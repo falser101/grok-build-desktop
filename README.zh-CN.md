@@ -14,85 +14,15 @@ Electron UI  →  ACP / JSON-RPC  →  grok agent serve （本机 loopback WebSo
 |------|------|
 | 设计说明 | [`docs/DESIGN.md`](./docs/DESIGN.md) |
 | 能力清单（✅ / 🟡 / ⬜） | [`docs/FEATURES.md`](./docs/FEATURES.md) |
-| 截图资源 | [`docs/screenshots/`](./docs/screenshots/) |
 
 ---
 
-## 功能截图
+## 截图
 
-> 将 PNG/WebP 放到 `docs/screenshots/`（见 [截图说明](./docs/screenshots/README.md)）。下方链接已写好，补图后即可显示。
+<!-- 替换此文件即可更新主图。 -->
+![Grok Build Desktop](./docs/screenshots/screenshot.png)
 
-### 主界面 — 对话与布局
-
-侧边栏 + 流式时间线 + 模型/模式芯片 + 输入框，整体布局对齐主流 AI 编程客户端。
-
-<!-- SCREENSHOT: 01-main-chat.png -->
-![主界面对话](./docs/screenshots/01-main-chat.png)
-
-*占位 — 建议截取：完整窗口 + 一段进行中的对话（深色主题）。*
-
-### 多会话并发与运行状态
-
-切换会话**不会取消**其它会话的 turn。运行中会话在列表显示 **loading 旋转动画**；加载中、等待权限审批有独立状态标识。
-
-<!-- SCREENSHOT: 02-sessions-running.png -->
-![会话列表运行状态](./docs/screenshots/02-sessions-running.png)
-
-*占位 — 建议截取：至少两个会话，其中一个带 spinner「运行中」。*
-
-### 工作区文件树与预览
-
-浏览项目、按需展开目录；主区语法高亮预览（支持行号）；Markdown 可在渲染预览与源码间切换。
-
-<!-- SCREENSHOT: 03-file-tree.png -->
-![文件树与预览](./docs/screenshots/03-file-tree.png)
-
-*占位 — 建议截取：侧栏「文件」打开 + 代码预览与对话分栏。*
-
-### 工具卡片与 Diff 查看器
-
-工具调用以卡片流式展示；可展开输出；多文件行级 diff（`+/-` gutter）。
-
-<!-- SCREENSHOT: 04-tool-diff.png -->
-![工具卡片与 Diff](./docs/screenshots/04-tool-diff.png)
-
-*占位 — 建议截取：展开的工具卡 + 带增删行的 diff。*
-
-### 权限确认
-
-敏感操作需确认；多请求排队并显示「还有 n 个」。开启 **Always-approve（YOLO）** 后可跳过弹窗，与 CLI 配置同步。
-
-<!-- SCREENSHOT: 05-permission.png -->
-![权限确认面板](./docs/screenshots/05-permission.png)
-
-*占位 — 建议截取：输入框上方的权限面板与选项列表。*
-
-### 设置 — 语言、主题、权限
-
-语言：英文 / 中文 / 跟随系统；主题：深色 / 浅色 / 跟随系统；YOLO 与 `~/.grok/config.toml` 同步。
-
-<!-- SCREENSHOT: 06-settings.png -->
-![设置页](./docs/screenshots/06-settings.png)
-
-*占位 — 建议截取：设置页语言 + 主题 + 权限区块。*
-
-### 扩展 — MCP、Skills、插件、Hooks
-
-侧栏「扩展」页：MCP 服务器增删启停、技能禁用、插件装卸、Hook 预览。
-
-<!-- SCREENSHOT: 07-extensions.png -->
-![扩展管理](./docs/screenshots/07-extensions.png)
-
-*占位 — 建议截取：扩展页 MCP 列表 + 技能行。*
-
-### 账号与用量
-
-应用内登录（浏览器 OAuth / 设备码）、登出、API Key，以及订阅 / credit 用量（与 CLI `/usage` 同源）。
-
-<!-- SCREENSHOT: 08-account-usage.png -->
-![账号与用量](./docs/screenshots/08-account-usage.png)
-
-*占位 — 建议截取：账号菜单或设置中的账号与用量区。*
+*完整主界面：会话侧栏、对话时间线、可选文件预览列、输入框。*
 
 ---
 
@@ -203,7 +133,7 @@ grok-build-desktop/
 ├── docs/
 │   ├── DESIGN.md
 │   ├── FEATURES.md
-│   └── screenshots/          ← 在此放置截图
+│   └── screenshots/          ← screenshot.png
 ├── src/
 │   ├── main/                 ← Electron 主进程、Agent、FS、账号
 │   ├── preload/

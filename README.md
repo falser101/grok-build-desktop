@@ -14,85 +14,15 @@ Sessions, auth, and config live under `~/.grok` and stay compatible with the Gro
 |-----|------|
 | Design | [`docs/DESIGN.md`](./docs/DESIGN.md) |
 | Feature checklist (✅ / 🟡 / ⬜) | [`docs/FEATURES.md`](./docs/FEATURES.md) |
-| Screenshot assets | [`docs/screenshots/`](./docs/screenshots/) |
 
 ---
 
-## Screenshots
+## Screenshot
 
-> Replace files under `docs/screenshots/` (see [screenshot guide](./docs/screenshots/README.md)). Links below are ready once you drop in the PNGs.
+<!-- Replace this file to update the hero image. -->
+![Grok Build Desktop](./docs/screenshots/screenshot.png)
 
-### Main window — chat & layout
-
-Claude-style sidebar, streaming timeline, model/mode chips, and composer.
-
-<!-- SCREENSHOT: 01-main-chat.png -->
-![Main chat window](./docs/screenshots/01-main-chat.png)
-
-*Placeholder — capture: full app window with an active conversation (dark theme recommended).*
-
-### Multi-session concurrency & run status
-
-Switch sessions without cancelling other turns. Running sessions show a **spinner** in the sidebar; loading and permission-wait states use distinct indicators.
-
-<!-- SCREENSHOT: 02-sessions-running.png -->
-![Session list with running status](./docs/screenshots/02-sessions-running.png)
-
-*Placeholder — capture: two projects; one session with loading spinner, another idle.*
-
-### Workspace file tree & preview
-
-Browse the project, open files with line numbers and syntax highlighting; Markdown can toggle rendered vs source.
-
-<!-- SCREENSHOT: 03-file-tree.png -->
-![File tree and preview](./docs/screenshots/03-file-tree.png)
-
-*Placeholder — capture: Files panel open + code preview side-by-side with chat.*
-
-### Tool cards & diff viewer
-
-Tool calls stream as cards; expand for output and multi-file line-level diffs.
-
-<!-- SCREENSHOT: 04-tool-diff.png -->
-![Tool cards and diff](./docs/screenshots/04-tool-diff.png)
-
-*Placeholder — capture: expanded tool card with `+/-` diff gutter.*
-
-### Permission confirmation
-
-Approve or deny sensitive actions; queue shows how many requests are waiting. **Always-approve (YOLO)** skips prompts when enabled.
-
-<!-- SCREENSHOT: 05-permission.png -->
-![Permission panel](./docs/screenshots/05-permission.png)
-
-*Placeholder — capture: permission panel above the composer with options list.*
-
-### Settings — language, theme, permissions
-
-English / 中文 / system language; dark / light / system theme; YOLO synced with `~/.grok/config.toml`.
-
-<!-- SCREENSHOT: 06-settings.png -->
-![Settings](./docs/screenshots/06-settings.png)
-
-*Placeholder — capture: Settings page with language + theme + permissions blocks.*
-
-### Extensions — MCP, Skills, Plugins, Hooks
-
-Manage MCP servers, skills, plugins, and hooks from the sidebar Extensions view.
-
-<!-- SCREENSHOT: 07-extensions.png -->
-![Extensions](./docs/screenshots/07-extensions.png)
-
-*Placeholder — capture: Extensions tab with MCP list and a skill row.*
-
-### Account & usage
-
-In-app login (OAuth / device code), logout, API key, and billing/usage (same source as CLI `/usage`).
-
-<!-- SCREENSHOT: 08-account-usage.png -->
-![Account and usage](./docs/screenshots/08-account-usage.png)
-
-*Placeholder — capture: account menu or settings account section with usage meters.*
+*Full app window: session sidebar, chat timeline, optional file preview column, and composer.*
 
 ---
 
@@ -203,7 +133,7 @@ grok-build-desktop/
 ├── docs/
 │   ├── DESIGN.md
 │   ├── FEATURES.md
-│   └── screenshots/          ← drop PNGs here
+│   └── screenshots/          ← screenshot.png
 ├── src/
 │   ├── main/                 ← Electron main, agent, FS, account
 │   ├── preload/
