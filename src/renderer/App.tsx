@@ -67,13 +67,21 @@ const RIGHT_DEFAULT = 300;
 const RIGHT_MIN = 200;
 const RIGHT_MAX = 560;
 const RIGHT_COLLAPSE = 96;
+const VIEWER_DEFAULT = 420;
+const VIEWER_MIN = 280;
+const VIEWER_MAX = 900;
+const VIEWER_COLLAPSE = 160;
 const LAYOUT_STORAGE_KEY = "grok-desktop-layout";
 
 type PanelLayout = {
   sidebarWidth: number;
   sidebarCollapsed: boolean;
   rightPanelWidth: number;
+  /** File preview column width (shell-level, next to chat). */
+  viewerWidth: number;
 };
+
+type ResizeSide = "left" | "right" | "viewer";
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
@@ -87,6 +95,7 @@ function loadPanelLayout(): PanelLayout {
         sidebarWidth: SIDEBAR_DEFAULT,
         sidebarCollapsed: false,
         rightPanelWidth: RIGHT_DEFAULT,
+        viewerWidth: VIEWER_DEFAULT,
       };
     }
     const p = JSON.parse(raw) as Partial<PanelLayout>;
@@ -104,12 +113,18 @@ function loadPanelLayout(): PanelLayout {
         RIGHT_MIN,
         RIGHT_MAX,
       ),
+      viewerWidth: clamp(
+        typeof p.viewerWidth === "number" ? p.viewerWidth : VIEWER_DEFAULT,
+        VIEWER_MIN,
+        VIEWER_MAX,
+      ),
     };
   } catch {
     return {
       sidebarWidth: SIDEBAR_DEFAULT,
       sidebarCollapsed: false,
       rightPanelWidth: RIGHT_DEFAULT,
+      viewerWidth: VIEWER_DEFAULT,
     };
   }
 }
@@ -600,9 +615,7 @@ export function App() {
   const [panelLayout, setPanelLayout] = useState<PanelLayout>(() =>
     loadPanelLayout(),
   );
-  const [resizingSide, setResizingSide] = useState<"left" | "right" | null>(
-    null,
-  );
+  const [resizingSide, setResizingSide] = useState<ResizeSide | null>(null);
   /** Workspace picker menu above the composer. */
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [accountStatus, setAccountStatus] = useState<AccountStatus | null>(
@@ -645,17 +658,20 @@ export function App() {
   const skipRenameBlurRef = useRef(false);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const resizeDragRef = useRef<{
-    side: "left" | "right";
+    side: ResizeSide;
     startX: number;
     startW: number;
     /** Live width applied to DOM during drag (no React re-render). */
     liveW: number;
     rightOpen: boolean;
+    viewerOpen: boolean;
   } | null>(null);
   const panelLayoutRef = useRef(panelLayout);
   panelLayoutRef.current = panelLayout;
   const rightPanelOpenRef = useRef(rightPanelOpen);
   rightPanelOpenRef.current = rightPanelOpen;
+  const openFilePathRef = useRef(openFilePath);
+  openFilePathRef.current = openFilePath;
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -673,20 +689,38 @@ export function App() {
     if (typeof window === "undefined") return RIGHT_MAX;
     return Math.min(RIGHT_MAX, Math.floor(window.innerWidth * 0.48));
   }, []);
+  const maxViewerW = useCallback(() => {
+    if (typeof window === "undefined") return VIEWER_MAX;
+    return Math.min(VIEWER_MAX, Math.floor(window.innerWidth * 0.55));
+  }, []);
 
-  /** Apply grid columns directly on the shell node — no React re-render. */
+  /**
+   * Apply grid columns on the shell node — no React re-render.
+   * Layout: sidebar | chat(main) | [viewer?] | [right?]
+   */
   const applyShellColumns = useCallback(
-    (leftPx: number, rightPx: number | null) => {
+    (
+      leftPx: number,
+      rightPx: number | null,
+      viewerPx: number | null = null,
+    ) => {
       const el = shellRef.current;
       if (!el) return;
       el.style.setProperty("--sidebar-w", `${leftPx}px`);
-      if (rightPx != null) {
+      const cols = [`${leftPx}px`, "minmax(0, 1fr)"];
+      if (viewerPx != null && viewerPx > 0) {
+        el.style.setProperty("--viewer-w", `${viewerPx}px`);
+        cols.push(`${viewerPx}px`);
+      } else {
+        el.style.setProperty("--viewer-w", "0px");
+      }
+      if (rightPx != null && rightPx > 0) {
         el.style.setProperty("--right-panel-w", `${rightPx}px`);
-        el.style.gridTemplateColumns = `${leftPx}px minmax(0, 1fr) ${rightPx}px`;
+        cols.push(`${rightPx}px`);
       } else {
         el.style.setProperty("--right-panel-w", "0px");
-        el.style.gridTemplateColumns = `${leftPx}px minmax(0, 1fr)`;
       }
+      el.style.gridTemplateColumns = cols.join(" ");
     },
     [],
   );
@@ -698,27 +732,37 @@ export function App() {
     const leftPx = panelLayout.sidebarCollapsed
       ? SIDEBAR_RAIL
       : panelLayout.sidebarWidth;
+    const viewerPx =
+      openFilePath && view === "chat" ? panelLayout.viewerWidth : null;
     const rightPx =
       rightPanelOpen && view === "chat" ? panelLayout.rightPanelWidth : null;
-    applyShellColumns(leftPx, rightPx);
+    applyShellColumns(leftPx, rightPx, viewerPx);
   }, [
     applyShellColumns,
     panelLayout.sidebarCollapsed,
     panelLayout.sidebarWidth,
     panelLayout.rightPanelWidth,
+    panelLayout.viewerWidth,
     rightPanelOpen,
+    openFilePath,
     view,
   ]);
 
   const onResizePointerDown = useCallback(
-    (side: "left" | "right") => (e: ReactPointerEvent<HTMLDivElement>) => {
+    (side: ResizeSide) => (e: ReactPointerEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
       const layout = panelLayoutRef.current;
       const rightOpenNow =
         rightPanelOpenRef.current && viewRef.current === "chat";
+      const viewerOpenNow =
+        Boolean(openFilePathRef.current) && viewRef.current === "chat";
       const startW =
-        side === "left" ? layout.sidebarWidth : layout.rightPanelWidth;
+        side === "left"
+          ? layout.sidebarWidth
+          : side === "right"
+            ? layout.rightPanelWidth
+            : layout.viewerWidth;
       // Set drag ref BEFORE any setState so layout effects skip overwriting.
       resizeDragRef.current = {
         side,
@@ -726,6 +770,7 @@ export function App() {
         startW,
         liveW: startW,
         rightOpen: rightOpenNow,
+        viewerOpen: viewerOpenNow,
       };
       setResizingSide(side);
       document.body.classList.add("is-resizing-panels");
@@ -734,6 +779,7 @@ export function App() {
         ? SIDEBAR_RAIL
         : layout.sidebarWidth;
       const rightFixed = layout.rightPanelWidth;
+      const viewerFixed = layout.viewerWidth;
 
       const paint = (clientX: number) => {
         const drag = resizeDragRef.current;
@@ -742,12 +788,30 @@ export function App() {
           const raw = drag.startW + (clientX - drag.startX);
           const next = clamp(raw, SIDEBAR_COLLAPSE * 0.45, maxSidebarW());
           drag.liveW = next;
-          applyShellColumns(next, drag.rightOpen ? rightFixed : null);
-        } else {
+          applyShellColumns(
+            next,
+            drag.rightOpen ? rightFixed : null,
+            drag.viewerOpen ? viewerFixed : null,
+          );
+        } else if (drag.side === "right") {
           const raw = drag.startW - (clientX - drag.startX);
           const next = clamp(raw, RIGHT_COLLAPSE * 0.45, maxRightW());
           drag.liveW = next;
-          applyShellColumns(leftFixed, next);
+          applyShellColumns(
+            leftFixed,
+            next,
+            drag.viewerOpen ? viewerFixed : null,
+          );
+        } else {
+          // Viewer: drag left edge — move left = wider.
+          const raw = drag.startW - (clientX - drag.startX);
+          const next = clamp(raw, VIEWER_COLLAPSE * 0.45, maxViewerW());
+          drag.liveW = next;
+          applyShellColumns(
+            leftFixed,
+            drag.rightOpen ? rightFixed : null,
+            next,
+          );
         }
       };
 
@@ -791,20 +855,37 @@ export function App() {
               sidebarWidth: clamp(live, SIDEBAR_MIN, maxSidebarW()),
             }));
           }
-        } else if (live < RIGHT_COLLAPSE) {
-          setRightPanelOpen(false);
+        } else if (drag.side === "right") {
+          if (live < RIGHT_COLLAPSE) {
+            setRightPanelOpen(false);
+            setPanelLayout((prev) => ({
+              ...prev,
+              rightPanelWidth: clamp(
+                drag.startW >= RIGHT_MIN ? drag.startW : RIGHT_DEFAULT,
+                RIGHT_MIN,
+                maxRightW(),
+              ),
+            }));
+          } else {
+            setPanelLayout((prev) => ({
+              ...prev,
+              rightPanelWidth: clamp(live, RIGHT_MIN, maxRightW()),
+            }));
+          }
+        } else if (live < VIEWER_COLLAPSE) {
+          setOpenFilePath(null);
           setPanelLayout((prev) => ({
             ...prev,
-            rightPanelWidth: clamp(
-              drag.startW >= RIGHT_MIN ? drag.startW : RIGHT_DEFAULT,
-              RIGHT_MIN,
-              maxRightW(),
+            viewerWidth: clamp(
+              drag.startW >= VIEWER_MIN ? drag.startW : VIEWER_DEFAULT,
+              VIEWER_MIN,
+              maxViewerW(),
             ),
           }));
         } else {
           setPanelLayout((prev) => ({
             ...prev,
-            rightPanelWidth: clamp(live, RIGHT_MIN, maxRightW()),
+            viewerWidth: clamp(live, VIEWER_MIN, maxViewerW()),
           }));
         }
       };
@@ -813,7 +894,7 @@ export function App() {
       document.addEventListener("pointerup", onUp);
       document.addEventListener("pointercancel", onUp);
     },
-    [applyShellColumns, maxRightW, maxSidebarW],
+    [applyShellColumns, maxRightW, maxSidebarW, maxViewerW],
   );
 
   // Close file preview when workspace changes.
@@ -1227,8 +1308,11 @@ export function App() {
     () => snap.availableModels.find((mod) => mod.modelId === snap.modelId),
     [snap.availableModels, snap.modelId],
   );
-  const modeLabel =
-    modes.find((mod) => mod.id === snap.sessionMode)?.label ?? m.modeAgent;
+  const modeLabel = useMemo(() => {
+    const hit = modes.find((mod) => mod.id === snap.sessionMode);
+    const label = (hit?.label || m.modeAgent || "Agent").trim();
+    return label || "Agent";
+  }, [modes, snap.sessionMode, m.modeAgent]);
 
   const connectionReady = snap.connection === "ready";
   const hasWorkspace = Boolean(snap.workspace);
@@ -2361,10 +2445,8 @@ export function App() {
               <span className="icon">☰</span>
               {m.sidePanelToggle}
             </button>
-            {/* One column: pin + timeline + composer share identical width. */}
-            <div
-              className={`chat-rail${openFilePath ? " with-viewer" : ""}`}
-            >
+            {/* Chat column only: pin + timeline + composer share identical width. */}
+            <div className="chat-rail">
             <div className="chat-topbar">
               {pinnedUser && !showHome && !snap.replaying ? (
                 <button
@@ -2392,9 +2474,7 @@ export function App() {
                 </button>
               ) : null}
             </div>
-            <div
-              className={`main-work ${openFilePath ? "with-viewer" : ""}`}
-            >
+            <div className="main-work">
               <div
                 className="main-scroll chat-pane"
                 ref={chatPaneRef}
@@ -2449,16 +2529,6 @@ export function App() {
                   />
                 )}
               </div>
-              {openFilePath ? (
-                <div className="viewer-pane">
-                  <FileViewer
-                    path={openFilePath}
-                    m={m}
-                    onClose={() => setOpenFilePath(null)}
-                    onInsertMention={insertFileMention}
-                  />
-                </div>
-              ) : null}
             </div>
 
             <div className="composer-wrap">
@@ -2529,14 +2599,15 @@ export function App() {
                   <div className="chip-menu-wrap ws-mode-wrap">
                     <button
                       type="button"
-                      className={`ws-meta-chip ws-meta-btn ${
+                      className={`ws-meta-chip ws-meta-btn ws-mode-btn ${
                         menu === "mode" ? "open" : ""
                       }`}
                       disabled={!connectionReady}
                       onClick={() =>
                         setMenu((cur) => (cur === "mode" ? null : "mode"))
                       }
-                      title={m.sessionMode}
+                      title={`${m.sessionMode}: ${modeLabel}`}
+                      aria-label={`${m.sessionMode}: ${modeLabel}`}
                     >
                       <span className="ws-icon" aria-hidden="true">
                         <svg
@@ -2555,7 +2626,7 @@ export function App() {
                           <path d="M13.5 13.5 18 18" />
                         </svg>
                       </span>
-                      <span>{modeLabel}</span>
+                      <span className="ws-mode-label">{modeLabel}</span>
                     </button>
                     {menu === "mode" ? (
                       <div className="dropdown">
@@ -3026,6 +3097,29 @@ export function App() {
           </div>
         )}
       </section>
+
+      {openFilePath && view === "chat" ? (
+        <section
+          className="viewer-column"
+          aria-label={m.filesPreview}
+        >
+          <div
+            className="resize-handle resize-handle-viewer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={m.resizeViewer}
+            title={m.resizeViewer}
+            onPointerDown={onResizePointerDown("viewer")}
+            onDoubleClick={() => setOpenFilePath(null)}
+          />
+          <FileViewer
+            path={openFilePath}
+            m={m}
+            onClose={() => setOpenFilePath(null)}
+            onInsertMention={insertFileMention}
+          />
+        </section>
+      ) : null}
 
       {rightOpen ? (
         <aside className="right-panel" aria-label={m.sidePanelToggle}>

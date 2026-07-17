@@ -200,6 +200,8 @@ export interface Messages {
   filesShowSource: string;
   filesShowPreview: string;
   filesInsertMention: string;
+  /** Accessible name for the shell-level file preview column. */
+  filesPreview: string;
 
   // Right side panel + workspace picker
   sidePanelToggle: string;
@@ -208,6 +210,7 @@ export interface Messages {
   sidePanelTerminal: string;
   resizeSidebar: string;
   resizeRightPanel: string;
+  resizeViewer: string;
   sidebarExpand: string;
   workspaceLabel: string;
   workspaceEmpty: string;
@@ -466,6 +469,7 @@ const en: Messages = {
   filesShowSource: "Source",
   filesShowPreview: "Preview",
   filesInsertMention: "Insert @path into composer",
+  filesPreview: "File preview",
 
   sidePanelToggle: "Files & terminal",
   sidePanelToggleHide: "Hide side panel",
@@ -473,6 +477,7 @@ const en: Messages = {
   sidePanelTerminal: "Terminal",
   resizeSidebar: "Drag to resize sidebar (drag small to collapse)",
   resizeRightPanel: "Drag to resize panel (drag small to collapse)",
+  resizeViewer: "Drag to resize file preview (drag small to close)",
   sidebarExpand: "Expand sidebar",
   workspaceLabel: "Workspace",
   workspaceEmpty: "No workspace",
@@ -732,6 +737,7 @@ const zh: Messages = {
   filesShowSource: "源码",
   filesShowPreview: "预览",
   filesInsertMention: "将 @路径 插入输入框",
+  filesPreview: "文件预览",
 
   sidePanelToggle: "文件与终端",
   sidePanelToggleHide: "隐藏侧栏",
@@ -739,6 +745,7 @@ const zh: Messages = {
   sidePanelTerminal: "终端",
   resizeSidebar: "拖动调整左侧宽度（拖到很小可折叠）",
   resizeRightPanel: "拖动调整右侧宽度（拖到很小可折叠）",
+  resizeViewer: "拖动调整文件预览宽度（拖到很小可关闭）",
   sidebarExpand: "展开左侧栏",
   workspaceLabel: "工作区",
   workspaceEmpty: "未选择工作区",

@@ -37,6 +37,7 @@ html[data-theme="dark"] {
   --sidebar-w: 260px;
   --files-w: 240px;
   --right-panel-w: 300px;
+  --viewer-w: 420px;
   --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   --mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   /* Syntax highlight tokens (dark) */
@@ -147,8 +148,18 @@ button {
   overflow: hidden;
 }
 
-.shell.shell-right-open {
+/* Shell columns are also written inline by applyShellColumns during resize. */
+.shell.shell-right-open:not(.shell-viewer-open) {
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--right-panel-w);
+}
+
+.shell.shell-viewer-open:not(.shell-right-open) {
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--viewer-w);
+}
+
+.shell.shell-viewer-open.shell-right-open {
+  grid-template-columns:
+    var(--sidebar-w) minmax(0, 1fr) var(--viewer-w) var(--right-panel-w);
 }
 
 body.is-resizing-panels {
@@ -169,6 +180,7 @@ body.is-resizing-panels * {
 
 .shell.shell-resizing .sidebar,
 .shell.shell-resizing .right-panel,
+.shell.shell-resizing .viewer-column,
 .shell.shell-resizing .main {
   pointer-events: none;
   transition: none !important;
@@ -209,8 +221,30 @@ body.is-resizing-panels * {
   right: -3px;
 }
 
-.resize-handle-right {
+.resize-handle-right,
+.resize-handle-viewer {
   left: -3px;
+}
+
+/* ── File preview column (shell-level, separate from chat) ── */
+
+.viewer-column {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px color-mix(in srgb, var(--shadow) 55%, transparent);
+}
+
+.viewer-column .file-viewer {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* ── Sidebar ───────────────────────────────────────── */
@@ -935,11 +969,6 @@ body.is-resizing-panels * {
   --chat-scrollbar: 10px;
 }
 
-/* File viewer needs full main width; sub-columns re-apply the chat max. */
-.chat-rail.with-viewer {
-  max-width: none;
-}
-
 .chat-topbar {
   flex: 0 0 auto;
   display: flex;
@@ -948,19 +977,6 @@ body.is-resizing-panels * {
   min-height: 40px;
   min-width: 0;
   box-sizing: border-box;
-}
-
-.chat-rail.with-viewer .chat-topbar {
-  padding-right: 0;
-}
-
-.chat-rail.with-viewer .chat-topbar {
-  justify-content: center;
-}
-
-.chat-rail.with-viewer .current-turn-pin {
-  width: 100%;
-  max-width: var(--chat-col-max);
 }
 
 .chat-topbar-spacer {
@@ -1081,23 +1097,9 @@ body.is-resizing-panels * {
   overflow: hidden;
 }
 
-.main-work.with-viewer {
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 1fr);
-}
-
 .chat-pane {
   min-width: 0;
   min-height: 0;
-}
-
-.viewer-pane {
-  min-width: 0;
-  min-height: 0;
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--bg);
 }
 
 .main-scroll {
@@ -1193,12 +1195,12 @@ body.is-resizing-panels * {
 }
 
 /* Default (no rail): keep historical centered column. */
-.main-scroll:not(.chat-pane) .timeline,
-.chat-rail.with-viewer .timeline {
+.main-scroll:not(.chat-pane) .timeline {
   max-width: var(--chat-col-max);
 }
 
-.chat-rail:not(.with-viewer) .timeline {
+/* Chat rail owns the full chat column width. */
+.chat-rail .timeline {
   max-width: none;
 }
 
@@ -1907,10 +1909,6 @@ body.is-resizing-panels * {
   padding: 0 var(--chat-scrollbar) 20px 0;
 }
 
-.chat-rail.with-viewer .composer-wrap {
-  padding: 0 0 20px;
-}
-
 .composer-stack,
 .composer,
 .permission-panel,
@@ -1920,18 +1918,11 @@ body.is-resizing-panels * {
   box-sizing: border-box;
 }
 
-/* Outside a tight rail (viewer mode / legacy), re-apply the column max. */
-.chat-rail.with-viewer .composer-stack,
-.chat-rail.with-viewer .composer,
-.chat-rail.with-viewer .permission-panel,
-.chat-rail.with-viewer .composer-error {
-  max-width: var(--chat-col-max);
-}
-
-.chat-rail:not(.with-viewer) .composer-stack,
-.chat-rail:not(.with-viewer) .composer,
-.chat-rail:not(.with-viewer) .permission-panel,
-.chat-rail:not(.with-viewer) .composer-error {
+/* Chat column: fill the rail (file preview is a separate shell column). */
+.chat-rail .composer-stack,
+.chat-rail .composer,
+.chat-rail .permission-panel,
+.chat-rail .composer-error {
   max-width: none;
 }
 
@@ -1991,6 +1982,14 @@ body.is-resizing-panels * {
     color 0.12s;
 }
 
+/* Mode chip: never clip the label (icon-only was a flex/min-width collapse). */
+.ws-mode-btn {
+  max-width: none;
+  flex: 0 0 auto;
+  min-width: max-content;
+  color: var(--text);
+}
+
 .workspace-picker-btn {
   color: var(--text);
   cursor: pointer;
@@ -2042,8 +2041,8 @@ body.is-resizing-panels * {
   font-weight: 500;
 }
 
-.ws-meta-chip span:last-child,
-.ws-meta-btn span:last-child {
+.ws-meta-chip > span:not(.ws-icon),
+.ws-meta-btn > span:not(.ws-icon) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2052,7 +2051,19 @@ body.is-resizing-panels * {
 
 .ws-mode-wrap {
   position: relative;
-  min-width: 0;
+  flex: 0 0 auto;
+  min-width: max-content;
+}
+
+.ws-mode-label {
+  flex: 0 0 auto !important;
+  min-width: max-content !important;
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--text);
 }
 
 .workspace-dropdown {
@@ -3879,16 +3890,16 @@ html[data-theme="light"] .icon-btn.send {
   font-weight: 600;
 }
 
-/* Narrow windows: stack viewer under chat */
+/* Narrow windows: keep columns but shrink viewer floor */
 @media (max-width: 1100px) {
-  .main-work.with-viewer {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  .shell.shell-viewer-open:not(.shell-right-open) {
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr) minmax(240px, var(--viewer-w));
   }
 
-  .viewer-pane {
-    border-left: none;
-    border-top: 1px solid var(--border);
+  .shell.shell-viewer-open.shell-right-open {
+    grid-template-columns:
+      var(--sidebar-w) minmax(0, 1fr) minmax(220px, var(--viewer-w))
+      minmax(160px, var(--right-panel-w));
   }
 }
 
