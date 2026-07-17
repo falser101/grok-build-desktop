@@ -49,6 +49,16 @@ function MarkdownBodyInner({ text, className, streaming }: Props) {
   // Stable empty fallback so streaming "" still shows caret via CSS.
   const source = useMemo(() => text || "\u00a0", [text]);
 
+  // While tokens stream, skip full remark/GFM parse (O(n) per chunk). Plain
+  // text keeps the caret smooth; markdown is applied once the turn settles.
+  if (streaming) {
+    return (
+      <div className={cls}>
+        <div className="md-streaming-plain">{source}</div>
+      </div>
+    );
+  }
+
   return (
     <div className={cls}>
       <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>

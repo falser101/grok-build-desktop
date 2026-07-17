@@ -176,8 +176,9 @@ body.is-resizing-panels * {
 
 /* Avoid layout thrash from content reflow during live resize */
 .shell.shell-resizing {
-  /* Ensure no delayed transitions fight the drag */
   transition: none !important;
+  /* Isolate grid column changes from expensive descendant paints where possible */
+  contain: layout style;
 }
 
 .shell.shell-resizing .sidebar,
@@ -186,6 +187,22 @@ body.is-resizing-panels * {
 .shell.shell-resizing .main {
   pointer-events: none;
   transition: none !important;
+  /* Freeze internal scroll/paint work while the column width is scrubbing */
+  overflow: hidden !important;
+  contain: strict;
+  will-change: width;
+}
+
+/* xterm fit/repaint is expensive — skip until panel-resize-end */
+body.is-resizing-panels .term-xterm-host,
+body.is-resizing-panels .xterm {
+  visibility: hidden;
+}
+
+body.is-resizing-panels .timeline,
+body.is-resizing-panels .file-viewer,
+body.is-resizing-panels .file-tree {
+  content-visibility: hidden;
 }
 
 /* ── Resize handles ────────────────────────────────── */
@@ -1398,6 +1415,24 @@ body.is-resizing-panels * {
   min-width: 0;
   /* Keep target clear of the sticky pin when jump-scrolling. */
   scroll-margin-top: 52px;
+  /* Skip layout/paint for off-screen history rows in long sessions */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
+}
+
+.system-line.loading-conversation {
+  opacity: 0.85;
+  animation: loading-conversation-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes loading-conversation-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .msg-head {
@@ -1520,6 +1555,12 @@ body.is-resizing-panels * {
   animation: blink 1s steps(1) infinite;
   margin-left: 2px;
   color: var(--accent);
+}
+
+/* Live token stream — plain text only (no remark) until turn completes. */
+.md-streaming-plain {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* —— Markdown (assistant / thought) —— */
@@ -1698,6 +1739,8 @@ body.is-resizing-panels * {
   border-radius: 10px;
   background: var(--surface-tint);
   overflow: hidden;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
 }
 
 .thought summary,
@@ -1759,6 +1802,8 @@ body.is-resizing-panels * {
 }
 
 .tool-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 40px;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   border-radius: 10px;

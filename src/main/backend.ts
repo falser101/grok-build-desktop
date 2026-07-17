@@ -692,7 +692,8 @@ export class AgentBackend {
       agentVersion: this.agentVersion,
       accountEmail: this.accountEmail,
       usage: this.usage ? { ...this.usage, summaryLines: [...this.usage.summaryLines] } : undefined,
-      timeline: this.timeline.map((t) => ({ ...t })),
+      // slice is enough — Electron IPC structured-clones; avoid per-item spreads.
+      timeline: this.timeline.slice(),
       sessions: this.sessions.map((s) => ({
         ...s,
         status: this.sessionRunStatus(s.sessionId),
@@ -1214,10 +1215,11 @@ export class AgentBackend {
 
   private pushTimeline(item: TimelineItem): void {
     this.timeline.push(item);
-    // During heavy replay, throttle snapshot emits
-    if (!this.replaying || this.timeline.length % 8 === 0) {
-      this.emitSnapshot();
-    }
+    // Cold session load: accumulate silently. One snapshot at start (empty +
+    // replaying) and one at end (full history) — intermediate frames force the
+    // renderer to re-parse growing markdown and feel like a hung switch.
+    if (this.replaying) return;
+    this.emitSnapshot();
   }
 
   private updateTimeline(

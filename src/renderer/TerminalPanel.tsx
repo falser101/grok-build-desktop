@@ -243,15 +243,33 @@ export function TerminalPanel({
   }, [active, fitAndResize, termId]);
 
   // Observe container resize (panel drag, window resize).
+  // Skip while the shell is scrubbing columns — fit once on panel-resize-end.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const ro = new ResizeObserver(() => {
+    let raf = 0;
+    const scheduleFit = () => {
       if (!active) return;
-      fitAndResize();
-    });
+      if (document.body.classList.contains("is-resizing-panels")) return;
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        fitAndResize();
+      });
+    };
+    const ro = new ResizeObserver(scheduleFit);
     ro.observe(host);
-    return () => ro.disconnect();
+    const onPanelResizeEnd = () => {
+      if (!active) return;
+      // Next frame so final CSS vars have been applied.
+      requestAnimationFrame(() => fitAndResize());
+    };
+    window.addEventListener("panel-resize-end", onPanelResizeEnd);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("panel-resize-end", onPanelResizeEnd);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [active, fitAndResize]);
 
   // Click anywhere in the terminal area to focus.

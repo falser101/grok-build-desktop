@@ -621,11 +621,20 @@ const ChatTimeline = memo(function ChatTimeline({
   m: Messages;
   bottomRef: RefObject<HTMLDivElement | null>;
 }) {
+  // During cold session load, skip mounting partial history (avoids N× markdown
+  // re-parses). Backend holds emits until replay finishes; this is a safety net.
+  if (replaying) {
+    return (
+      <div className="timeline">
+        <div className="system-line loading-conversation">
+          {m.loadingConversation}
+        </div>
+        <div ref={bottomRef} />
+      </div>
+    );
+  }
   return (
     <div className="timeline">
-      {replaying ? (
-        <div className="system-line">{m.loadingConversation}</div>
-      ) : null}
       {timeline.map((item) => (
         <TimelineRow
           key={item.id}
@@ -737,7 +746,6 @@ export function App() {
   const [panelLayout, setPanelLayout] = useState<PanelLayout>(() =>
     loadPanelLayout(),
   );
-  const [resizingSide, setResizingSide] = useState<ResizeSide | null>(null);
   /** Workspace picker menu above the composer. */
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [accountStatus, setAccountStatus] = useState<AccountStatus | null>(
@@ -796,6 +804,8 @@ export function App() {
     rightOpen: boolean;
     viewerOpen: boolean;
   } | null>(null);
+  /** True while a panel edge is being dragged — skip React layout sync / persist. */
+  const isResizingRef = useRef(false);
   const panelLayoutRef = useRef(panelLayout);
   panelLayoutRef.current = panelLayout;
   const rightPanelOpenRef = useRef(rightPanelOpen);
@@ -809,13 +819,14 @@ export function App() {
 
   // Persist panel widths / collapse (skip while actively dragging).
   useEffect(() => {
-    if (resizingSide) return;
+    if (isResizingRef.current) return;
     savePanelLayout(panelLayout);
-  }, [panelLayout, resizingSide]);
+  }, [panelLayout]);
 
   /**
    * Apply grid columns on the shell node — no React re-render.
-   * Widths are % of the shell. Layout: sidebar | chat(main) | [viewer?] | [right?]
+   * Only mutates CSS variables; stylesheet rules drive grid-template-columns.
+   * Layout: sidebar | chat(main) | [viewer?] | [right?]
    */
   const applyShellColumns = useCallback(
     (
@@ -827,20 +838,20 @@ export function App() {
       if (!el) return;
       const fmt = (pct: number) => `${pct.toFixed(2)}%`;
       el.style.setProperty("--sidebar-w", fmt(leftPct));
-      const cols = [fmt(leftPct), "minmax(0, 1fr)"];
       if (viewerPct != null && viewerPct > 0) {
         el.style.setProperty("--viewer-w", fmt(viewerPct));
-        cols.push(fmt(viewerPct));
       } else {
         el.style.setProperty("--viewer-w", "0%");
       }
       if (rightPct != null && rightPct > 0) {
         el.style.setProperty("--right-panel-w", fmt(rightPct));
-        cols.push(fmt(rightPct));
       } else {
         el.style.setProperty("--right-panel-w", "0%");
       }
-      el.style.gridTemplateColumns = cols.join(" ");
+      // Clear any legacy inline grid from older builds so CSS classes own the template.
+      if (el.style.gridTemplateColumns) {
+        el.style.gridTemplateColumns = "";
+      }
     },
     [],
   );
@@ -848,7 +859,7 @@ export function App() {
   // Sync React layout state → DOM when not dragging.
   // (During drag, pointer handlers own the grid columns via applyShellColumns.)
   useLayoutEffect(() => {
-    if (resizeDragRef.current) return;
+    if (isResizingRef.current || resizeDragRef.current) return;
     const leftPct = panelLayout.sidebarCollapsed
       ? SIDEBAR_RAIL
       : panelLayout.sidebarWidth;
@@ -875,7 +886,7 @@ export function App() {
   // Keep % layout correct when the window is resized (no drag in progress).
   useEffect(() => {
     const onResize = () => {
-      if (resizeDragRef.current) return;
+      if (isResizingRef.current || resizeDragRef.current) return;
       const layout = panelLayoutRef.current;
       const leftPct = layout.sidebarCollapsed
         ? SIDEBAR_RAIL
@@ -900,6 +911,7 @@ export function App() {
     (side: ResizeSide) => (e: ReactPointerEvent<HTMLDivElement>) => {
       e.preventDefault();
       e.stopPropagation();
+      const handle = e.currentTarget;
       const layout = panelLayoutRef.current;
       const rightOpenNow =
         rightPanelOpenRef.current && viewRef.current === "chat";
@@ -913,7 +925,7 @@ export function App() {
           : side === "right"
             ? layout.rightPanelWidth
             : layout.viewerWidth;
-      // Set drag ref BEFORE any setState so layout effects skip overwriting.
+      // Set drag ref BEFORE any state so layout effects skip overwriting.
       resizeDragRef.current = {
         side,
         startX: e.clientX,
@@ -922,8 +934,16 @@ export function App() {
         rightOpen: rightOpenNow,
         viewerOpen: viewerOpenNow,
       };
-      setResizingSide(side);
+      isResizingRef.current = true;
+      // DOM-only chrome — avoid a full React re-render at drag start.
+      const shell = shellRef.current;
+      shell?.classList.add("shell-resizing", `shell-resizing-${side}`);
       document.body.classList.add("is-resizing-panels");
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
 
       const leftFixed = layout.sidebarCollapsed
         ? SIDEBAR_RAIL
@@ -971,27 +991,61 @@ export function App() {
         }
       };
 
+      // Coalesce pointermoves to one layout per frame (smoother than layout thrash).
+      let raf = 0;
+      let latestX = e.clientX;
       const onMove = (ev: PointerEvent) => {
-        // Direct DOM write — follows cursor without waiting for React/rAF.
-        paint(ev.clientX);
+        latestX = ev.clientX;
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          paint(latestX);
+        });
       };
 
-      const onUp = () => {
+      const finishChrome = () => {
+        isResizingRef.current = false;
+        shell?.classList.remove(
+          "shell-resizing",
+          "shell-resizing-left",
+          "shell-resizing-right",
+          "shell-resizing-viewer",
+        );
+        document.body.classList.remove("is-resizing-panels");
+        // Let terminal / file viewers fit once after the final column widths settle.
+        requestAnimationFrame(() => {
+          window.dispatchEvent(new Event("panel-resize-end"));
+        });
+      };
+
+      const onUp = (ev: PointerEvent) => {
         document.removeEventListener("pointermove", onMove);
         document.removeEventListener("pointerup", onUp);
         document.removeEventListener("pointercancel", onUp);
+        if (raf) {
+          cancelAnimationFrame(raf);
+          raf = 0;
+        }
+        latestX = ev.clientX;
+        paint(latestX);
 
         const drag = resizeDragRef.current;
-        document.body.classList.remove("is-resizing-panels");
+        try {
+          if (handle.hasPointerCapture(ev.pointerId)) {
+            handle.releasePointerCapture(ev.pointerId);
+          }
+        } catch {
+          /* ignore */
+        }
         if (!drag) {
-          setResizingSide(null);
+          finishChrome();
           return;
         }
 
         const live = drag.liveW;
         // Clear drag BEFORE setState so useLayoutEffect can apply final columns.
         resizeDragRef.current = null;
-        setResizingSide(null);
+        finishChrome();
 
         if (drag.side === "left") {
           if (live < SIDEBAR_COLLAPSE) {
@@ -1136,6 +1190,7 @@ export function App() {
       if (event.type === "snapshot") {
         // Apply immediately — busy / connection / permission must not lag
         // behind session switches (startTransition left the send button stuck).
+        // During cold load the backend suppresses intermediate timeline frames.
         setSnap(event.snapshot);
       } else if (event.type === "log" && event.level === "error") {
         setLocalError(event.message);
@@ -2430,9 +2485,7 @@ export function App() {
       ref={shellRef}
       className={`shell ${rightOpen ? "shell-right-open" : ""} ${
         panelLayout.sidebarCollapsed ? "shell-sidebar-collapsed" : ""
-      } ${resizingSide ? `shell-resizing shell-resizing-${resizingSide}` : ""} ${
-        showViewerColumn ? "shell-viewer-open" : ""
-      }`}
+      } ${showViewerColumn ? "shell-viewer-open" : ""}`}
     >
       {loading && view === "chat" ? <div className="loading-bar" /> : null}
 
