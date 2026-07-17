@@ -457,9 +457,14 @@ export interface DesktopApi {
    * Binary / oversized files return metadata with empty content.
    */
   readFile: (relPath: string) => Promise<FileReadResult>;
-  /** Start an interactive shell in cwd (defaults to workspace). */
-  termStart: (cwd?: string) => Promise<TermStartResult>;
+  /** Start an interactive PTY shell in cwd (defaults to workspace). */
+  termStart: (
+    cwd?: string,
+    cols?: number,
+    rows?: number,
+  ) => Promise<TermStartResult>;
   termWrite: (id: string, data: string) => Promise<void>;
+  termResize: (id: string, cols: number, rows: number) => Promise<void>;
   termKill: (id: string) => Promise<void>;
   onTermEvent: (cb: (event: TermHostEvent) => void) => () => void;
   // ── Extensions (MCP / Skills / Plugins / Hooks) ──

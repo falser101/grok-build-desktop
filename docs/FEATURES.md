@@ -16,7 +16,7 @@
 | 连接状态（starting / ready / error…）与重试 | ✅ | 首页错误卡 + Retry |
 | 与 CLI 共用 `~/.grok`（auth / sessions / config） | ✅ | 无独立账号体系 |
 | 二进制解析（`GROK_BINARY` → `~/.grok/bin` → PATH） | ✅ | 打包内置 binary 路径已预留，未真正打包 |
-| 应用菜单 / 窗口 chrome | ✅ | Win/Linux 隐藏默认 File…Help（系统浅色条）；macOS 精简 app/edit/window |
+| 应用菜单 / 窗口 chrome | ✅ | Win/Linux：隐藏菜单条但保留 Edit 角色（Ctrl+C/V…）+ 选区右键复制；macOS 精简 app/edit/window |
 | 桌面内多会话并发 + 侧栏运行状态 | ✅ | 切换会话不取消其它 turn；侧栏 spinner / 等待审批点 |
 | 多窗口 / 挂接正在跑的 TUI live session | ⬜ | 不能 attach 外部 CLI 进程（leader-socket 仍 Later） |
 
@@ -56,7 +56,7 @@
 | Compact（手动 `/compact` + 自动） | ✅ | 进度卡、tokens before/after |
 | Cancel 中断当前 turn | ✅ | 忙碌时 Stop 按钮 |
 | 忙碌时消息队列 / 排队发送 | ⬜ | 忙时直接禁发 |
-| 复制单条 / 导出对话 Markdown | ⬜ | — |
+| 复制单条 / 导出对话 Markdown | ✅ | 悬停复制用户/助手/思考；顶栏「导出」→ 复制 MD / 下载 .md |
 | Plan / TODO 可视化面板 | ⬜ | 仅有 plan **模式**切换，无任务列表 UI |
 
 ---
@@ -173,6 +173,7 @@
 | Diff 查看器 | ✅ |
 | 工具输出详情 | ✅ |
 | 工作区文件树 + 语法高亮预览 | ✅ |
+| 复制单条 / 导出对话 Markdown | ✅ |
 | 登录引导 | ⬜ |
 | 安装包 + 内置 binary | ⬜ |
 | MCP / Skills 设置 UI | ✅ |
@@ -182,8 +183,8 @@
 
 ## 建议下一波
 
-1. **登录引导 + 打包内置 binary** — 从「开发者能跑」到「能装」  
-2. **Plan/TODO 面板 或 复制导出** — 效率类补齐  
+1. **Plan/TODO 可视化面板** — Plan 模式已有，缺任务列表 UI  
+2. **登录引导 + 打包内置 binary** — 从「开发者能跑」到「能装」  
 3. **文件树增强**（搜索全文、从 tool/diff 跳转打开、只读→可编辑）— 可选  
 4. **Diff 语法高亮** — 可选  
 

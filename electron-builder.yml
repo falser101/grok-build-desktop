@@ -9,7 +9,10 @@ files:
 linux:
   target:
     - AppImage
+    - deb
   category: Development
+  maintainer: falser101 <falser101@users.noreply.github.com>
+  vendor: falser101
 mac:
   target:
     - dmg

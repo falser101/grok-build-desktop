@@ -94,10 +94,12 @@ const api: DesktopApi = {
     ipcRenderer.invoke("fs:listDir", relDir) as Promise<FileEntry[]>,
   readFile: (relPath: string) =>
     ipcRenderer.invoke("fs:readFile", relPath) as Promise<FileReadResult>,
-  termStart: (cwd?: string) =>
-    ipcRenderer.invoke("term:start", cwd) as Promise<TermStartResult>,
+  termStart: (cwd?: string, cols?: number, rows?: number) =>
+    ipcRenderer.invoke("term:start", cwd, cols, rows) as Promise<TermStartResult>,
   termWrite: (id: string, data: string) =>
     ipcRenderer.invoke("term:write", id, data) as Promise<void>,
+  termResize: (id: string, cols: number, rows: number) =>
+    ipcRenderer.invoke("term:resize", id, cols, rows) as Promise<void>,
   termKill: (id: string) =>
     ipcRenderer.invoke("term:kill", id) as Promise<void>,
   onTermEvent: (cb) => {

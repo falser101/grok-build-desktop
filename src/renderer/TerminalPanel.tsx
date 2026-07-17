@@ -1,77 +1,217 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import "@xterm/xterm/css/xterm.css";
 import type { Messages } from "./i18n";
 
 /**
- * Strip common ANSI CSI sequences for plain-text terminal display.
- * (We are not embedding a full VT emulator.)
+ * VS Code-style interactive terminal: xterm.js frontend + PTY backend.
+ * Full-screen terminal surface (no separate input bar) — type anywhere.
  */
-function stripAnsi(s: string): string {
-  return s
-    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
-    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
-    .replace(/\x1b[()][0-9A-Za-z]/g, "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n");
-}
-
 export function TerminalPanel({
   workspace,
   active,
   m,
 }: {
   workspace: string | undefined;
-  /** When false, keep process alive but do not auto-focus. */
+  /** When false, keep process alive but do not auto-focus / resize thrash. */
   active: boolean;
   m: Messages;
 }) {
-  const [output, setOutput] = useState("");
-  const [line, setLine] = useState("");
   const [termId, setTermId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const preRef = useRef<HTMLPreElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const termIdRef = useRef<string | null>(null);
+  const [shellLabel, setShellLabel] = useState<string>("");
 
-  const scrollBottom = useCallback(() => {
-    const el = preRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const xtermRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const termIdRef = useRef<string | null>(null);
+  const workspaceRef = useRef(workspace);
+  const disposedRef = useRef(false);
+
+  workspaceRef.current = workspace;
+
+  const fitAndResize = useCallback(() => {
+    const term = xtermRef.current;
+    const fit = fitRef.current;
+    const id = termIdRef.current;
+    if (!term || !fit || !hostRef.current) return;
+    // Skip if host has no layout (hidden panel).
+    if (
+      hostRef.current.clientWidth < 4 ||
+      hostRef.current.clientHeight < 4
+    ) {
+      return;
+    }
+    try {
+      fit.fit();
+    } catch {
+      /* ignore */
+    }
+    if (id && term.cols > 0 && term.rows > 0) {
+      void window.desktop
+        .termResize(id, term.cols, term.rows)
+        .catch(() => undefined);
+    }
   }, []);
 
   const start = useCallback(async () => {
+    if (disposedRef.current) return;
     setBusy(true);
     setError(null);
     try {
-      // Kill previous shell if any
       if (termIdRef.current) {
         await window.desktop.termKill(termIdRef.current).catch(() => undefined);
         termIdRef.current = null;
         setTermId(null);
       }
-      setOutput("");
-      const res = await window.desktop.termStart(workspace);
+      xtermRef.current?.reset();
+      xtermRef.current?.clear();
+
+      // Prefer measured size; fall back to defaults for first paint.
+      let cols = 80;
+      let rows = 24;
+      const fit = fitRef.current;
+      const term = xtermRef.current;
+      if (fit && term && hostRef.current) {
+        try {
+          fit.fit();
+          cols = term.cols || 80;
+          rows = term.rows || 24;
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const res = await window.desktop.termStart(
+        workspaceRef.current,
+        cols,
+        rows,
+      );
+      if (disposedRef.current) {
+        await window.desktop.termKill(res.id).catch(() => undefined);
+        return;
+      }
       termIdRef.current = res.id;
       setTermId(res.id);
+      setShellLabel(res.shell);
+      // Sync PTY size after attach.
+      if (term) {
+        void window.desktop
+          .termResize(res.id, term.cols, term.rows)
+          .catch(() => undefined);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
-  }, [workspace]);
+  }, []);
 
-  // Subscribe to term events once.
+  // Create xterm once.
+  useEffect(() => {
+    disposedRef.current = false;
+    const host = hostRef.current;
+    if (!host) return;
+
+    const term = new Terminal({
+      cursorBlink: true,
+      cursorStyle: "bar",
+      fontFamily:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      fontSize: 13,
+      lineHeight: 1.2,
+      letterSpacing: 0,
+      scrollback: 5000,
+      allowProposedApi: true,
+      theme: {
+        background: "#0e0e0e",
+        foreground: "#d4d4d4",
+        cursor: "#aeafad",
+        cursorAccent: "#0e0e0e",
+        selectionBackground: "rgba(255, 255, 255, 0.18)",
+        black: "#000000",
+        red: "#cd3131",
+        green: "#0dbc79",
+        yellow: "#e5e510",
+        blue: "#2472c8",
+        magenta: "#bc3fbc",
+        cyan: "#11a8cd",
+        white: "#e5e5e5",
+        brightBlack: "#666666",
+        brightRed: "#f14c4c",
+        brightGreen: "#23d18b",
+        brightYellow: "#f5f543",
+        brightBlue: "#3b8eea",
+        brightMagenta: "#d670d6",
+        brightCyan: "#29b8db",
+        brightWhite: "#e5e5e5",
+      },
+    });
+
+    const fit = new FitAddon();
+    const links = new WebLinksAddon();
+    term.loadAddon(fit);
+    term.loadAddon(links);
+    term.open(host);
+
+    xtermRef.current = term;
+    fitRef.current = fit;
+
+    const onData = term.onData((data) => {
+      const id = termIdRef.current;
+      if (!id) return;
+      void window.desktop.termWrite(id, data).catch(() => undefined);
+    });
+
+    const onBinary = term.onBinary((data) => {
+      const id = termIdRef.current;
+      if (!id) return;
+      // Convert binary string to raw bytes for PTY.
+      let raw = "";
+      for (let i = 0; i < data.length; i++) {
+        raw += String.fromCharCode(data.charCodeAt(i) & 0xff);
+      }
+      void window.desktop.termWrite(id, raw).catch(() => undefined);
+    });
+
+    // Initial fit after layout.
+    requestAnimationFrame(() => {
+      try {
+        fit.fit();
+      } catch {
+        /* ignore */
+      }
+    });
+
+    return () => {
+      disposedRef.current = true;
+      onData.dispose();
+      onBinary.dispose();
+      const id = termIdRef.current;
+      if (id) {
+        void window.desktop.termKill(id).catch(() => undefined);
+        termIdRef.current = null;
+      }
+      term.dispose();
+      xtermRef.current = null;
+      fitRef.current = null;
+    };
+  }, []);
+
+  // Stream PTY output → xterm.
   useEffect(() => {
     return window.desktop.onTermEvent((ev) => {
       if (ev.type === "data") {
         if (termIdRef.current && ev.id !== termIdRef.current) return;
-        setOutput((o) => o + stripAnsi(ev.data));
+        xtermRef.current?.write(ev.data);
       } else if (ev.type === "exit") {
         if (termIdRef.current && ev.id !== termIdRef.current) return;
-        setOutput(
-          (o) =>
-            o +
-            `\n[${m.termExited.replace("{code}", String(ev.code ?? "?"))}]\n`,
+        const code = ev.code ?? "?";
+        xtermRef.current?.writeln(
+          `\r\n\x1b[90m[${m.termExited.replace("{code}", String(code))}]\x1b[0m`,
         );
         termIdRef.current = null;
         setTermId(null);
@@ -79,41 +219,45 @@ export function TerminalPanel({
     });
   }, [m.termExited]);
 
-  // Start / restart when panel becomes active or workspace changes.
+  // Start shell once xterm is ready; restart when workspace changes.
+  useEffect(() => {
+    // Wait a frame so fit has dimensions.
+    const t = window.setTimeout(() => {
+      void start();
+    }, 0);
+    return () => {
+      window.clearTimeout(t);
+    };
+    // Only restart on workspace change (not active toggle).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace]);
+
+  // Focus + fit when panel becomes visible.
   useEffect(() => {
     if (!active) return;
-    void start();
-    return () => {
-      const id = termIdRef.current;
-      if (id) {
-        void window.desktop.termKill(id).catch(() => undefined);
-        termIdRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only on active/workspace
-  }, [active, workspace]);
+    const t = window.setTimeout(() => {
+      fitAndResize();
+      xtermRef.current?.focus();
+    }, 30);
+    return () => window.clearTimeout(t);
+  }, [active, fitAndResize, termId]);
 
+  // Observe container resize (panel drag, window resize).
   useEffect(() => {
-    scrollBottom();
-  }, [output, scrollBottom]);
+    const host = hostRef.current;
+    if (!host) return;
+    const ro = new ResizeObserver(() => {
+      if (!active) return;
+      fitAndResize();
+    });
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [active, fitAndResize]);
 
-  useEffect(() => {
-    if (active) inputRef.current?.focus();
-  }, [active, termId]);
-
-  const sendLine = useCallback(async () => {
-    const id = termIdRef.current;
-    if (!id) return;
-    const text = line;
-    setLine("");
-    // Echo local input for shells that don't echo over pipes.
-    setOutput((o) => o + text + "\n");
-    try {
-      await window.desktop.termWrite(id, text + "\n");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }, [line]);
+  // Click anywhere in the terminal area to focus.
+  const onHostClick = useCallback(() => {
+    xtermRef.current?.focus();
+  }, []);
 
   return (
     <div className="term-panel">
@@ -128,50 +272,47 @@ export function TerminalPanel({
                 workspace}
             </span>
           ) : null}
+          {shellLabel ? (
+            <span className="term-shell" title={shellLabel}>
+              {" "}
+              · {shellLabel.split(/[/\\]/).pop()}
+            </span>
+          ) : null}
         </span>
-        <button
-          type="button"
-          className="term-restart"
-          onClick={() => void start()}
-          disabled={busy}
-          title={m.termRestart}
-        >
-          ↻
-        </button>
+        <div className="term-toolbar-actions">
+          <button
+            type="button"
+            className="term-action"
+            onClick={() => {
+              xtermRef.current?.clear();
+            }}
+            title={m.termClear}
+            disabled={busy}
+          >
+            ⌫
+          </button>
+          <button
+            type="button"
+            className="term-action"
+            onClick={() => void start()}
+            disabled={busy}
+            title={m.termRestart}
+          >
+            ↻
+          </button>
+        </div>
       </div>
       {error ? <div className="term-error">{error}</div> : null}
-      <pre className="term-output" ref={preRef} tabIndex={-1}>
-        {output || (busy ? m.termStarting : m.termHint)}
-      </pre>
-      <form
-        className="term-input-row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void sendLine();
-        }}
-      >
-        <span className="term-prompt">›</span>
-        <input
-          ref={inputRef}
-          className="term-input"
-          value={line}
-          disabled={!termId}
-          onChange={(e) => setLine(e.target.value)}
-          placeholder={termId ? m.termPlaceholder : m.termStarting}
-          spellCheck={false}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-        />
-        <button
-          type="submit"
-          className="term-send"
-          disabled={!termId || !line.trim()}
-          title={m.termRun}
-        >
-          ↵
-        </button>
-      </form>
+      {!termId && busy ? (
+        <div className="term-status">{m.termStarting}</div>
+      ) : null}
+      <div
+        className="term-xterm-host"
+        ref={hostRef}
+        onClick={onHostClick}
+        role="application"
+        aria-label={m.termTitle}
+      />
     </div>
   );
 }

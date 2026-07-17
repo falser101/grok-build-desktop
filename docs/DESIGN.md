@@ -71,10 +71,12 @@ Ship a desktop app that ordinary (non-terminal) users can use like Claude Deskto
 
 Electron ships a **default application menu** (`File` / `Edit` / `View` / `Window` / `Help`) when the main process never calls `Menu.setApplicationMenu`. On **Linux** (and often Windows) that menu is drawn as a **native light-themed bar** above the dark React UI — it looks “stuck white” and is unrelated to the app theme tokens in `styles.css`.
 
+**Important:** On Win/Linux, `Menu.setApplicationMenu(null)` also removes **Edit role accelerators** (`Ctrl+C/V/X/A`, Undo…). Selection copy/paste then fails. Keep a minimal **Edit** menu for roles; hide the strip with `autoHideMenuBar` (Alt reveals it briefly). Also attach a `webContents` **context-menu** with Copy/Paste when there is a selection or an editable field.
+
 | Platform | Behavior |
 |----------|----------|
-| **Linux / Windows** | `Menu.setApplicationMenu(null)` + `autoHideMenuBar: true` — no stock menu strip |
-| **macOS** | Minimal menu: `appMenu` + `editMenu` + `windowMenu` (system expects an app menu) |
+| **Linux / Windows** | Minimal `Edit` menu (undo/redo/cut/copy/paste/selectAll) + `autoHideMenuBar: true` + selection/editable right-click Edit menu |
+| **macOS** | Minimal menu: `appMenu` + `editMenu` + `windowMenu` (system expects an app menu) + same right-click Edit menu |
 
 Window `backgroundColor` is `#1a1a1a` so the frame flash before first paint matches dark theme. In-app theme (dark/light/system) only styles the **renderer**; the OS title bar still follows the desktop environment unless we later adopt `titleBarOverlay` / frameless chrome.
 

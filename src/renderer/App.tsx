@@ -44,6 +44,14 @@ import {
   tryHandleLocalSlash,
   type SlashSuggestion,
 } from "./slash";
+import {
+  copyText,
+  downloadTextFile,
+  itemToCopyText,
+  safeExportFilename,
+  timelineToMarkdown,
+  type TimelineMdLabels,
+} from "./timelineMarkdown";
 
 const initial: AppSnapshot = {
   connection: "idle",
@@ -57,27 +65,35 @@ const initial: AppSnapshot = {
   alwaysApprove: false,
 };
 
-/** Panel resize limits (px). Drag below collapse threshold folds the panel. */
-const SIDEBAR_DEFAULT = 260;
-const SIDEBAR_MIN = 180;
-const SIDEBAR_MAX = 480;
-const SIDEBAR_COLLAPSE = 96;
-const SIDEBAR_RAIL = 28;
-const RIGHT_DEFAULT = 300;
-const RIGHT_MIN = 200;
-const RIGHT_MAX = 560;
-const RIGHT_COLLAPSE = 96;
-const VIEWER_DEFAULT = 420;
-const VIEWER_MIN = 280;
-const VIEWER_MAX = 900;
-const VIEWER_COLLAPSE = 160;
-const LAYOUT_STORAGE_KEY = "grok-desktop-layout";
+/**
+ * Panel widths as % of the shell width (responsive across screen sizes).
+ * Drag below collapse threshold folds the panel.
+ */
+const SIDEBAR_DEFAULT = 18;
+const SIDEBAR_MIN = 12;
+const SIDEBAR_MAX = 32;
+const SIDEBAR_COLLAPSE = 7;
+/** Collapsed sidebar rail width (% of shell). */
+const SIDEBAR_RAIL = 2.5;
+const RIGHT_DEFAULT = 20;
+const RIGHT_MIN = 14;
+const RIGHT_MAX = 38;
+const RIGHT_COLLAPSE = 7;
+const VIEWER_DEFAULT = 22;
+const VIEWER_MIN = 16;
+const VIEWER_MAX = 42;
+const VIEWER_COLLAPSE = 10;
+const LAYOUT_STORAGE_KEY = "grok-desktop-layout-v2";
+/** Legacy px-based key — migrate once then drop. */
+const LAYOUT_STORAGE_KEY_LEGACY = "grok-desktop-layout";
 
 type PanelLayout = {
+  /** Sidebar width as % of shell (0–100). */
   sidebarWidth: number;
   sidebarCollapsed: boolean;
+  /** Right panel width as % of shell. */
   rightPanelWidth: number;
-  /** File preview column width (shell-level, next to chat). */
+  /** File preview column width as % of shell. */
   viewerWidth: number;
 };
 
@@ -87,45 +103,71 @@ function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
 
+function shellWidthPx(): number {
+  if (typeof window === "undefined") return 1280;
+  return Math.max(320, window.innerWidth);
+}
+
+/** Convert legacy px layout values to % of current window. */
+function pxToPct(px: number, min: number, max: number): number {
+  const pct = (px / shellWidthPx()) * 100;
+  return clamp(pct, min, max);
+}
+
+/**
+ * Accept stored number: if it looks like old px (> max%), convert; else treat as %.
+ */
+function normalizeWidthPct(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  // Legacy px storage was always well above 50 for these panels.
+  if (value > max + 5) return pxToPct(value, min, max);
+  return clamp(value, min, max);
+}
+
+function defaultPanelLayout(): PanelLayout {
+  return {
+    sidebarWidth: SIDEBAR_DEFAULT,
+    sidebarCollapsed: false,
+    rightPanelWidth: RIGHT_DEFAULT,
+    viewerWidth: VIEWER_DEFAULT,
+  };
+}
+
 function loadPanelLayout(): PanelLayout {
   try {
-    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
-    if (!raw) {
-      return {
-        sidebarWidth: SIDEBAR_DEFAULT,
-        sidebarCollapsed: false,
-        rightPanelWidth: RIGHT_DEFAULT,
-        viewerWidth: VIEWER_DEFAULT,
-      };
-    }
+    const raw =
+      localStorage.getItem(LAYOUT_STORAGE_KEY) ??
+      localStorage.getItem(LAYOUT_STORAGE_KEY_LEGACY);
+    if (!raw) return defaultPanelLayout();
     const p = JSON.parse(raw) as Partial<PanelLayout>;
     return {
-      sidebarWidth: clamp(
-        typeof p.sidebarWidth === "number" ? p.sidebarWidth : SIDEBAR_DEFAULT,
+      sidebarWidth: normalizeWidthPct(
+        p.sidebarWidth,
+        SIDEBAR_DEFAULT,
         SIDEBAR_MIN,
         SIDEBAR_MAX,
       ),
       sidebarCollapsed: Boolean(p.sidebarCollapsed),
-      rightPanelWidth: clamp(
-        typeof p.rightPanelWidth === "number"
-          ? p.rightPanelWidth
-          : RIGHT_DEFAULT,
+      rightPanelWidth: normalizeWidthPct(
+        p.rightPanelWidth,
+        RIGHT_DEFAULT,
         RIGHT_MIN,
         RIGHT_MAX,
       ),
-      viewerWidth: clamp(
-        typeof p.viewerWidth === "number" ? p.viewerWidth : VIEWER_DEFAULT,
+      viewerWidth: normalizeWidthPct(
+        p.viewerWidth,
+        VIEWER_DEFAULT,
         VIEWER_MIN,
         VIEWER_MAX,
       ),
     };
   } catch {
-    return {
-      sidebarWidth: SIDEBAR_DEFAULT,
-      sidebarCollapsed: false,
-      rightPanelWidth: RIGHT_DEFAULT,
-      viewerWidth: VIEWER_DEFAULT,
-    };
+    return defaultPanelLayout();
   }
 }
 
@@ -405,6 +447,72 @@ function resolveScrollPinnedUser(
   return active;
 }
 
+function MsgCopyButton({
+  item,
+  m,
+}: {
+  item: TimelineItem;
+  m: Messages;
+}) {
+  const [state, setState] = useState<"idle" | "ok" | "err">("idle");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const onCopy = async (e: ReactMouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const text = itemToCopyText(item);
+    if (!text) return;
+    try {
+      await copyText(text);
+      setState("ok");
+    } catch {
+      setState("err");
+    }
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setState("idle"), 1600);
+  };
+
+  const label =
+    state === "ok" ? m.copied : state === "err" ? m.copyFailed : m.copyMessage;
+
+  return (
+    <button
+      type="button"
+      className={`msg-copy-btn${state === "ok" ? " is-ok" : ""}${
+        state === "err" ? " is-err" : ""
+      }`}
+      onClick={(e) => void onCopy(e)}
+      title={label}
+      aria-label={label}
+    >
+      {state === "ok" ? (
+        <span className="msg-copy-label">{m.copied}</span>
+      ) : (
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <rect x="9" y="9" width="13" height="13" rx="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 const TimelineRow = memo(function TimelineRow({
   item,
   m,
@@ -423,7 +531,10 @@ const TimelineRow = memo(function TimelineRow({
         className={`msg${highlight ? " msg-flash" : ""}`}
         id={msgDomId(item.id)}
       >
-        <div className="msg-role user">{m.you}</div>
+        <div className="msg-head">
+          <div className="msg-role user">{m.you}</div>
+          <MsgCopyButton item={item} m={m} />
+        </div>
         <div className="msg-body">{item.text}</div>
       </div>
     );
@@ -431,7 +542,10 @@ const TimelineRow = memo(function TimelineRow({
   if (item.kind === "assistant") {
     return (
       <div className="msg">
-        <div className="msg-role assistant">{m.grok}</div>
+        <div className="msg-head">
+          <div className="msg-role assistant">{m.grok}</div>
+          <MsgCopyButton item={item} m={m} />
+        </div>
         <MarkdownBody
           className="msg-body"
           text={item.text}
@@ -443,8 +557,11 @@ const TimelineRow = memo(function TimelineRow({
   if (item.kind === "thought") {
     return (
       <details className="thought">
-        <summary>
-          {item.streaming ? m.thoughtStreaming : m.thought}
+        <summary className="thought-summary">
+          <span className="thought-summary-label">
+            {item.streaming ? m.thoughtStreaming : m.thought}
+          </span>
+          <MsgCopyButton item={item} m={m} />
         </summary>
         <MarkdownBody
           className="thought-body"
@@ -607,11 +724,16 @@ export function App() {
   const [renameDraft, setRenameDraft] = useState("");
   /** Highlighted option in the permission panel. */
   const [permIndex, setPermIndex] = useState(0);
-  /** Right side panel (files / terminal). */
+  /**
+   * Right side panel (Codex): top-right button toggles the whole region.
+   * Inside: tool menu → pick files / terminal / review / browser.
+   */
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<"files" | "terminal">(
-    "files",
-  );
+  const [rightPanelTab, setRightPanelTab] = useState<
+    "menu" | "files" | "terminal" | "review" | "browser"
+  >("menu");
+  /** Keep PTY + xterm mounted after first open (VS Code-style session). */
+  const [termKeepAlive, setTermKeepAlive] = useState(false);
   const [panelLayout, setPanelLayout] = useState<PanelLayout>(() =>
     loadPanelLayout(),
   );
@@ -626,6 +748,10 @@ export function App() {
   const [openFilePath, setOpenFilePath] = useState<string | null>(null);
   /** Timeline message id briefly highlighted after pin click. */
   const [flashMsgId, setFlashMsgId] = useState<string | null>(null);
+  /** Export conversation dropdown (copy MD / download .md). */
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  /** Brief status after export / download. */
+  const [exportToast, setExportToast] = useState<string | null>(null);
   /**
    * User message that owns the current scroll position (sticky header).
    * Updates as you scroll past each user turn — not always "latest turn".
@@ -633,6 +759,10 @@ export function App() {
   const [pinnedUser, setPinnedUser] = useState<UserTimelineItem | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const chatPaneRef = useRef<HTMLDivElement | null>(null);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
+  const exportToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pinScrollRafRef = useRef<number | null>(null);
   /**
@@ -670,6 +800,8 @@ export function App() {
   panelLayoutRef.current = panelLayout;
   const rightPanelOpenRef = useRef(rightPanelOpen);
   rightPanelOpenRef.current = rightPanelOpen;
+  const rightPanelTabRef = useRef(rightPanelTab);
+  rightPanelTabRef.current = rightPanelTab;
   const openFilePathRef = useRef(openFilePath);
   openFilePathRef.current = openFilePath;
   const viewRef = useRef(view);
@@ -681,44 +813,32 @@ export function App() {
     savePanelLayout(panelLayout);
   }, [panelLayout, resizingSide]);
 
-  const maxSidebarW = useCallback(() => {
-    if (typeof window === "undefined") return SIDEBAR_MAX;
-    return Math.min(SIDEBAR_MAX, Math.floor(window.innerWidth * 0.42));
-  }, []);
-  const maxRightW = useCallback(() => {
-    if (typeof window === "undefined") return RIGHT_MAX;
-    return Math.min(RIGHT_MAX, Math.floor(window.innerWidth * 0.48));
-  }, []);
-  const maxViewerW = useCallback(() => {
-    if (typeof window === "undefined") return VIEWER_MAX;
-    return Math.min(VIEWER_MAX, Math.floor(window.innerWidth * 0.55));
-  }, []);
-
   /**
    * Apply grid columns on the shell node — no React re-render.
-   * Layout: sidebar | chat(main) | [viewer?] | [right?]
+   * Widths are % of the shell. Layout: sidebar | chat(main) | [viewer?] | [right?]
    */
   const applyShellColumns = useCallback(
     (
-      leftPx: number,
-      rightPx: number | null,
-      viewerPx: number | null = null,
+      leftPct: number,
+      rightPct: number | null,
+      viewerPct: number | null = null,
     ) => {
       const el = shellRef.current;
       if (!el) return;
-      el.style.setProperty("--sidebar-w", `${leftPx}px`);
-      const cols = [`${leftPx}px`, "minmax(0, 1fr)"];
-      if (viewerPx != null && viewerPx > 0) {
-        el.style.setProperty("--viewer-w", `${viewerPx}px`);
-        cols.push(`${viewerPx}px`);
+      const fmt = (pct: number) => `${pct.toFixed(2)}%`;
+      el.style.setProperty("--sidebar-w", fmt(leftPct));
+      const cols = [fmt(leftPct), "minmax(0, 1fr)"];
+      if (viewerPct != null && viewerPct > 0) {
+        el.style.setProperty("--viewer-w", fmt(viewerPct));
+        cols.push(fmt(viewerPct));
       } else {
-        el.style.setProperty("--viewer-w", "0px");
+        el.style.setProperty("--viewer-w", "0%");
       }
-      if (rightPx != null && rightPx > 0) {
-        el.style.setProperty("--right-panel-w", `${rightPx}px`);
-        cols.push(`${rightPx}px`);
+      if (rightPct != null && rightPct > 0) {
+        el.style.setProperty("--right-panel-w", fmt(rightPct));
+        cols.push(fmt(rightPct));
       } else {
-        el.style.setProperty("--right-panel-w", "0px");
+        el.style.setProperty("--right-panel-w", "0%");
       }
       el.style.gridTemplateColumns = cols.join(" ");
     },
@@ -729,14 +849,17 @@ export function App() {
   // (During drag, pointer handlers own the grid columns via applyShellColumns.)
   useLayoutEffect(() => {
     if (resizeDragRef.current) return;
-    const leftPx = panelLayout.sidebarCollapsed
+    const leftPct = panelLayout.sidebarCollapsed
       ? SIDEBAR_RAIL
       : panelLayout.sidebarWidth;
-    const viewerPx =
-      openFilePath && view === "chat" ? panelLayout.viewerWidth : null;
-    const rightPx =
+    const viewerOpen =
+      view === "chat" &&
+      (Boolean(openFilePath) ||
+        (rightPanelOpen && rightPanelTab === "files"));
+    const viewerPct = viewerOpen ? panelLayout.viewerWidth : null;
+    const rightPct =
       rightPanelOpen && view === "chat" ? panelLayout.rightPanelWidth : null;
-    applyShellColumns(leftPx, rightPx, viewerPx);
+    applyShellColumns(leftPct, rightPct, viewerPct);
   }, [
     applyShellColumns,
     panelLayout.sidebarCollapsed,
@@ -744,9 +867,34 @@ export function App() {
     panelLayout.rightPanelWidth,
     panelLayout.viewerWidth,
     rightPanelOpen,
+    rightPanelTab,
     openFilePath,
     view,
   ]);
+
+  // Keep % layout correct when the window is resized (no drag in progress).
+  useEffect(() => {
+    const onResize = () => {
+      if (resizeDragRef.current) return;
+      const layout = panelLayoutRef.current;
+      const leftPct = layout.sidebarCollapsed
+        ? SIDEBAR_RAIL
+        : layout.sidebarWidth;
+      const viewerOpen =
+        viewRef.current === "chat" &&
+        (Boolean(openFilePathRef.current) ||
+          (rightPanelOpenRef.current && rightPanelTabRef.current === "files"));
+      const rightOpen =
+        rightPanelOpenRef.current && viewRef.current === "chat";
+      applyShellColumns(
+        leftPct,
+        rightOpen ? layout.rightPanelWidth : null,
+        viewerOpen ? layout.viewerWidth : null,
+      );
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [applyShellColumns]);
 
   const onResizePointerDown = useCallback(
     (side: ResizeSide) => (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -756,7 +904,9 @@ export function App() {
       const rightOpenNow =
         rightPanelOpenRef.current && viewRef.current === "chat";
       const viewerOpenNow =
-        Boolean(openFilePathRef.current) && viewRef.current === "chat";
+        viewRef.current === "chat" &&
+        (Boolean(openFilePathRef.current) ||
+          (rightPanelOpenRef.current && rightPanelTabRef.current === "files"));
       const startW =
         side === "left"
           ? layout.sidebarWidth
@@ -780,13 +930,18 @@ export function App() {
         : layout.sidebarWidth;
       const rightFixed = layout.rightPanelWidth;
       const viewerFixed = layout.viewerWidth;
+      const shellW = Math.max(
+        1,
+        shellRef.current?.clientWidth ?? shellWidthPx(),
+      );
 
       const paint = (clientX: number) => {
         const drag = resizeDragRef.current;
         if (!drag) return;
+        const deltaPct = ((clientX - drag.startX) / shellW) * 100;
         if (drag.side === "left") {
-          const raw = drag.startW + (clientX - drag.startX);
-          const next = clamp(raw, SIDEBAR_COLLAPSE * 0.45, maxSidebarW());
+          const raw = drag.startW + deltaPct;
+          const next = clamp(raw, SIDEBAR_COLLAPSE * 0.45, SIDEBAR_MAX);
           drag.liveW = next;
           applyShellColumns(
             next,
@@ -794,8 +949,9 @@ export function App() {
             drag.viewerOpen ? viewerFixed : null,
           );
         } else if (drag.side === "right") {
-          const raw = drag.startW - (clientX - drag.startX);
-          const next = clamp(raw, RIGHT_COLLAPSE * 0.45, maxRightW());
+          // Drag left edge: move left = wider right panel.
+          const raw = drag.startW - deltaPct;
+          const next = clamp(raw, RIGHT_COLLAPSE * 0.45, RIGHT_MAX);
           drag.liveW = next;
           applyShellColumns(
             leftFixed,
@@ -804,8 +960,8 @@ export function App() {
           );
         } else {
           // Viewer: drag left edge — move left = wider.
-          const raw = drag.startW - (clientX - drag.startX);
-          const next = clamp(raw, VIEWER_COLLAPSE * 0.45, maxViewerW());
+          const raw = drag.startW - deltaPct;
+          const next = clamp(raw, VIEWER_COLLAPSE * 0.45, VIEWER_MAX);
           drag.liveW = next;
           applyShellColumns(
             leftFixed,
@@ -845,14 +1001,14 @@ export function App() {
               sidebarWidth: clamp(
                 drag.startW >= SIDEBAR_MIN ? drag.startW : SIDEBAR_DEFAULT,
                 SIDEBAR_MIN,
-                maxSidebarW(),
+                SIDEBAR_MAX,
               ),
             }));
           } else {
             setPanelLayout((prev) => ({
               ...prev,
               sidebarCollapsed: false,
-              sidebarWidth: clamp(live, SIDEBAR_MIN, maxSidebarW()),
+              sidebarWidth: clamp(live, SIDEBAR_MIN, SIDEBAR_MAX),
             }));
           }
         } else if (drag.side === "right") {
@@ -863,13 +1019,13 @@ export function App() {
               rightPanelWidth: clamp(
                 drag.startW >= RIGHT_MIN ? drag.startW : RIGHT_DEFAULT,
                 RIGHT_MIN,
-                maxRightW(),
+                RIGHT_MAX,
               ),
             }));
           } else {
             setPanelLayout((prev) => ({
               ...prev,
-              rightPanelWidth: clamp(live, RIGHT_MIN, maxRightW()),
+              rightPanelWidth: clamp(live, RIGHT_MIN, RIGHT_MAX),
             }));
           }
         } else if (live < VIEWER_COLLAPSE) {
@@ -879,13 +1035,13 @@ export function App() {
             viewerWidth: clamp(
               drag.startW >= VIEWER_MIN ? drag.startW : VIEWER_DEFAULT,
               VIEWER_MIN,
-              maxViewerW(),
+              VIEWER_MAX,
             ),
           }));
         } else {
           setPanelLayout((prev) => ({
             ...prev,
-            viewerWidth: clamp(live, VIEWER_MIN, maxViewerW()),
+            viewerWidth: clamp(live, VIEWER_MIN, VIEWER_MAX),
           }));
         }
       };
@@ -894,7 +1050,7 @@ export function App() {
       document.addEventListener("pointerup", onUp);
       document.addEventListener("pointercancel", onUp);
     },
-    [applyShellColumns, maxRightW, maxSidebarW, maxViewerW],
+    [applyShellColumns],
   );
 
   // Close file preview when workspace changes.
@@ -1213,6 +1369,31 @@ export function App() {
     };
   }, [wsMenuOpen]);
 
+  // Close export menu on outside click or Escape
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (
+        exportMenuRef.current &&
+        !exportMenuRef.current.contains(e.target as Node)
+      ) {
+        setExportMenuOpen(false);
+      }
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setExportMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [exportMenuOpen]);
+
   // Close session context menu on outside click / Escape
   useEffect(() => {
     if (!ctxMenu) return;
@@ -1343,6 +1524,93 @@ export function App() {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
   }, []);
+
+  const mdExportLabels = useMemo((): TimelineMdLabels => {
+    return {
+      you: m.you,
+      grok: m.grok,
+      thought: m.thought,
+      tool: m.exportLabelTool,
+      compact: m.exportLabelCompact,
+      system: m.exportLabelSystem,
+      output: m.toolOutput,
+      truncated: m.toolOutputTruncated,
+    };
+  }, [m]);
+
+  const showExportToast = useCallback((text: string) => {
+    setExportToast(text);
+    if (exportToastTimerRef.current) clearTimeout(exportToastTimerRef.current);
+    exportToastTimerRef.current = setTimeout(() => setExportToast(null), 2200);
+  }, []);
+
+  const buildConversationMarkdown = useCallback(() => {
+    return timelineToMarkdown(
+      snap.timeline,
+      {
+        title: snap.sessionTitle || m.untitledSession,
+        workspace: snap.workspace,
+        sessionId: snap.sessionId,
+        modelId: snap.modelId,
+      },
+      mdExportLabels,
+    );
+  }, [
+    snap.timeline,
+    snap.sessionTitle,
+    snap.workspace,
+    snap.sessionId,
+    snap.modelId,
+    m.untitledSession,
+    mdExportLabels,
+  ]);
+
+  const onExportCopyMarkdown = useCallback(async () => {
+    setExportMenuOpen(false);
+    if (snap.timeline.length === 0) {
+      showExportToast(m.exportEmpty);
+      return;
+    }
+    try {
+      await copyText(buildConversationMarkdown());
+      showExportToast(m.exportCopied);
+    } catch {
+      showExportToast(m.copyFailed);
+    }
+  }, [
+    snap.timeline.length,
+    buildConversationMarkdown,
+    showExportToast,
+    m.exportEmpty,
+    m.exportCopied,
+    m.copyFailed,
+  ]);
+
+  const onExportDownloadMarkdown = useCallback(() => {
+    setExportMenuOpen(false);
+    if (snap.timeline.length === 0) {
+      showExportToast(m.exportEmpty);
+      return;
+    }
+    try {
+      downloadTextFile(
+        safeExportFilename(snap.sessionTitle || m.untitledSession),
+        buildConversationMarkdown(),
+      );
+      showExportToast(m.exportDownloaded);
+    } catch {
+      showExportToast(m.copyFailed);
+    }
+  }, [
+    snap.timeline.length,
+    snap.sessionTitle,
+    buildConversationMarkdown,
+    showExportToast,
+    m.exportEmpty,
+    m.exportDownloaded,
+    m.untitledSession,
+    m.copyFailed,
+  ]);
 
   /** New session bound to a project folder (sidebar project row). */
   const onNewSessionInProject = useCallback(async (cwd: string) => {
@@ -2100,6 +2368,62 @@ export function App() {
   );
 
   const rightOpen = rightPanelOpen && view === "chat";
+  const filesPanelActive = rightOpen && rightPanelTab === "files";
+  const showViewerColumn =
+    view === "chat" && (Boolean(openFilePath) || filesPanelActive);
+
+  const toggleRightPanel = useCallback(() => {
+    setRightPanelOpen((open) => {
+      if (open) return false;
+      // Opening: land on tool menu (Codex default right area).
+      setRightPanelTab("menu");
+      return true;
+    });
+  }, []);
+
+  const openRightTool = useCallback(
+    (tab: "files" | "terminal" | "review" | "browser") => {
+      if (tab === "terminal") setTermKeepAlive(true);
+      setRightPanelTab(tab);
+      setRightPanelOpen(true);
+    },
+    [],
+  );
+
+  // Shortcuts open the right panel into a specific tool (panel stays open).
+  useEffect(() => {
+    if (view !== "chat") return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod || e.altKey) return;
+      if (e.key === "p" || e.key === "P") {
+        if (e.shiftKey) return;
+        e.preventDefault();
+        e.stopPropagation();
+        openRightTool("files");
+        return;
+      }
+      if (e.key === "`") {
+        e.preventDefault();
+        e.stopPropagation();
+        openRightTool("terminal");
+        return;
+      }
+      if ((e.key === "c" || e.key === "C") && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        openRightTool("review");
+        return;
+      }
+      if ((e.key === "t" || e.key === "T") && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        openRightTool("browser");
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [view, openRightTool]);
 
   return (
     <div
@@ -2107,7 +2431,7 @@ export function App() {
       className={`shell ${rightOpen ? "shell-right-open" : ""} ${
         panelLayout.sidebarCollapsed ? "shell-sidebar-collapsed" : ""
       } ${resizingSide ? `shell-resizing shell-resizing-${resizingSide}` : ""} ${
-        openFilePath && view === "chat" ? "shell-viewer-open" : ""
+        showViewerColumn ? "shell-viewer-open" : ""
       }`}
     >
       {loading && view === "chat" ? <div className="loading-bar" /> : null}
@@ -2430,21 +2754,6 @@ export function App() {
           </div>
         ) : (
           <div className="main-chat">
-            {/* Outside the rail so it sits on the true main top-right. */}
-            <button
-              type="button"
-              className={`chat-topbar-btn chat-side-toggle ${
-                rightPanelOpen ? "active" : ""
-              }`}
-              onClick={() => setRightPanelOpen((v) => !v)}
-              title={
-                rightPanelOpen ? m.sidePanelToggleHide : m.sidePanelToggle
-              }
-              aria-pressed={rightPanelOpen}
-            >
-              <span className="icon">☰</span>
-              {m.sidePanelToggle}
-            </button>
             {/* Chat column only: pin + timeline + composer share identical width. */}
             <div className="chat-rail">
             <div className="chat-topbar">
@@ -2472,8 +2781,67 @@ export function App() {
                     ↵
                   </span>
                 </button>
+              ) : (
+                <div className="chat-topbar-spacer" />
+              )}
+              {!showHome && snap.timeline.length > 0 ? (
+                <div className="export-menu-wrap" ref={exportMenuRef}>
+                  <button
+                    type="button"
+                    className={`chat-topbar-btn export-btn${
+                      exportMenuOpen ? " active" : ""
+                    }`}
+                    onClick={() => setExportMenuOpen((v) => !v)}
+                    title={m.exportConversation}
+                    aria-haspopup="menu"
+                    aria-expanded={exportMenuOpen}
+                  >
+                    <svg
+                      className="icon"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.75"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden
+                    >
+                      <path d="M12 3v12" />
+                      <path d="m7 10 5 5 5-5" />
+                      <path d="M5 19h14" />
+                    </svg>
+                    {m.exportConversation}
+                  </button>
+                  {exportMenuOpen ? (
+                    <div className="export-menu" role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="export-menu-item"
+                        onClick={() => void onExportCopyMarkdown()}
+                      >
+                        {m.exportCopyMarkdown}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="export-menu-item"
+                        onClick={() => onExportDownloadMarkdown()}
+                      >
+                        {m.exportDownloadMarkdown}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
             </div>
+            {exportToast ? (
+              <div className="export-toast" role="status" aria-live="polite">
+                {exportToast}
+              </div>
+            ) : null}
             <div className="main-work">
               <div
                 className="main-scroll chat-pane"
@@ -3098,7 +3466,7 @@ export function App() {
         )}
       </section>
 
-      {openFilePath && view === "chat" ? (
+      {showViewerColumn ? (
         <section
           className="viewer-column"
           aria-label={m.filesPreview}
@@ -3110,15 +3478,82 @@ export function App() {
             aria-label={m.resizeViewer}
             title={m.resizeViewer}
             onPointerDown={onResizePointerDown("viewer")}
-            onDoubleClick={() => setOpenFilePath(null)}
+            onDoubleClick={() => {
+              if (openFilePath) setOpenFilePath(null);
+              else if (filesPanelActive) setRightPanelOpen(false);
+            }}
           />
-          <FileViewer
-            path={openFilePath}
-            m={m}
-            onClose={() => setOpenFilePath(null)}
-            onInsertMention={insertFileMention}
-          />
+          {openFilePath ? (
+            <FileViewer
+              path={openFilePath}
+              m={m}
+              onClose={() => setOpenFilePath(null)}
+              onInsertMention={insertFileMention}
+            />
+          ) : (
+            <div className="file-viewer-empty-state">
+              <div className="file-viewer-empty-icon" aria-hidden>
+                <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+                  <path
+                    d="M8 12.5A3 3 0 0 1 11 9.5h6l2.5 3H29a3 3 0 0 1 3 3V28a3 3 0 0 1-3 3H11a3 3 0 0 1-3-3V12.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <div className="file-viewer-empty-title">{m.openFileEmpty}</div>
+              <div className="file-viewer-empty-hint">
+                {m.openFileEmptyHint}
+              </div>
+            </div>
+          )}
         </section>
+      ) : null}
+
+      {view === "chat" ? (
+        <button
+          type="button"
+          className={`chat-topbar-btn chat-side-toggle ${
+            rightPanelOpen ? "active" : ""
+          }`}
+          onClick={toggleRightPanel}
+          title={rightPanelOpen ? m.sidePanelToggleHide : m.sidePanelToggle}
+          aria-pressed={rightPanelOpen}
+          aria-label={
+            rightPanelOpen ? m.sidePanelToggleHide : m.sidePanelToggle
+          }
+        >
+          <span className="icon" aria-hidden>
+            {rightPanelOpen ? (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <rect
+                  x="2"
+                  y="3"
+                  width="12"
+                  height="10"
+                  rx="1.5"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                />
+                <path d="M10 3v10" stroke="currentColor" strokeWidth="1.3" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <rect
+                  x="2"
+                  y="3"
+                  width="12"
+                  height="10"
+                  rx="1.5"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                />
+                <path d="M11 3v10" stroke="currentColor" strokeWidth="1.3" />
+              </svg>
+            )}
+          </span>
+        </button>
       ) : null}
 
       {rightOpen ? (
@@ -3132,54 +3567,180 @@ export function App() {
             onPointerDown={onResizePointerDown("right")}
             onDoubleClick={() => setRightPanelOpen(false)}
           />
-          <div className="right-panel-tabs" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              className={`right-panel-tab ${
-                rightPanelTab === "files" ? "active" : ""
-              }`}
-              aria-selected={rightPanelTab === "files"}
-              onClick={() => setRightPanelTab("files")}
-            >
-              {m.sidePanelFiles}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              className={`right-panel-tab ${
-                rightPanelTab === "terminal" ? "active" : ""
-              }`}
-              aria-selected={rightPanelTab === "terminal"}
-              onClick={() => setRightPanelTab("terminal")}
-            >
-              {m.sidePanelTerminal}
-            </button>
-            <button
-              type="button"
-              className="right-panel-close"
-              title={m.sidePanelToggleHide}
-              onClick={() => setRightPanelOpen(false)}
-            >
-              ×
-            </button>
-          </div>
           <div className="right-panel-body">
-            {rightPanelTab === "files" ? (
+            {rightPanelTab === "menu" ? (
+              <nav className="right-tools-menu in-panel" aria-label={m.sidePanelToggle}>
+                <button
+                  type="button"
+                  className="right-tools-item"
+                  onClick={() => setRightPanelTab("review")}
+                >
+                  <span className="right-tools-icon" aria-hidden>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <path
+                        d="M3.5 2.5h6.2L12.5 5.3V13a.5.5 0 0 1-.5.5H3.5A.5.5 0 0 1 3 13V3a.5.5 0 0 1 .5-.5Z"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                      />
+                      <path
+                        d="M9.5 2.5V5h2.8"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                      />
+                      <path
+                        d="M5.2 8.6 6.8 10l3-3.2"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="right-tools-label">{m.sidePanelReview}</span>
+                  <span className="right-tools-kbd">
+                    {m.sidePanelReviewShortcut}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="right-tools-item"
+                  onClick={() => {
+                    setTermKeepAlive(true);
+                    setRightPanelTab("terminal");
+                  }}
+                >
+                  <span className="right-tools-icon" aria-hidden>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <rect
+                        x="2.5"
+                        y="3"
+                        width="11"
+                        height="10"
+                        rx="1.5"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                      />
+                      <path
+                        d="M5 7.2 6.6 8.5 5 9.8M8.2 10.2h2.6"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="right-tools-label">
+                    {m.sidePanelTerminal}
+                  </span>
+                  <span className="right-tools-kbd">
+                    {m.sidePanelTerminalShortcut}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="right-tools-item"
+                  onClick={() => setRightPanelTab("browser")}
+                >
+                  <span className="right-tools-icon" aria-hidden>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <circle
+                        cx="8"
+                        cy="8"
+                        r="5.5"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                      />
+                      <path
+                        d="M2.5 8h11M8 2.5c1.6 1.7 2.4 3.5 2.4 5.5S9.6 11.8 8 13.5C6.4 11.8 5.6 10 5.6 8S6.4 4.2 8 2.5Z"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                      />
+                    </svg>
+                  </span>
+                  <span className="right-tools-label">
+                    {m.sidePanelBrowser}
+                  </span>
+                  <span className="right-tools-kbd">
+                    {m.sidePanelBrowserShortcut}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="right-tools-item"
+                  onClick={() => setRightPanelTab("files")}
+                >
+                  <span className="right-tools-icon" aria-hidden>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <path
+                        d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.1 1.3h5.1A1.2 1.2 0 0 1 13.5 5.5v6.3a1.2 1.2 0 0 1-1.2 1.2H3.7a1.2 1.2 0 0 1-1.2-1.2V4.2Z"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="right-tools-label">{m.sidePanelFiles}</span>
+                  <span className="right-tools-kbd">
+                    {m.sidePanelFilesShortcut}
+                  </span>
+                </button>
+              </nav>
+            ) : rightPanelTab === "files" ? (
               <FileTree
                 workspace={snap.workspace}
                 selectedPath={openFilePath}
                 onSelectFile={(p) => {
                   setOpenFilePath(p);
                 }}
+                onClose={() => setRightPanelTab("menu")}
                 m={m}
               />
-            ) : (
-              <TerminalPanel
-                workspace={snap.workspace}
-                active={rightOpen && rightPanelTab === "terminal"}
-                m={m}
-              />
+            ) : rightPanelTab === "review" || rightPanelTab === "browser" ? (
+              <div className="right-panel-placeholder">
+                <button
+                  type="button"
+                  className="right-panel-back"
+                  onClick={() => setRightPanelTab("menu")}
+                >
+                  ← {m.sidePanelToggle}
+                </button>
+                <div className="right-panel-placeholder-title">
+                  {rightPanelTab === "review"
+                    ? m.sidePanelReview
+                    : m.sidePanelBrowser}
+                </div>
+                <div className="right-panel-placeholder-hint">
+                  {rightPanelTab === "review"
+                    ? m.sidePanelReviewHint
+                    : m.sidePanelBrowserHint}
+                </div>
+              </div>
+            ) : null}
+            {/* Terminal stays mounted after first open so the PTY session survives tab switches. */}
+            {(rightPanelTab === "terminal" || termKeepAlive) && (
+              <div
+                className="right-panel-tool"
+                style={{
+                  display:
+                    rightPanelTab === "terminal" ? "flex" : "none",
+                }}
+                aria-hidden={rightPanelTab !== "terminal"}
+              >
+                <div className="right-panel-tool-bar">
+                  <button
+                    type="button"
+                    className="right-panel-back"
+                    onClick={() => setRightPanelTab("menu")}
+                  >
+                    ← {m.sidePanelToggle}
+                  </button>
+                </div>
+                <TerminalPanel
+                  workspace={snap.workspace}
+                  active={rightOpen && rightPanelTab === "terminal"}
+                  m={m}
+                />
+              </div>
             )}
           </div>
         </aside>

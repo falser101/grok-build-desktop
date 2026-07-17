@@ -59,6 +59,22 @@ export interface Messages {
   toolOutputTruncated: string;
   /** e.g. "2 files" for multi-diff tool cards. */
   toolDiffCount: string;
+  /** Copy one timeline bubble to clipboard. */
+  copyMessage: string;
+  /** Short confirm after copy. */
+  copied: string;
+  copyFailed: string;
+  /** Export full conversation. */
+  exportConversation: string;
+  exportCopyMarkdown: string;
+  exportDownloadMarkdown: string;
+  exportEmpty: string;
+  exportCopied: string;
+  exportDownloaded: string;
+  /** Markdown section labels used in export (role-like). */
+  exportLabelTool: string;
+  exportLabelCompact: string;
+  exportLabelSystem: string;
 
   // Composer
   local: string;
@@ -208,6 +224,17 @@ export interface Messages {
   sidePanelToggleHide: string;
   sidePanelFiles: string;
   sidePanelTerminal: string;
+  sidePanelReview: string;
+  sidePanelBrowser: string;
+  sidePanelReviewHint: string;
+  sidePanelBrowserHint: string;
+  sidePanelFilesShortcut: string;
+  sidePanelTerminalShortcut: string;
+  sidePanelReviewShortcut: string;
+  sidePanelBrowserShortcut: string;
+  openFileTitle: string;
+  openFileEmpty: string;
+  openFileEmptyHint: string;
   resizeSidebar: string;
   resizeRightPanel: string;
   resizeViewer: string;
@@ -224,6 +251,7 @@ export interface Messages {
   termPlaceholder: string;
   termStarting: string;
   termRestart: string;
+  termClear: string;
   termRun: string;
   termExited: string;
 
@@ -324,6 +352,18 @@ const en: Messages = {
   toolOutput: "Output",
   toolOutputTruncated: "Output truncated for display",
   toolDiffCount: "{n} file(s)",
+  copyMessage: "Copy message",
+  copied: "Copied",
+  copyFailed: "Could not copy",
+  exportConversation: "Export",
+  exportCopyMarkdown: "Copy as Markdown",
+  exportDownloadMarkdown: "Download .md",
+  exportEmpty: "Nothing to export yet",
+  exportCopied: "Conversation copied as Markdown",
+  exportDownloaded: "Markdown file downloaded",
+  exportLabelTool: "Tool",
+  exportLabelCompact: "Compact",
+  exportLabelSystem: "System",
 
   local: "Local",
   chooseWorkspace: "Choose workspace",
@@ -471,10 +511,21 @@ const en: Messages = {
   filesInsertMention: "Insert @path into composer",
   filesPreview: "File preview",
 
-  sidePanelToggle: "Files & terminal",
-  sidePanelToggleHide: "Hide side panel",
+  sidePanelToggle: "Open side panel",
+  sidePanelToggleHide: "Close side panel",
   sidePanelFiles: "Files",
   sidePanelTerminal: "Terminal",
+  sidePanelReview: "Review",
+  sidePanelBrowser: "Browser",
+  sidePanelReviewHint: "Review is not available yet.",
+  sidePanelBrowserHint: "Browser is not available yet.",
+  sidePanelFilesShortcut: "Ctrl+P",
+  sidePanelTerminalShortcut: "Ctrl+`",
+  sidePanelReviewShortcut: "Ctrl+Shift+C",
+  sidePanelBrowserShortcut: "Ctrl+T",
+  openFileTitle: "Open file",
+  openFileEmpty: "Open a file",
+  openFileEmptyHint: "Select a file from the workspace tree",
   resizeSidebar: "Drag to resize sidebar (drag small to collapse)",
   resizeRightPanel: "Drag to resize panel (drag small to collapse)",
   resizeViewer: "Drag to resize file preview (drag small to close)",
@@ -487,10 +538,11 @@ const en: Messages = {
   chooseWorkspaceFirst: "Select a workspace before chatting.",
   placeholderNeedWorkspace: "Select a workspace first…",
   termTitle: "Terminal",
-  termHint: "Shell starts when this tab is open.",
-  termPlaceholder: "Enter a command…",
+  termHint: "Interactive shell — type directly in the terminal.",
+  termPlaceholder: "Type in the terminal…",
   termStarting: "Starting shell…",
   termRestart: "Restart shell",
+  termClear: "Clear terminal",
   termRun: "Run",
   termExited: "Shell exited (code {code})",
 
@@ -594,6 +646,18 @@ const zh: Messages = {
   toolOutput: "输出",
   toolOutputTruncated: "输出已截断显示",
   toolDiffCount: "{n} 个文件",
+  copyMessage: "复制消息",
+  copied: "已复制",
+  copyFailed: "复制失败",
+  exportConversation: "导出",
+  exportCopyMarkdown: "复制为 Markdown",
+  exportDownloadMarkdown: "下载 .md",
+  exportEmpty: "暂无内容可导出",
+  exportCopied: "已复制整段对话为 Markdown",
+  exportDownloaded: "已下载 Markdown 文件",
+  exportLabelTool: "工具",
+  exportLabelCompact: "压缩",
+  exportLabelSystem: "系统",
 
   local: "本地",
   chooseWorkspace: "选择工作区",
@@ -739,10 +803,21 @@ const zh: Messages = {
   filesInsertMention: "将 @路径 插入输入框",
   filesPreview: "文件预览",
 
-  sidePanelToggle: "文件与终端",
-  sidePanelToggleHide: "隐藏侧栏",
+  sidePanelToggle: "打开右侧面板",
+  sidePanelToggleHide: "关闭右侧面板",
   sidePanelFiles: "文件",
   sidePanelTerminal: "终端",
+  sidePanelReview: "审阅",
+  sidePanelBrowser: "浏览器",
+  sidePanelReviewHint: "审阅功能暂未开放。",
+  sidePanelBrowserHint: "浏览器功能暂未开放。",
+  sidePanelFilesShortcut: "Ctrl+P",
+  sidePanelTerminalShortcut: "Ctrl+`",
+  sidePanelReviewShortcut: "Ctrl+Shift+C",
+  sidePanelBrowserShortcut: "Ctrl+T",
+  openFileTitle: "打开文件",
+  openFileEmpty: "打开文件",
+  openFileEmptyHint: "从工作区目录树中选择文件",
   resizeSidebar: "拖动调整左侧宽度（拖到很小可折叠）",
   resizeRightPanel: "拖动调整右侧宽度（拖到很小可折叠）",
   resizeViewer: "拖动调整文件预览宽度（拖到很小可关闭）",
@@ -755,10 +830,11 @@ const zh: Messages = {
   chooseWorkspaceFirst: "请先选择工作区后再对话。",
   placeholderNeedWorkspace: "请先选择工作区…",
   termTitle: "终端",
-  termHint: "打开此标签页后启动 shell。",
-  termPlaceholder: "输入命令…",
+  termHint: "交互式 shell — 直接在终端中输入。",
+  termPlaceholder: "在终端中输入…",
   termStarting: "正在启动 shell…",
   termRestart: "重启 shell",
+  termClear: "清屏",
   termRun: "运行",
   termExited: "Shell 已退出（code {code}）",
 

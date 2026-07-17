@@ -34,10 +34,11 @@ html[data-theme="dark"] {
   --shadow-strong: rgba(0, 0, 0, 0.45);
   --scrollbar: #333333;
   --radius: 10px;
-  --sidebar-w: 260px;
-  --files-w: 240px;
-  --right-panel-w: 300px;
-  --viewer-w: 420px;
+  /* Panel column widths — % of shell (overridden live by JS). */
+  --sidebar-w: 18%;
+  --files-w: 18%;
+  --right-panel-w: 20%;
+  --viewer-w: 22%;
   --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   --mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   /* Syntax highlight tokens (dark) */
@@ -140,6 +141,7 @@ button {
 /* ── Shell ─────────────────────────────────────────── */
 
 .shell {
+  position: relative;
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
@@ -913,8 +915,8 @@ body.is-resizing-panels * {
 
 .main {
   /* Shared by top pin, timeline, and composer for vertical alignment. */
-  --chat-col-max: 780px;
-  --chat-pad-x: 28px;
+  --chat-col-max: min(90%, 48rem);
+  --chat-pad-x: clamp(0.75rem, 2.2vw, 1.75rem);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   height: 100%;
@@ -947,12 +949,128 @@ body.is-resizing-panels * {
   box-sizing: border-box;
 }
 
-/* Side panel toggle — true top-right of the main pane (outside the rail). */
-.main-chat > .chat-side-toggle {
+/*
+ * Shell-level toggle: pinned to the window top-right so it does not shift
+ * when the right panel / viewer columns open or resize.
+ */
+.shell > .chat-side-toggle {
   position: absolute;
   top: 8px;
   right: 14px;
-  z-index: 6;
+  z-index: 40;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  /* Sit above right-panel chrome */
+  pointer-events: auto;
+}
+
+.shell > .chat-side-toggle .icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.9;
+}
+
+/* Tool list inside the opened right panel. */
+.right-tools-menu.in-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  /* Top padding clears the fixed shell toggle at top-right. */
+  padding: 48px 12px 16px;
+  box-sizing: border-box;
+  justify-content: center;
+}
+
+.right-tools-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, var(--bg));
+  color: var(--text);
+  text-align: left;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--shadow) 40%, transparent);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.right-tools-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-soft);
+}
+
+.right-tools-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
+}
+
+.right-tools-item:hover .right-tools-icon {
+  color: var(--text);
+}
+
+.right-tools-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.right-tools-kbd {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-dim);
+  letter-spacing: 0.01em;
+}
+
+.right-panel-tool {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.right-panel-tool > .term-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.right-panel-tool-bar {
+  flex: 0 0 auto;
+  padding: 8px 10px 0;
+}
+
+.right-panel-back {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.right-panel-back:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.right-panel-placeholder .right-panel-back {
+  align-self: flex-start;
+  margin-bottom: 12px;
 }
 
 .chat-rail {
@@ -987,7 +1105,6 @@ body.is-resizing-panels * {
 /* Scroll-linked sticky user prompt (section for current viewport). */
 .current-turn-pin {
   flex: 1 1 auto;
-  width: 100%;
   min-width: 0;
   display: inline-flex;
   align-items: center;
@@ -1086,6 +1203,76 @@ body.is-resizing-panels * {
   background: var(--accent-soft);
   color: var(--text);
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.export-menu-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: 8px;
+}
+
+.export-btn .icon {
+  display: block;
+}
+
+.export-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 180px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 28%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.export-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.export-menu-item:hover,
+.export-menu-item:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.export-toast {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  margin: 4px var(--chat-scrollbar) 0 0;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  animation: export-toast-in 0.16s ease-out;
+}
+
+@keyframes export-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .main-work {
@@ -1211,6 +1398,74 @@ body.is-resizing-panels * {
   min-width: 0;
   /* Keep target clear of the sticky pin when jump-scrolling. */
   scroll-margin-top: 52px;
+}
+
+.msg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.msg-head .msg-role {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.msg-copy-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s, background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.msg:hover .msg-copy-btn,
+.msg:focus-within .msg-copy-btn,
+.thought:hover .msg-copy-btn,
+.thought:focus-within .msg-copy-btn,
+.msg-copy-btn:focus-visible,
+.msg-copy-btn.is-ok,
+.msg-copy-btn.is-err {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.msg-copy-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.msg-copy-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.msg-copy-btn.is-ok {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.msg-copy-btn.is-err {
+  color: var(--danger, #e06c75);
+}
+
+.msg-copy-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 @keyframes msg-flash {
@@ -1445,26 +1700,44 @@ body.is-resizing-panels * {
   overflow: hidden;
 }
 
-.thought summary {
+.thought summary,
+.thought-summary {
   cursor: pointer;
   padding: 8px 12px;
   color: var(--text-dim);
   font-size: 12px;
   user-select: none;
   list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.thought-summary-label {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .thought summary::-webkit-details-marker {
   display: none;
 }
 
-.thought summary::before {
+.thought summary::before,
+.thought-summary::before {
   content: "▸ ";
   color: var(--text-dim);
+  flex: 0 0 auto;
 }
 
-.thought[open] summary::before {
+.thought[open] summary::before,
+.thought[open] .thought-summary::before {
   content: "▾ ";
+}
+
+/* Copy lives in the summary row; keep it tappable without looking dead. */
+.thought-summary .msg-copy-btn {
+  margin-left: auto;
 }
 
 .thought .thought-body {
@@ -3270,17 +3543,27 @@ html[data-theme="light"] .icon-btn.send {
   flex-direction: column;
 }
 
-.right-panel-tabs {
+.right-panel-head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   padding: 8px 8px 0;
   border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
 }
 
-.right-panel-tab {
+.right-panel-head-tabs {
   flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+}
+
+.right-panel-head-tab {
+  flex: 0 0 auto;
   padding: 8px 10px;
   border-radius: 8px 8px 0 0;
   font-size: 12.5px;
@@ -3288,14 +3571,15 @@ html[data-theme="light"] .icon-btn.send {
   color: var(--text-muted);
   border: 1px solid transparent;
   border-bottom: none;
+  white-space: nowrap;
 }
 
-.right-panel-tab:hover {
+.right-panel-head-tab:hover {
   color: var(--text);
   background: var(--bg-hover);
 }
 
-.right-panel-tab.active {
+.right-panel-head-tab.active {
   color: var(--text);
   background: var(--bg);
   border-color: var(--border);
@@ -3328,6 +3612,30 @@ html[data-theme="light"] .icon-btn.send {
   background: var(--bg);
 }
 
+.right-panel-placeholder {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.right-panel-placeholder-title {
+  font-size: 14px;
+  font-weight: 560;
+  color: var(--text);
+}
+
+.right-panel-placeholder-hint {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  max-width: 220px;
+}
+
 /* legacy alias kept for any remaining references */
 .files-panel {
   min-width: 0;
@@ -3340,7 +3648,7 @@ html[data-theme="light"] .icon-btn.send {
   flex-direction: column;
 }
 
-/* ── Terminal panel ────────────────────────────────── */
+/* ── Terminal panel (xterm / VS Code-style) ────────── */
 
 .term-panel {
   display: flex;
@@ -3356,14 +3664,14 @@ html[data-theme="light"] .icon-btn.send {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
   border-bottom: 1px solid #222;
   background: #141414;
 }
 
 .term-title {
-  font-size: 11.5px;
+  font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -3374,108 +3682,101 @@ html[data-theme="light"] .icon-btn.send {
   white-space: nowrap;
 }
 
-.term-cwd {
+.term-cwd,
+.term-shell {
   text-transform: none;
   letter-spacing: 0;
   font-weight: 500;
   color: #b0b0b0;
 }
 
-.term-restart {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  color: #9b9b9b;
-  font-size: 14px;
-  line-height: 1;
+.term-shell {
+  color: #7a7a7a;
+  font-weight: 400;
 }
 
-.term-restart:hover:not(:disabled) {
+.term-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex: 0 0 auto;
+}
+
+.term-action {
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 0.35rem;
+  color: #9b9b9b;
+  font-size: 0.9rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.term-action:hover:not(:disabled) {
   background: #222;
   color: #eee;
 }
 
+.term-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .term-error {
   flex: 0 0 auto;
-  padding: 6px 10px;
-  font-size: 12px;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.75rem;
   color: #e07070;
   background: rgba(224, 112, 112, 0.08);
   border-bottom: 1px solid rgba(224, 112, 112, 0.2);
 }
 
-.term-output {
+.term-status {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.72rem;
+  color: #888;
+  background: #121212;
+  border-bottom: 1px solid #1e1e1e;
+}
+
+/* Full-area interactive terminal surface (no separate input bar). */
+.term-xterm-host {
   flex: 1 1 auto;
   min-height: 0;
-  margin: 0;
-  padding: 10px 12px;
-  overflow: auto;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: #d0d0d0;
-  overscroll-behavior: contain;
+  width: 100%;
+  padding: 0.25rem 0.35rem 0.35rem;
+  overflow: hidden;
+  cursor: text;
+  position: relative;
 }
 
-.term-output::-webkit-scrollbar {
-  width: 8px;
+.term-xterm-host .xterm {
+  height: 100%;
+  width: 100%;
+  padding: 0;
 }
-.term-output::-webkit-scrollbar-thumb {
+
+.term-xterm-host .xterm-viewport {
+  overflow-y: auto !important;
+}
+
+.term-xterm-host .xterm-viewport::-webkit-scrollbar {
+  width: 0.5rem;
+}
+.term-xterm-host .xterm-viewport::-webkit-scrollbar-thumb {
   background: #333;
-  border-radius: 6px;
+  border-radius: 0.35rem;
 }
-
-.term-input-row {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border-top: 1px solid #222;
-  background: #121212;
-}
-
-.term-prompt {
-  flex: 0 0 auto;
-  color: #7dcea0;
-  font-family: var(--mono);
-  font-size: 13px;
-}
-
-.term-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: none;
-  outline: none;
+.term-xterm-host .xterm-viewport::-webkit-scrollbar-track {
   background: transparent;
-  color: #ececec;
-  font-family: var(--mono);
-  font-size: 12.5px;
 }
 
-.term-input::placeholder {
-  color: #555;
-}
-
-.term-send {
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  color: #9b9b9b;
-  font-size: 14px;
-}
-
-.term-send:hover:not(:disabled) {
-  background: #222;
-  color: #eee;
-}
-
-.term-send:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+/* Ensure helper textarea can receive IME / key events. */
+.term-xterm-host .xterm-helper-textarea {
+  position: absolute;
 }
 
 .file-tree {
@@ -3483,26 +3784,57 @@ html[data-theme="light"] .icon-btn.send {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  background: var(--bg-sidebar);
 }
 
-.file-tree-header {
+.file-tree-toolbar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 10px 4px;
   gap: 8px;
+  /* Extra right padding so actions clear the fixed shell toggle. */
+  padding: 10px 48px 8px 10px;
 }
 
-.file-tree-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-dim);
+.file-tree-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 550;
 }
 
-.file-tree-refresh {
+.file-tree-open-btn:hover {
+  background: var(--bg-hover);
+}
+
+.file-tree-open-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.file-tree-open-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-tree-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.file-tree-refresh,
+.file-tree-close {
   width: 26px;
   height: 26px;
   border-radius: 6px;
@@ -3511,17 +3843,22 @@ html[data-theme="light"] .icon-btn.send {
   line-height: 1;
 }
 
-.file-tree-refresh:hover {
+.file-tree-refresh:hover,
+.file-tree-close:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
 
+.file-tree-close {
+  font-size: 16px;
+}
+
 .file-tree-project {
   flex: 0 0 auto;
-  padding: 2px 12px 8px;
-  font-size: 12.5px;
+  padding: 0 12px 8px;
+  font-size: 12px;
   font-weight: 550;
-  color: var(--text);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3529,13 +3866,24 @@ html[data-theme="light"] .icon-btn.send {
 
 .file-tree-filter {
   flex: 0 0 auto;
+  position: relative;
   padding: 0 10px 8px;
+}
+
+.file-tree-filter-icon {
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  transform: translateY(calc(-50% - 4px));
+  font-size: 12px;
+  color: var(--text-dim);
+  pointer-events: none;
 }
 
 .file-tree-filter input {
   width: 100%;
-  padding: 6px 8px;
-  border-radius: 7px;
+  padding: 7px 8px 7px 26px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   color: var(--text);
@@ -3552,7 +3900,7 @@ html[data-theme="light"] .icon-btn.send {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 0 4px 12px;
+  padding: 0 6px 12px;
   overscroll-behavior: contain;
 }
 
@@ -3567,7 +3915,7 @@ html[data-theme="light"] .icon-btn.send {
 .file-tree-item {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   width: 100%;
   padding: 3px 6px 3px 0;
   border-radius: 6px;
@@ -3595,12 +3943,68 @@ html[data-theme="light"] .icon-btn.send {
   text-align: center;
 }
 
+/* Colored kind icons (Codex-like, no emoji). */
 .file-tree-icon {
   flex: 0 0 auto;
-  width: 16px;
-  font-size: 12px;
-  text-align: center;
-  line-height: 1;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  position: relative;
+  background: var(--text-dim);
+  opacity: 0.85;
+}
+
+.file-tree-icon.kind-dir {
+  background: #6aa8ff;
+  border-radius: 2px 2px 1px 1px;
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.12);
+}
+
+.file-tree-icon.kind-dir.open {
+  background: #8bb8ff;
+}
+
+.file-tree-icon.kind-go {
+  background: #29beb0;
+}
+.file-tree-icon.kind-ts {
+  background: #3b82f6;
+}
+.file-tree-icon.kind-js {
+  background: #ca8a04;
+}
+.file-tree-icon.kind-json {
+  background: #a3a3a3;
+}
+.file-tree-icon.kind-md {
+  background: #64748b;
+}
+.file-tree-icon.kind-py {
+  background: #3776ab;
+}
+.file-tree-icon.kind-rs {
+  background: #dea584;
+}
+.file-tree-icon.kind-css {
+  background: #38bdf8;
+}
+.file-tree-icon.kind-html {
+  background: #e34c26;
+}
+.file-tree-icon.kind-cfg {
+  background: #94a3b8;
+}
+.file-tree-icon.kind-img {
+  background: #c084fc;
+}
+.file-tree-icon.kind-git {
+  background: #f97316;
+}
+.file-tree-icon.kind-docker {
+  background: #2496ed;
+}
+.file-tree-icon.kind-file {
+  background: #9ca3af;
 }
 
 .file-tree-name {
@@ -3621,6 +4025,39 @@ html[data-theme="light"] .icon-btn.send {
 .file-tree-status.error,
 .file-tree-empty.error {
   color: var(--danger);
+}
+
+/* Empty file viewer (files panel open, no selection). */
+.file-viewer-empty-state {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--text-dim);
+  background: var(--bg);
+}
+
+.file-viewer-empty-icon {
+  color: var(--text-dim);
+  opacity: 0.7;
+  margin-bottom: 4px;
+}
+
+.file-viewer-empty-title {
+  font-size: 14px;
+  font-weight: 560;
+  color: var(--text-muted);
+}
+
+.file-viewer-empty-hint {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.45;
 }
 
 /* ── File viewer ───────────────────────────────────── */
@@ -3890,16 +4327,27 @@ html[data-theme="light"] .icon-btn.send {
   font-weight: 600;
 }
 
-/* Narrow windows: keep columns but shrink viewer floor */
-@media (max-width: 1100px) {
-  .shell.shell-viewer-open:not(.shell-right-open) {
-    grid-template-columns: var(--sidebar-w) minmax(0, 1fr) minmax(240px, var(--viewer-w));
+/*
+ * Narrow windows: slightly tighter default panel share so chat keeps room.
+ * (Live drag still writes % via JS; this only affects pure-CSS fallback.)
+ */
+@media (max-width: 68.75rem) {
+  :root,
+  html[data-theme="dark"],
+  html[data-theme="light"] {
+    --sidebar-w: 16%;
+    --right-panel-w: 18%;
+    --viewer-w: 20%;
   }
+}
 
-  .shell.shell-viewer-open.shell-right-open {
-    grid-template-columns:
-      var(--sidebar-w) minmax(0, 1fr) minmax(220px, var(--viewer-w))
-      minmax(160px, var(--right-panel-w));
+@media (max-width: 48rem) {
+  :root,
+  html[data-theme="dark"],
+  html[data-theme="light"] {
+    --sidebar-w: 14%;
+    --right-panel-w: 22%;
+    --viewer-w: 24%;
   }
 }
 

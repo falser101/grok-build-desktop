@@ -1,5 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
 import { homedir, platform } from "node:os";
+import * as pty from "node-pty";
 
 export type TermEvent =
   | { type: "data"; id: string; data: string }
@@ -9,15 +9,14 @@ type TermSession = {
   id: string;
   cwd: string;
   shell: string;
-  /** Active long-running child, if any. */
-  child: ChildProcess | null;
+  pty: pty.IPty;
   killed: boolean;
 };
 
 /**
- * Lightweight shell host for the right-side terminal panel.
- * Runs each submitted line as `shell -c <line>` in the workspace cwd.
- * (No PTY — fine for day-to-day commands; not a full interactive TUI.)
+ * Interactive PTY host for the right-side terminal (VS Code-style).
+ * Spawns a real login shell with a pseudo-terminal so interactive
+ * programs (vim, less, git, etc.) work correctly.
  */
 export class TerminalHost {
   private sessions = new Map<string, TermSession>();
@@ -41,28 +40,76 @@ export class TerminalHost {
 
   private resolveShell(): string {
     if (platform() === "win32") {
-      return process.env.COMSPEC || "cmd.exe";
+      return (
+        process.env.COMSPEC ||
+        process.env.SHELL ||
+        "powershell.exe"
+      );
     }
     return process.env.SHELL || "/bin/bash";
   }
 
-  start(cwd?: string): { id: string; cwd: string; shell: string } {
+  start(
+    cwd?: string,
+    cols = 80,
+    rows = 24,
+  ): { id: string; cwd: string; shell: string } {
     const workDir =
       (cwd && cwd.trim()) || process.env.HOME || homedir() || process.cwd();
     const shell = this.resolveShell();
     const id = `term-${++this.seq}-${Date.now().toString(36)}`;
-    this.sessions.set(id, {
+
+    const isWin = platform() === "win32";
+    // Login shell on Unix so PATH / profile match a normal terminal.
+    const args = isWin ? [] : ["-l"];
+
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (typeof v === "string") env[k] = v;
+    }
+    env.TERM = "xterm-256color";
+    env.COLORTERM = env.COLORTERM || "truecolor";
+    // Avoid forcing non-interactive quirks; PTY is interactive.
+    delete env.ELECTRON_RUN_AS_NODE;
+
+    const spawnOpts: pty.IPtyForkOptions | pty.IWindowsPtyForkOptions = {
+      name: "xterm-256color",
+      cols: Math.max(2, Math.floor(cols)),
+      rows: Math.max(1, Math.floor(rows)),
+      cwd: workDir,
+      env,
+    };
+    if (isWin) {
+      (spawnOpts as pty.IWindowsPtyForkOptions).useConpty = true;
+    }
+
+    let ptyProcess: pty.IPty;
+    try {
+      ptyProcess = pty.spawn(shell, args, spawnOpts);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to spawn shell: ${msg}`);
+    }
+
+    const session: TermSession = {
       id,
       cwd: workDir,
       shell,
-      child: null,
+      pty: ptyProcess,
       killed: false,
+    };
+    this.sessions.set(id, session);
+
+    ptyProcess.onData((data) => {
+      if (session.killed) return;
+      this.emit({ type: "data", id, data });
     });
 
-    this.emit({
-      type: "data",
-      id,
-      data: `# ${shell}\n# cwd: ${workDir}\n# Enter a command and press Enter.\n\n`,
+    ptyProcess.onExit(({ exitCode }) => {
+      if (session.killed) return;
+      session.killed = true;
+      this.sessions.delete(id);
+      this.emit({ type: "exit", id, code: exitCode ?? null });
     });
 
     return { id, cwd: workDir, shell };
@@ -71,50 +118,23 @@ export class TerminalHost {
   write(id: string, data: string): void {
     const s = this.sessions.get(id);
     if (!s || s.killed) return;
-
-    // Treat writes as complete command lines (UI sends line + \n).
-    const line = data.replace(/\r?\n$/, "").trimEnd();
-    if (!line) return;
-
-    // Kill previous long-running command if still active.
-    if (s.child && !s.child.killed) {
-      try {
-        s.child.kill("SIGTERM");
-      } catch {
-        /* ignore */
-      }
-      s.child = null;
+    try {
+      s.pty.write(data);
+    } catch {
+      /* ignore broken pipe */
     }
+  }
 
-    const isWin = platform() === "win32";
-    const args = isWin ? ["/d", "/s", "/c", line] : ["-lc", line];
-    const child = spawn(s.shell, args, {
-      cwd: s.cwd,
-      env: { ...process.env },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    s.child = child;
-
-    const onChunk = (buf: Buffer) => {
-      this.emit({ type: "data", id, data: buf.toString("utf8") });
-    };
-    child.stdout.on("data", onChunk);
-    child.stderr.on("data", onChunk);
-    child.on("error", (err) => {
-      this.emit({
-        type: "data",
-        id,
-        data: `[error] ${err.message}\n`,
-      });
-    });
-    child.on("exit", (code) => {
-      if (s.child === child) s.child = null;
-      if (code != null && code !== 0) {
-        this.emit({ type: "data", id, data: `\n[exit ${code}]\n` });
-      } else {
-        this.emit({ type: "data", id, data: "\n" });
-      }
-    });
+  resize(id: string, cols: number, rows: number): void {
+    const s = this.sessions.get(id);
+    if (!s || s.killed) return;
+    const c = Math.max(2, Math.floor(cols));
+    const r = Math.max(1, Math.floor(rows));
+    try {
+      s.pty.resize(c, r);
+    } catch {
+      /* ignore */
+    }
   }
 
   kill(id: string): void {
@@ -122,19 +142,10 @@ export class TerminalHost {
     if (!s) return;
     s.killed = true;
     this.sessions.delete(id);
-    if (s.child) {
-      try {
-        s.child.kill("SIGTERM");
-      } catch {
-        /* ignore */
-      }
-      setTimeout(() => {
-        try {
-          if (s.child && !s.child.killed) s.child.kill("SIGKILL");
-        } catch {
-          /* ignore */
-        }
-      }, 800);
+    try {
+      s.pty.kill();
+    } catch {
+      /* ignore */
     }
     this.emit({ type: "exit", id, code: 0 });
   }

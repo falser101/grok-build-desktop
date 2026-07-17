@@ -12,6 +12,8 @@ type Props = {
   workspace: string | undefined;
   selectedPath: string | null;
   onSelectFile: (path: string) => void;
+  /** Close the files panel (Codex-style). */
+  onClose?: () => void;
   m: Messages;
 };
 
@@ -21,52 +23,60 @@ type NodeState = {
   error?: string;
 };
 
-function fileIcon(entry: FileEntry, open: boolean): string {
-  if (entry.isDir) return open ? "📂" : "📁";
+/** Codex-like simple file/folder glyph (not emoji). */
+function fileIconKind(entry: FileEntry): string {
+  if (entry.isDir) return "dir";
   const ext = entry.name.includes(".")
     ? entry.name.slice(entry.name.lastIndexOf(".")).toLowerCase()
     : "";
   switch (ext) {
     case ".go":
-      return "🦫";
-    case ".java":
-    case ".kt":
-      return "☕";
+      return "go";
+    case ".ts":
+    case ".tsx":
+      return "ts";
+    case ".js":
+    case ".jsx":
+    case ".mjs":
+    case ".cjs":
+      return "js";
+    case ".json":
+      return "json";
     case ".md":
     case ".mdx":
-      return "📝";
+    case ".markdown":
+      return "md";
+    case ".py":
+      return "py";
+    case ".rs":
+      return "rs";
     case ".css":
     case ".scss":
     case ".less":
-      return "🎨";
-    case ".vue":
+      return "css";
     case ".html":
     case ".htm":
-    case ".svelte":
-      return "🌐";
-    case ".ts":
-    case ".tsx":
-    case ".js":
-    case ".jsx":
-      return "📜";
-    case ".json":
-    case ".yaml":
+      return "html";
     case ".yml":
+    case ".yaml":
     case ".toml":
-      return "⚙️";
-    case ".py":
-      return "🐍";
-    case ".rs":
-      return "🦀";
+      return "cfg";
     case ".png":
     case ".jpg":
     case ".jpeg":
     case ".gif":
     case ".svg":
     case ".webp":
-      return "🖼";
+      return "img";
+    case ".dockerignore":
+    case ".gitignore":
+      return "git";
+    case ".dockerfile":
+      return "docker";
     default:
-      return "📄";
+      if (entry.name === "Dockerfile" || entry.name === "Makefile") return "cfg";
+      if (entry.name === "GOAL.md" || entry.name === "README.md") return "md";
+      return "file";
   }
 }
 
@@ -123,11 +133,14 @@ function TreeNode({
         onKeyDown={onKey}
       >
         <span className="file-tree-chev" aria-hidden>
-          {entry.isDir ? (isOpen ? "▾" : "▸") : " "}
+          {entry.isDir ? (isOpen ? "▾" : "▸") : ""}
         </span>
-        <span className="file-tree-icon" aria-hidden>
-          {fileIcon(entry, Boolean(isOpen))}
-        </span>
+        <span
+          className={`file-tree-icon kind-${fileIconKind(entry)}${
+            entry.isDir && isOpen ? " open" : ""
+          }`}
+          aria-hidden
+        />
         <span className="file-tree-name">{entry.name}</span>
       </button>
       {entry.isDir && isOpen ? (
@@ -170,6 +183,7 @@ function FileTreeInner({
   workspace,
   selectedPath,
   onSelectFile,
+  onClose,
   m,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([""]));
@@ -235,80 +249,104 @@ function FileTreeInner({
     return e.name.toLowerCase().includes(q);
   });
 
-  if (!workspace) {
-    return (
-      <div className="file-tree">
-        <div className="file-tree-header">
-          <span className="file-tree-title">{m.filesTitle}</span>
-        </div>
-        <div className="file-tree-empty">{m.filesNoWorkspace}</div>
-      </div>
-    );
-  }
+  const projectName = workspace
+    ? workspace.replace(/\\/g, "/").split("/").filter(Boolean).pop() ||
+      workspace
+    : "";
 
-  const projectName =
-    workspace.replace(/\\/g, "/").split("/").filter(Boolean).pop() ||
-    workspace;
+  const refresh = () => {
+    setNodeState({});
+    void loadDir("");
+    for (const p of expanded) {
+      if (p) void loadDir(p);
+    }
+  };
 
   return (
     <div className="file-tree">
-      <div className="file-tree-header">
-        <span className="file-tree-title" title={workspace}>
-          {m.filesTitle}
-        </span>
-        <button
-          type="button"
-          className="file-tree-refresh"
-          title={m.filesRefresh}
-          aria-label={m.filesRefresh}
-          onClick={() => {
-            setNodeState({});
-            void loadDir("");
-            for (const p of expanded) {
-              if (p) void loadDir(p);
-            }
-          }}
-        >
-          ↻
+      <div className="file-tree-toolbar">
+        <button type="button" className="file-tree-open-btn" title={workspace}>
+          <span className="file-tree-open-icon" aria-hidden>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.1 1.3h5.1A1.2 1.2 0 0 1 13.5 5.5v6.3a1.2 1.2 0 0 1-1.2 1.2H3.7a1.2 1.2 0 0 1-1.2-1.2V4.2Z"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          <span className="file-tree-open-label">{m.openFileTitle}</span>
         </button>
+        <div className="file-tree-toolbar-actions">
+          <button
+            type="button"
+            className="file-tree-refresh"
+            title={m.filesRefresh}
+            aria-label={m.filesRefresh}
+            onClick={refresh}
+          >
+            ↻
+          </button>
+          {onClose ? (
+            <button
+              type="button"
+              className="file-tree-close"
+              title={m.sidePanelToggleHide}
+              aria-label={m.sidePanelToggleHide}
+              onClick={onClose}
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
       </div>
-      <div className="file-tree-project" title={workspace}>
-        {projectName}
-      </div>
-      <div className="file-tree-filter">
-        <input
-          type="search"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder={m.filesFilter}
-          aria-label={m.filesFilter}
-        />
-      </div>
-      <div className="file-tree-scroll" role="tree">
-        {rootError ? (
-          <div className="file-tree-empty error">{rootError}</div>
-        ) : null}
-        {root?.loading && !root.children ? (
-          <div className="file-tree-empty">{m.filesLoading}</div>
-        ) : null}
-        {!root?.loading && visibleChildren.length === 0 && !rootError ? (
-          <div className="file-tree-empty">
-            {q ? m.filesNoMatch : m.filesEmpty}
+      {!workspace ? (
+        <div className="file-tree-empty">{m.filesNoWorkspace}</div>
+      ) : (
+        <>
+          <div className="file-tree-project" title={workspace}>
+            {projectName}
           </div>
-        ) : null}
-        {visibleChildren.map((entry) => (
-          <TreeNode
-            key={entry.path}
-            entry={entry}
-            depth={0}
-            selectedPath={selectedPath}
-            expanded={expanded}
-            nodeState={nodeState}
-            onToggle={onToggle}
-            onSelectFile={onSelectFile}
-          />
-        ))}
-      </div>
+          <div className="file-tree-filter">
+            <span className="file-tree-filter-icon" aria-hidden>
+              ⌕
+            </span>
+            <input
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder={m.filesFilter}
+              aria-label={m.filesFilter}
+            />
+          </div>
+          <div className="file-tree-scroll" role="tree">
+            {rootError ? (
+              <div className="file-tree-empty error">{rootError}</div>
+            ) : null}
+            {root?.loading && !root.children ? (
+              <div className="file-tree-empty">{m.filesLoading}</div>
+            ) : null}
+            {!root?.loading && visibleChildren.length === 0 && !rootError ? (
+              <div className="file-tree-empty">
+                {q ? m.filesNoMatch : m.filesEmpty}
+              </div>
+            ) : null}
+            {visibleChildren.map((entry) => (
+              <TreeNode
+                key={entry.path}
+                entry={entry}
+                depth={0}
+                selectedPath={selectedPath}
+                expanded={expanded}
+                nodeState={nodeState}
+                onToggle={onToggle}
+                onSelectFile={onSelectFile}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

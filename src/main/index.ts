@@ -131,10 +131,12 @@ function configureLinuxDisplayAndIme(): void {
 configureLinuxDisplayAndIme();
 
 /**
- * Electron's default menu is File / Edit / View / Window / Help.
- * On Linux it renders as a system light-themed bar that clashes with the dark
- * chat UI. We hide it on Win/Linux; on macOS keep a minimal menu (required
- * for the app menu + standard Edit shortcuts in the menu bar).
+ * Application menu wires platform accelerators (Ctrl/Cmd+C/V/X/A, Undo…).
+ *
+ * On Win/Linux, `Menu.setApplicationMenu(null)` removes those roles entirely —
+ * selection copy/paste stops working. Keep a minimal Edit menu and hide the
+ * native bar via `autoHideMenuBar` so we don't flash a light File/Edit strip.
+ * macOS still needs app + window menus in the system menu bar.
  */
 function setupApplicationMenu(): void {
   if (process.platform === "darwin") {
@@ -147,7 +149,63 @@ function setupApplicationMenu(): void {
     );
     return;
   }
-  Menu.setApplicationMenu(null);
+
+  // Explicit roles (not only role: "editMenu") so accelerators are registered
+  // even when the menu bar is auto-hidden.
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "Edit",
+        submenu: [
+          { role: "undo" },
+          { role: "redo" },
+          { type: "separator" },
+          { role: "cut" },
+          { role: "copy" },
+          { role: "paste" },
+          { role: "delete" },
+          { type: "separator" },
+          { role: "selectAll" },
+        ],
+      },
+    ]),
+  );
+}
+
+/**
+ * Native right-click Edit menu for selected text and editable fields.
+ * Only pops when there is something useful to do (avoids clashing with
+ * in-app session context menus on empty non-editable clicks).
+ */
+function attachEditContextMenu(win: BrowserWindow): void {
+  win.webContents.on("context-menu", (_event, params) => {
+    const { editFlags, isEditable, selectionText } = params;
+    const hasSelection = Boolean(selectionText && selectionText.trim());
+    if (!isEditable && !hasSelection) return;
+
+    const items: Electron.MenuItemConstructorOptions[] = [];
+
+    if (isEditable) {
+      items.push(
+        { role: "undo", enabled: editFlags.canUndo },
+        { role: "redo", enabled: editFlags.canRedo },
+        { type: "separator" },
+        { role: "cut", enabled: editFlags.canCut },
+        { role: "copy", enabled: editFlags.canCopy },
+        { role: "paste", enabled: editFlags.canPaste },
+        { role: "delete", enabled: editFlags.canDelete },
+        { type: "separator" },
+        { role: "selectAll", enabled: editFlags.canSelectAll },
+      );
+    } else {
+      items.push(
+        { role: "copy", enabled: editFlags.canCopy },
+        { role: "selectAll", enabled: editFlags.canSelectAll },
+      );
+    }
+
+    Menu.buildFromTemplate(items).popup({ window: win });
+  });
 }
 
 function createWindow(): void {
@@ -159,7 +217,8 @@ function createWindow(): void {
     title: "Grok Build",
     backgroundColor: "#1a1a1a",
     show: false,
-    // No stock menu strip; Alt shouldn't pop a light File/Edit bar either.
+    // Keep Edit accelerators from setupApplicationMenu without a permanent
+    // system light menu strip (press Alt to reveal on Win/Linux).
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, "../preload/index.mjs"),
@@ -168,6 +227,8 @@ function createWindow(): void {
       sandbox: false,
     },
   });
+
+  attachEditContextMenu(mainWindow);
 
   backend.onEvent((event) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -380,18 +441,32 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle("term:start", (_e, cwd?: string) => {
-    const root =
-      (typeof cwd === "string" && cwd.trim()) ||
-      backend.snapshot().workspace ||
-      undefined;
-    return terminalHost.start(root);
-  });
+  ipcMain.handle(
+    "term:start",
+    (_e, cwd?: string, cols?: number, rows?: number) => {
+      const root =
+        (typeof cwd === "string" && cwd.trim()) ||
+        backend.snapshot().workspace ||
+        undefined;
+      const c = typeof cols === "number" && cols > 0 ? cols : 80;
+      const r = typeof rows === "number" && rows > 0 ? rows : 24;
+      return terminalHost.start(root, c, r);
+    },
+  );
 
   ipcMain.handle("term:write", (_e, id: string, data: string) => {
     if (typeof id !== "string" || typeof data !== "string") return;
     terminalHost.write(id, data);
   });
+
+  ipcMain.handle(
+    "term:resize",
+    (_e, id: string, cols: number, rows: number) => {
+      if (typeof id !== "string") return;
+      if (typeof cols !== "number" || typeof rows !== "number") return;
+      terminalHost.resize(id, cols, rows);
+    },
+  );
 
   ipcMain.handle("term:kill", (_e, id: string) => {
     if (typeof id !== "string") return;
@@ -619,5 +694,6 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  terminalHost.killAll();
   void backend.stop();
 });
