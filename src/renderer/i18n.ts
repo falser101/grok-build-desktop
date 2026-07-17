@@ -98,6 +98,29 @@ export interface Messages {
   attachFiles: string;
   cancel: string;
   send: string;
+  /** Composer placeholder while a turn is running. */
+  placeholderBusy: string;
+  /** Prompt queue (busy follow-ups). */
+  queueTitle: string;
+  queueCount: string;
+  queueHintBusy: string;
+  queueClear: string;
+  queueSendNow: string;
+  queueSendNowHint: string;
+  queueSendNowShortcut: string;
+  queueRemove: string;
+  queueAction: string;
+  queueAttachmentsOnly: string;
+  queueEmptyItem: string;
+  /** Prompt history (↑ / /history). */
+  historyBrowseStatus: string;
+  historyBrowseHint: string;
+  historySearchTitle: string;
+  historySearchPlaceholder: string;
+  historySearchClose: string;
+  historySearchHint: string;
+  historyEmpty: string;
+  historyNoMatches: string;
   permissionsMvp: string;
   permissionTitle: string;
   permissionHint: string;
@@ -381,10 +404,31 @@ const en: Messages = {
   tokenUsage: "Context tokens: {used} used / {total} window",
   placeholderReady: "Describe a task…  / commands  ·  @ files",
   placeholderWaiting: "Waiting for agent…",
+  placeholderBusy:
+    "Agent is working — Enter to queue · Ctrl+Enter to send now…",
   noMatches: "No matches for",
   attachFiles: "Attach files",
   cancel: "Cancel",
   send: "Send",
+  queueTitle: "Queued messages",
+  queueCount: "{n} queued",
+  queueHintBusy: "Sends when the current turn finishes",
+  queueClear: "Clear",
+  queueSendNow: "Send now",
+  queueSendNowHint: "Cancel current turn and send this next",
+  queueSendNowShortcut: "Ctrl+Enter",
+  queueRemove: "Remove from queue",
+  queueAction: "Queue",
+  queueAttachmentsOnly: "{n} attachment(s)",
+  queueEmptyItem: "(empty)",
+  historyBrowseStatus: "History {i}/{n}",
+  historyBrowseHint: "↑↓ step · Esc clear · type to edit",
+  historySearchTitle: "Prompt history",
+  historySearchPlaceholder: "Filter prompts…",
+  historySearchClose: "Close",
+  historySearchHint: "↑↓ · Enter insert · Esc close · also /history or Ctrl+R",
+  historyEmpty: "No prompts in history yet",
+  historyNoMatches: "No matching prompts",
   permissionsMvp: "Permissions: confirm each action",
   permissionTitle: "Permission required",
   permissionHint: "↑↓ to choose · Enter to confirm · Esc to cancel",
@@ -526,10 +570,10 @@ const en: Messages = {
   openFileTitle: "Open file",
   openFileEmpty: "Open a file",
   openFileEmptyHint: "Select a file from the workspace tree",
-  resizeSidebar: "Drag to resize sidebar (drag small to collapse)",
+  resizeSidebar: "Drag to resize sidebar (drag small to collapse). Ctrl+B toggles.",
   resizeRightPanel: "Drag to resize panel (drag small to collapse)",
   resizeViewer: "Drag to resize file preview (drag small to close)",
-  sidebarExpand: "Expand sidebar",
+  sidebarExpand: "Expand sidebar (Ctrl+B)",
   workspaceLabel: "Workspace",
   workspaceEmpty: "No workspace",
   workspacePick: "Select workspace",
@@ -675,10 +719,30 @@ const zh: Messages = {
   tokenUsage: "上下文 tokens：已用 {used} / 窗口 {total}",
   placeholderReady: "描述任务…  / 命令  ·  @ 文件",
   placeholderWaiting: "等待 agent…",
+  placeholderBusy: "Agent 工作中 — Enter 排队 · Ctrl+Enter 立即发送…",
   noMatches: "没有匹配",
   attachFiles: "添加附件",
   cancel: "取消",
   send: "发送",
+  queueTitle: "排队消息",
+  queueCount: "已排队 {n} 条",
+  queueHintBusy: "当前回合结束后自动发送",
+  queueClear: "清空",
+  queueSendNow: "立即发送",
+  queueSendNowHint: "取消当前回合并紧接着发送这条",
+  queueSendNowShortcut: "Ctrl+Enter",
+  queueRemove: "从队列移除",
+  queueAction: "排队",
+  queueAttachmentsOnly: "{n} 个附件",
+  queueEmptyItem: "（空）",
+  historyBrowseStatus: "历史 {i}/{n}",
+  historyBrowseHint: "↑↓ 切换 · Esc 清空 · 输入可编辑",
+  historySearchTitle: "Prompt 历史",
+  historySearchPlaceholder: "过滤历史…",
+  historySearchClose: "关闭",
+  historySearchHint: "↑↓ · Enter 填入 · Esc 关闭 · 也可用 /history 或 Ctrl+R",
+  historyEmpty: "还没有历史 prompt",
+  historyNoMatches: "没有匹配的历史",
   permissionsMvp: "权限：每次操作需确认",
   permissionTitle: "需要确认权限",
   permissionHint: "↑↓ 选择 · Enter 确认 · Esc 取消",
@@ -818,10 +882,10 @@ const zh: Messages = {
   openFileTitle: "打开文件",
   openFileEmpty: "打开文件",
   openFileEmptyHint: "从工作区目录树中选择文件",
-  resizeSidebar: "拖动调整左侧宽度（拖到很小可折叠）",
+  resizeSidebar: "拖动调整左侧宽度（拖到很小可折叠）。Ctrl+B 开关侧栏。",
   resizeRightPanel: "拖动调整右侧宽度（拖到很小可折叠）",
   resizeViewer: "拖动调整文件预览宽度（拖到很小可关闭）",
-  sidebarExpand: "展开左侧栏",
+  sidebarExpand: "展开左侧栏 (Ctrl+B)",
   workspaceLabel: "工作区",
   workspaceEmpty: "未选择工作区",
   workspacePick: "选择工作区",

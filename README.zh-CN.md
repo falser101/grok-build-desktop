@@ -36,7 +36,7 @@ Electron UI  →  ACP / JSON-RPC  →  grok agent serve （本机 loopback WebSo
 | **侧栏状态** | 运行中（spinner）、加载中、等待审批 |
 | **工具** | 工具卡片、可展开输出、行级 Diff |
 | **工作区** | 文件树、语法高亮预览、`@` 插入路径 |
-| **输入** | 附件、拖拽、粘贴图片、斜杠命令 |
+| **输入** | 附件、拖拽、粘贴图片、斜杠命令；**忙时消息队列**；**Prompt 历史**（↑ / `/history` / Ctrl+R） |
 | **模型** | 模型切换 / Agent·Plan·Ask / reasoning effort / Token 用量 |
 | **权限** | 确认面板 + 队列 + Always-approve（YOLO） |
 | **账号** | 登录 / 登出 / API Key / 订阅与用量 |
@@ -50,7 +50,7 @@ Electron UI  →  ACP / JSON-RPC  →  grok agent serve （本机 loopback WebSo
 - 挂接外部正在运行的 TUI / leader-socket 会话  
 - 带内置 `grok` 二进制的完整安装包  
 - 自动更新、代码签名  
-- 内嵌终端、完整命令面板（`Ctrl+K`）、Plan/TODO 面板  
+- 完整命令面板（`Ctrl+K`）、Plan/TODO 面板  
 
 ---
 

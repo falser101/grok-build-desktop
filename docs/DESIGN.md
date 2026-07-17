@@ -289,10 +289,13 @@ Split into `packages/*` when a second consumer appears.
 
 - [x] MCP / settings UI
 - [x] Skills / plugins / hooks management UI
-- [ ] Embedded terminal
+- [x] Embedded terminal (right panel, xterm + PTY)
 - [ ] Optional leader-socket multi-client mode
 - [ ] Auto-update of app + binary
-- [ ] Plan/TODO panel, message queue while busy, copy/export chat
+- [x] Message queue while busy (Enter queue / Ctrl+Enter send-now / auto-drain)
+- [x] Prompt history (↑ browse / `/history` + Ctrl+R search via `x.ai/prompt_history`)
+- [x] Copy / export conversation as Markdown
+- [ ] Plan/TODO panel
 - [ ] Full command palette + global shortcut system
 
 ---

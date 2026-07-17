@@ -390,6 +390,17 @@ function registerIpc(): void {
     },
   );
 
+  ipcMain.handle(
+    "agent:listPromptHistory",
+    async (_e, cwd: string, filterSessionId?: string) => {
+      if (typeof cwd !== "string" || !cwd.trim()) return [];
+      return backend.listPromptHistory(
+        cwd.trim(),
+        typeof filterSessionId === "string" ? filterSessionId : undefined,
+      );
+    },
+  );
+
   ipcMain.handle("agent:cancel", async () => {
     await backend.cancel();
   });

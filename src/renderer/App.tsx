@@ -649,6 +649,55 @@ const ChatTimeline = memo(function ChatTimeline({
 });
 
 type MenuKind = "model" | "mode" | "effort" | null;
+
+/** Follow-up prompt waiting for the current turn to finish. */
+type QueuedPrompt = {
+  id: string;
+  text: string;
+  attachments: PromptAttachment[];
+};
+
+function newQueueId(): string {
+  return `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function previewQueueText(text: string, max = 72): string {
+  const one = text.replace(/\s+/g, " ").trim();
+  if (!one) return "";
+  return one.length > max ? `${one.slice(0, max)}…` : one;
+}
+
+/** Newest-first; drop consecutive duplicates and empty strings. */
+function pushHistoryEntry(list: string[], text: string, max = 500): string[] {
+  const t = text.trim();
+  if (!t) return list;
+  if (list[0] === t) return list;
+  return [t, ...list].slice(0, max);
+}
+
+function filterHistoryEntries(entries: string[], query: string): string[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return entries;
+  const tokens = q.split(/\s+/).filter(Boolean);
+  return entries.filter((e) => {
+    const lower = e.toLowerCase();
+    return tokens.every((tok) => lower.includes(tok));
+  });
+}
+
+function userPromptsFromTimeline(timeline: TimelineItem[]): string[] {
+  const chrono: string[] = [];
+  for (const item of timeline) {
+    if (item.kind !== "user") continue;
+    const t = item.text.trim();
+    if (!t) continue;
+    // Skip pure image placeholders from the backend display text.
+    if (/^\[\d+ images?\]$/i.test(t)) continue;
+    if (chrono.length > 0 && chrono[chrono.length - 1] === t) continue;
+    chrono.push(t);
+  }
+  return chrono.reverse();
+}
 type MainView = "chat" | "settings" | "extensions";
 
 interface SessionCtxMenu {
@@ -718,6 +767,39 @@ export function App() {
   const [extTab, setExtTab] = useState<ExtTab>("mcp");
   const [dragOver, setDragOver] = useState(false);
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
+  /**
+   * Per-session follow-up queue. While a turn is busy, Enter enqueues here;
+   * items auto-send when the session becomes idle (FIFO).
+   */
+  const [queuesBySession, setQueuesBySession] = useState<
+    Record<string, QueuedPrompt[]>
+  >({});
+  /** Prevents double-drain while a dequeued prompt is still starting. */
+  const drainLockRef = useRef(false);
+  /**
+   * Cancel-and-send target: runs before the normal FIFO queue once busy clears.
+   * Scoped to a sessionId so a switch mid-cancel does not mis-fire.
+   */
+  const pendingImmediateRef = useRef<{
+    sessionId: string;
+    text: string;
+    attachments: PromptAttachment[];
+  } | null>(null);
+  /**
+   * Prompt history (newest first). Loaded from agent `x.ai/prompt_history`
+   * and updated locally on each send so ↑ recall works immediately.
+   */
+  const [promptHistory, setPromptHistory] = useState<string[]>([]);
+  /** ↑/↓ browse mode over `promptHistory` (fills the composer). */
+  const [historyBrowse, setHistoryBrowse] = useState<{
+    index: number;
+  } | null>(null);
+  /** /history searchable overlay. */
+  const [historySearchOpen, setHistorySearchOpen] = useState(false);
+  const [historySearchQuery, setHistorySearchQuery] = useState("");
+  const [historySearchIndex, setHistorySearchIndex] = useState(0);
+  const historySearchInputRef = useRef<HTMLInputElement | null>(null);
+  const historyListRef = useRef<HTMLDivElement | null>(null);
   const [atSuggest, setAtSuggest] = useState<PathSuggestion[] | null>(null);
   const [atQuery, setAtQuery] = useState("");
   const [atIndex, setAtIndex] = useState(0);
@@ -1835,12 +1917,220 @@ export function App() {
     }
   }, []);
 
+  const rememberPrompt = useCallback((text: string) => {
+    setPromptHistory((prev) => pushHistoryEntry(prev, text));
+  }, []);
+
+  const exitHistoryBrowse = useCallback(() => {
+    setHistoryBrowse(null);
+  }, []);
+
+  const applyHistoryEntry = useCallback(
+    (text: string) => {
+      setComposerText(text);
+      setSlashSuggest(null);
+      setAtSuggest(null);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        const pos = el.value.length;
+        el.setSelectionRange(pos, pos);
+        el.style.height = "auto";
+        el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+      });
+    },
+    [setComposerText],
+  );
+
+  const openHistorySearch = useCallback(
+    (filter?: string) => {
+      setHistorySearchQuery(filter ?? "");
+      setHistorySearchIndex(0);
+      setHistorySearchOpen(true);
+      setHistoryBrowse(null);
+      setSlashSuggest(null);
+      setAtSuggest(null);
+      requestAnimationFrame(() => historySearchInputRef.current?.focus());
+    },
+    [],
+  );
+
+  const closeHistorySearch = useCallback(() => {
+    setHistorySearchOpen(false);
+    setHistorySearchQuery("");
+    setHistorySearchIndex(0);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  const pickHistoryEntry = useCallback(
+    (text: string) => {
+      applyHistoryEntry(text);
+      setHistorySearchOpen(false);
+      setHistorySearchQuery("");
+      setHistorySearchIndex(0);
+      setHistoryBrowse(null);
+    },
+    [applyHistoryEntry],
+  );
+
+  // Load prompt history when workspace / session changes (agent file + timeline fallback).
+  useEffect(() => {
+    let cancelled = false;
+    const cwd = snap.workspace;
+    if (!cwd || snap.connection !== "ready") {
+      if (!cwd) setPromptHistory([]);
+      return;
+    }
+    void (async () => {
+      let fromAgent: string[] = [];
+      try {
+        fromAgent = await window.desktop.listPromptHistory(
+          cwd,
+          snap.sessionId,
+        );
+      } catch {
+        fromAgent = [];
+      }
+      if (cancelled) return;
+      const fromTimeline = userPromptsFromTimeline(snap.timeline);
+      // Prefer agent history; seed with timeline when agent returns empty/unavailable.
+      if (fromAgent.length > 0) {
+        setPromptHistory(fromAgent);
+      } else if (fromTimeline.length > 0) {
+        setPromptHistory(fromTimeline);
+      } else {
+        setPromptHistory([]);
+      }
+      setHistoryBrowse(null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally not depending on timeline every tick — only session/cwd/connection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- timeline used as cold fallback seed
+  }, [snap.workspace, snap.sessionId, snap.connection]);
+
+  // After session load finishes replaying, merge timeline user prompts if history still empty.
+  useEffect(() => {
+    if (snap.replaying || !snap.sessionId) return;
+    if (promptHistory.length > 0) return;
+    const fromTimeline = userPromptsFromTimeline(snap.timeline);
+    if (fromTimeline.length > 0) setPromptHistory(fromTimeline);
+  }, [snap.replaying, snap.sessionId, snap.timeline, promptHistory.length]);
+
+  const filteredHistory = useMemo(
+    () => filterHistoryEntries(promptHistory, historySearchQuery),
+    [promptHistory, historySearchQuery],
+  );
+
+  // Keep highlighted history-search row in view.
+  useEffect(() => {
+    if (!historySearchOpen) return;
+    const root = historyListRef.current;
+    if (!root) return;
+    const el = root.querySelector<HTMLElement>(
+      `[data-history-idx="${historySearchIndex}"]`,
+    );
+    el?.scrollIntoView({ block: "nearest" });
+  }, [historySearchOpen, historySearchIndex, filteredHistory.length]);
+
+  const promptQueue = useMemo(() => {
+    if (!snap.sessionId) return [] as QueuedPrompt[];
+    return queuesBySession[snap.sessionId] ?? [];
+  }, [queuesBySession, snap.sessionId]);
+
+  const enqueuePrompt = useCallback(
+    (sessionId: string, text: string, atts: PromptAttachment[]) => {
+      const item: QueuedPrompt = {
+        id: newQueueId(),
+        text,
+        attachments: atts.map((a) => ({ ...a })),
+      };
+      setQueuesBySession((prev) => ({
+        ...prev,
+        [sessionId]: [...(prev[sessionId] ?? []), item],
+      }));
+    },
+    [],
+  );
+
+  const removeQueuedPrompt = useCallback(
+    (sessionId: string, id: string) => {
+      setQueuesBySession((prev) => {
+        const list = prev[sessionId];
+        if (!list?.length) return prev;
+        return {
+          ...prev,
+          [sessionId]: list.filter((q) => q.id !== id),
+        };
+      });
+    },
+    [],
+  );
+
+  const clearSessionQueue = useCallback((sessionId: string) => {
+    setQueuesBySession((prev) => {
+      if (!prev[sessionId]?.length) return prev;
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
+  }, []);
+
+  /** Deliver a prompt to the agent (session must exist / be creatable). */
+  const dispatchAgentPrompt = useCallback(
+    async (text: string, atts: PromptAttachment[]) => {
+      const ok = await ensureSession();
+      if (!ok) return;
+      await window.desktop.sendPrompt({ text, attachments: atts });
+    },
+    [ensureSession],
+  );
+
+  /**
+   * Cancel the in-flight turn (if any) and send this prompt as soon as idle.
+   * Used for Ctrl+Enter / "Send now" on a queued row.
+   */
+  const requestImmediateSend = useCallback(
+    async (
+      text: string,
+      atts: PromptAttachment[],
+      opts?: { sessionId?: string },
+    ) => {
+      const sid = opts?.sessionId ?? snap.sessionId;
+      // Mid-turn on this session: park payload, cancel, drain on idle.
+      if (snap.busy && sid && sid === snap.sessionId) {
+        pendingImmediateRef.current = {
+          sessionId: sid,
+          text,
+          attachments: atts.map((a) => ({ ...a })),
+        };
+        try {
+          await window.desktop.cancel();
+        } catch (err) {
+          pendingImmediateRef.current = null;
+          setLocalError(err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
+      try {
+        await dispatchAgentPrompt(text, atts);
+      } catch (err) {
+        setLocalError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [snap.sessionId, snap.busy, dispatchAgentPrompt],
+  );
+
   const onSend = useCallback(async () => {
     const text = (textareaRef.current?.value ?? draftRef.current).trim();
     if (!text && attachments.length === 0) return;
     setLocalError(null);
     setSlashSuggest(null);
     setAtSuggest(null);
+    exitHistoryBrowse();
 
     // Local slash commands (/new, /model, …) before going to the agent.
     if (text.startsWith("/") && attachments.length === 0) {
@@ -1861,6 +2151,11 @@ export function App() {
           setLocalError(result.message);
           return;
         }
+        if (result.kind === "open_history") {
+          clearComposerText();
+          openHistorySearch(result.filter);
+          return;
+        }
         if (result.kind === "handled") {
           clearComposerText();
           return;
@@ -1871,9 +2166,16 @@ export function App() {
           clearComposerText();
           setAttachments([]);
           if (!follow) return;
-          const ok = await ensureSession();
-          if (!ok) return;
-          await window.desktop.sendPrompt({ text: follow });
+          rememberPrompt(follow);
+          if (snap.busy && snap.sessionId) {
+            enqueuePrompt(snap.sessionId, follow, []);
+            return;
+          }
+          try {
+            await dispatchAgentPrompt(follow, []);
+          } catch (err) {
+            setLocalError(err instanceof Error ? err.message : String(err));
+          }
           return;
         }
         // passthrough → agent
@@ -1883,24 +2185,147 @@ export function App() {
       }
     }
 
+    const atts = attachments.map((a) => ({ ...a }));
+    clearComposerText();
+    setAttachments([]);
+    if (text) rememberPrompt(text);
+
+    // Busy turn: queue follow-up (FIFO, auto-sends when idle).
+    if (snap.busy) {
+      if (!snap.sessionId) {
+        setLocalError(m.chooseWorkspaceFirst);
+        return;
+      }
+      enqueuePrompt(snap.sessionId, text, atts);
+      return;
+    }
+
     try {
-      const ok = await ensureSession();
-      if (!ok) return;
-      clearComposerText();
-      setAttachments([]);
-      await window.desktop.sendPrompt({ text, attachments });
+      await dispatchAgentPrompt(text, atts);
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
   }, [
     attachments,
-    ensureSession,
     clearComposerText,
+    dispatchAgentPrompt,
+    enqueuePrompt,
+    exitHistoryBrowse,
+    openHistorySearch,
+    rememberPrompt,
     snap.availableModels,
     snap.modelId,
     snap.workspace,
     snap.alwaysApprove,
+    snap.busy,
+    snap.sessionId,
+    m.chooseWorkspaceFirst,
   ]);
+
+  /**
+   * Ctrl+Enter / empty-Enter mid-turn: cancel current turn and send
+   * the draft (or the selected / top queued item) immediately after.
+   */
+  const onSendNow = useCallback(
+    async (queuedId?: string) => {
+      setLocalError(null);
+      setSlashSuggest(null);
+      setAtSuggest(null);
+      exitHistoryBrowse();
+
+      const sid = snap.sessionId;
+      if (queuedId && sid) {
+        const list = queuesBySession[sid] ?? [];
+        const item = list.find((q) => q.id === queuedId);
+        if (!item) return;
+        removeQueuedPrompt(sid, queuedId);
+        if (item.text) rememberPrompt(item.text);
+        await requestImmediateSend(item.text, item.attachments, {
+          sessionId: sid,
+        });
+        return;
+      }
+
+      const text = (textareaRef.current?.value ?? draftRef.current).trim();
+      const atts = attachments.map((a) => ({ ...a }));
+      if (text || atts.length > 0) {
+        // Local slash that only mutates client state still runs immediately.
+        if (text.startsWith("/") && atts.length === 0) {
+          try {
+            const result = await tryHandleLocalSlash(text, {
+              models: snap.availableModels,
+              modelId: snap.modelId,
+              workspace: snap.workspace,
+              alwaysApprove: snap.alwaysApprove,
+              newSession: (ws) => window.desktop.newSession(ws),
+              prepareNewChat: () => window.desktop.prepareNewChat(),
+              setModel: (id, effort) => window.desktop.setModel(id, effort),
+              setMode: (mode) => window.desktop.setMode(mode),
+              setAlwaysApprove: (on) => window.desktop.setAlwaysApprove(on),
+              pickFolder: () => window.desktop.pickFolder(),
+            });
+            if (result.kind === "error") {
+              setLocalError(result.message);
+              return;
+            }
+            if (result.kind === "open_history") {
+              clearComposerText();
+              openHistorySearch(result.filter);
+              return;
+            }
+            if (result.kind === "handled") {
+              clearComposerText();
+              return;
+            }
+            if (result.kind === "send") {
+              const follow = result.text.trim();
+              clearComposerText();
+              setAttachments([]);
+              if (!follow) return;
+              rememberPrompt(follow);
+              await requestImmediateSend(follow, []);
+              return;
+            }
+          } catch (err) {
+            setLocalError(err instanceof Error ? err.message : String(err));
+            return;
+          }
+        }
+        clearComposerText();
+        setAttachments([]);
+        if (text) rememberPrompt(text);
+        await requestImmediateSend(text, atts);
+        return;
+      }
+
+      // Empty composer: force-send the top queued follow-up.
+      if (sid) {
+        const top = (queuesBySession[sid] ?? [])[0];
+        if (top) {
+          removeQueuedPrompt(sid, top.id);
+          if (top.text) rememberPrompt(top.text);
+          await requestImmediateSend(top.text, top.attachments, {
+            sessionId: sid,
+          });
+        }
+      }
+    },
+    [
+      snap.sessionId,
+      snap.availableModels,
+      snap.modelId,
+      snap.workspace,
+      snap.alwaysApprove,
+      attachments,
+      queuesBySession,
+      removeQueuedPrompt,
+      requestImmediateSend,
+      clearComposerText,
+      exitHistoryBrowse,
+      openHistorySearch,
+      rememberPrompt,
+    ],
+  );
 
   const onCancel = useCallback(async () => {
     try {
@@ -1909,6 +2334,65 @@ export function App() {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
   }, []);
+
+  // When the active session goes idle, deliver pendingImmediate then FIFO queue.
+  useEffect(() => {
+    if (drainLockRef.current) return;
+    if (snap.busy || snap.replaying) return;
+    if (snap.connection !== "ready") return;
+    const sid = snap.sessionId;
+    if (!sid) return;
+
+    const immediate = pendingImmediateRef.current;
+    const queue = queuesBySession[sid] ?? [];
+    if (!immediate || immediate.sessionId !== sid) {
+      if (queue.length === 0) return;
+    }
+
+    // Lock synchronously so a re-render before await cannot double-drain.
+    drainLockRef.current = true;
+
+    const run = async (
+      text: string,
+      atts: PromptAttachment[],
+      requeue?: QueuedPrompt,
+    ) => {
+      try {
+        await dispatchAgentPrompt(text, atts);
+      } catch (err) {
+        if (requeue) {
+          setQueuesBySession((prev) => ({
+            ...prev,
+            [sid]: [requeue, ...(prev[sid] ?? [])],
+          }));
+        }
+        setLocalError(err instanceof Error ? err.message : String(err));
+      } finally {
+        drainLockRef.current = false;
+      }
+    };
+
+    if (immediate && immediate.sessionId === sid) {
+      pendingImmediateRef.current = null;
+      void run(immediate.text, immediate.attachments);
+      return;
+    }
+
+    const next = queue[0]!;
+    setQueuesBySession((prev) => {
+      const list = prev[sid] ?? [];
+      if (!list.length || list[0]?.id !== next.id) return prev;
+      return { ...prev, [sid]: list.slice(1) };
+    });
+    void run(next.text, next.attachments, next);
+  }, [
+    snap.busy,
+    snap.replaying,
+    snap.connection,
+    snap.sessionId,
+    queuesBySession,
+    dispatchAgentPrompt,
+  ]);
 
   const onToggleAlwaysApprove = useCallback(async () => {
     try {
@@ -1988,7 +2472,7 @@ export function App() {
       e.preventDefault();
       e.stopPropagation();
       setDragOver(false);
-      if (!connectionReady || snap.busy || snap.replaying) return;
+      if (!connectionReady || snap.replaying) return;
       const list = e.dataTransfer?.files;
       if (!list || list.length === 0) return;
       setLocalError(null);
@@ -2031,13 +2515,7 @@ export function App() {
         setLocalError(err instanceof Error ? err.message : String(err));
       }
     },
-    [
-      connectionReady,
-      snap.busy,
-      snap.replaying,
-      snap.acceptsImages,
-      mergeAttachments,
-    ],
+    [connectionReady, snap.replaying, snap.acceptsImages, mergeAttachments],
   );
 
   const openExtensions = useCallback((tab: ExtTab) => {
@@ -2313,16 +2791,93 @@ export function App() {
         return;
       }
     }
+    if (e.key === "Escape" && historySearchOpen) {
+      e.preventDefault();
+      closeHistorySearch();
+      return;
+    }
+    if (e.key === "Escape" && historyBrowse) {
+      e.preventDefault();
+      clearComposerText();
+      exitHistoryBrowse();
+      return;
+    }
     if (e.key === "Escape" && menu) {
       e.preventDefault();
       setMenu(null);
       return;
     }
+    // Ctrl/Cmd+R: open prompt-history search (TUI parity).
+    if (
+      (e.key === "r" || e.key === "R") &&
+      (e.ctrlKey || e.metaKey) &&
+      !e.altKey &&
+      !e.shiftKey
+    ) {
+      e.preventDefault();
+      openHistorySearch();
+      return;
+    }
+    // ↑/↓ prompt history browse (empty composer, or already browsing).
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      const cur = textareaRef.current?.value ?? draftRef.current;
+      const empty = cur.length === 0;
+      if (historyBrowse || (e.key === "ArrowUp" && empty && !e.shiftKey)) {
+        if (promptHistory.length === 0) {
+          if (historyBrowse) {
+            e.preventDefault();
+          }
+          return;
+        }
+        e.preventDefault();
+        if (e.key === "ArrowUp") {
+          if (!historyBrowse) {
+            setHistoryBrowse({ index: 0 });
+            applyHistoryEntry(promptHistory[0]!);
+            return;
+          }
+          const next = Math.min(
+            historyBrowse.index + 1,
+            promptHistory.length - 1,
+          );
+          setHistoryBrowse({ index: next });
+          applyHistoryEntry(promptHistory[next]!);
+          return;
+        }
+        // ArrowDown
+        if (!historyBrowse) return;
+        if (historyBrowse.index <= 0) {
+          clearComposerText();
+          exitHistoryBrowse();
+          return;
+        }
+        const next = historyBrowse.index - 1;
+        setHistoryBrowse({ index: next });
+        applyHistoryEntry(promptHistory[next]!);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (canCompose && !snap.busy && !snap.replaying) {
-        void onSend();
+      if (!canCompose || snap.replaying || Boolean(snap.pendingPermission)) {
+        return;
       }
+      // Ctrl/Cmd+Enter: cancel-and-send (draft or top of queue).
+      if (e.ctrlKey || e.metaKey) {
+        void onSendNow();
+        return;
+      }
+      if (snap.busy) {
+        const text = (textareaRef.current?.value ?? draftRef.current).trim();
+        if (!text && attachments.length === 0) {
+          // Empty composer mid-turn → force-send top queued follow-up.
+          if (promptQueue.length > 0) void onSendNow(promptQueue[0]!.id);
+          return;
+        }
+        void onSend(); // enqueue
+        return;
+      }
+      void onSend();
     }
   };
 
@@ -2436,6 +2991,13 @@ export function App() {
     });
   }, []);
 
+  const toggleSidebar = useCallback(() => {
+    setPanelLayout((p) => ({
+      ...p,
+      sidebarCollapsed: !p.sidebarCollapsed,
+    }));
+  }, []);
+
   const openRightTool = useCallback(
     (tab: "files" | "terminal" | "review" | "browser") => {
       if (tab === "terminal") setTermKeepAlive(true);
@@ -2444,6 +3006,21 @@ export function App() {
     },
     [],
   );
+
+  // Ctrl/Cmd+B toggles the left session sidebar (always available).
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod || e.altKey || e.shiftKey) return;
+      if (e.key === "b" || e.key === "B") {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleSidebar();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [toggleSidebar]);
 
   // Shortcuts open the right panel into a specific tool (panel stays open).
   useEffect(() => {
@@ -2496,9 +3073,7 @@ export function App() {
             className="sidebar-rail-btn"
             title={m.sidebarExpand}
             aria-label={m.sidebarExpand}
-            onClick={() =>
-              setPanelLayout((p) => ({ ...p, sidebarCollapsed: false }))
-            }
+            onClick={toggleSidebar}
           >
             <span className="sidebar-rail-icon" aria-hidden>
               <span />
@@ -2513,25 +3088,29 @@ export function App() {
           <button
             className="nav-btn primary"
             onClick={() => void onNewSession()}
+            title={m.newSession}
+            aria-label={m.newSession}
           >
             <span className="icon">＋</span>
-            {m.newSession}
+            <span className="nav-label">{m.newSession}</span>
           </button>
           <button
             className={`nav-btn ${view === "extensions" && extTab === "mcp" ? "active" : ""}`}
             onClick={() => openExtensions("mcp")}
             title={m.navMcp}
+            aria-label={m.navMcp}
           >
             <span className="icon">🔌</span>
-            {m.navMcp}
+            <span className="nav-label">{m.navMcp}</span>
           </button>
           <button
             className={`nav-btn ${view === "extensions" && extTab !== "mcp" ? "active" : ""}`}
             onClick={() => openExtensions("skills")}
             title={m.navExtensions}
+            aria-label={m.navExtensions}
           >
             <span className="icon">🧩</span>
-            {m.navExtensions}
+            <span className="nav-label">{m.navExtensions}</span>
           </button>
         </div>
 
@@ -3107,6 +3686,93 @@ export function App() {
                   ) : null}
                 </div>
 
+                {promptQueue.length > 0 ? (
+                  <div
+                    className="prompt-queue"
+                    role="region"
+                    aria-label={m.queueTitle}
+                  >
+                    <div className="prompt-queue-head">
+                      <span className="prompt-queue-title">
+                        {m.queueCount.replace(
+                          "{n}",
+                          String(promptQueue.length),
+                        )}
+                      </span>
+                      {snap.busy ? (
+                        <span className="prompt-queue-hint">
+                          {m.queueHintBusy}
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="prompt-queue-clear"
+                        onClick={() => {
+                          if (snap.sessionId) clearSessionQueue(snap.sessionId);
+                        }}
+                      >
+                        {m.queueClear}
+                      </button>
+                    </div>
+                    <ul className="prompt-queue-list">
+                      {promptQueue.map((item, idx) => {
+                        const preview =
+                          previewQueueText(item.text) ||
+                          (item.attachments.length > 0
+                            ? m.queueAttachmentsOnly.replace(
+                                "{n}",
+                                String(item.attachments.length),
+                              )
+                            : m.queueEmptyItem);
+                        return (
+                          <li key={item.id} className="prompt-queue-item">
+                            <span className="prompt-queue-idx" aria-hidden>
+                              {idx + 1}
+                            </span>
+                            <span
+                              className="prompt-queue-text"
+                              title={item.text || preview}
+                            >
+                              {preview}
+                              {item.attachments.length > 0 && item.text ? (
+                                <span className="prompt-queue-atts">
+                                  {" "}
+                                  ·{" "}
+                                  {m.queueAttachmentsOnly.replace(
+                                    "{n}",
+                                    String(item.attachments.length),
+                                  )}
+                                </span>
+                              ) : null}
+                            </span>
+                            <button
+                              type="button"
+                              className="prompt-queue-send-now"
+                              title={m.queueSendNowHint}
+                              onClick={() => void onSendNow(item.id)}
+                            >
+                              {m.queueSendNow}
+                            </button>
+                            <button
+                              type="button"
+                              className="prompt-queue-remove"
+                              title={m.queueRemove}
+                              aria-label={m.queueRemove}
+                              onClick={() => {
+                                if (snap.sessionId) {
+                                  removeQueuedPrompt(snap.sessionId, item.id);
+                                }
+                              }}
+                            >
+                              ×
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ) : null}
+
                 <div
                   className={`composer ${
                     snap.pendingPermission ? "composer-dimmed" : ""
@@ -3165,6 +3831,110 @@ export function App() {
                     </div>
                   ) : null}
 
+                  {historyBrowse ? (
+                    <div className="prompt-history-browse" role="status">
+                      {m.historyBrowseStatus
+                        .replace("{i}", String(historyBrowse.index + 1))
+                        .replace("{n}", String(promptHistory.length))}
+                      <span className="prompt-history-browse-hint">
+                        {m.historyBrowseHint}
+                      </span>
+                    </div>
+                  ) : null}
+
+                  {historySearchOpen ? (
+                    <div
+                      className="prompt-history-search"
+                      role="dialog"
+                      aria-label={m.historySearchTitle}
+                    >
+                      <div className="prompt-history-search-head">
+                        <input
+                          ref={historySearchInputRef}
+                          className="prompt-history-search-input"
+                          type="search"
+                          value={historySearchQuery}
+                          placeholder={m.historySearchPlaceholder}
+                          aria-label={m.historySearchPlaceholder}
+                          onChange={(e) => {
+                            setHistorySearchQuery(e.target.value);
+                            setHistorySearchIndex(0);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              closeHistorySearch();
+                              return;
+                            }
+                            if (e.key === "ArrowDown") {
+                              e.preventDefault();
+                              setHistorySearchIndex((i) =>
+                                Math.min(
+                                  i + 1,
+                                  Math.max(0, filteredHistory.length - 1),
+                                ),
+                              );
+                              return;
+                            }
+                            if (e.key === "ArrowUp") {
+                              e.preventDefault();
+                              setHistorySearchIndex((i) => Math.max(i - 1, 0));
+                              return;
+                            }
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              const hit = filteredHistory[historySearchIndex];
+                              if (hit) pickHistoryEntry(hit);
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="prompt-history-search-close"
+                          onClick={closeHistorySearch}
+                          title={m.historySearchClose}
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <div
+                        ref={historyListRef}
+                        className="prompt-history-search-list"
+                      >
+                        {filteredHistory.length === 0 ? (
+                          <div className="prompt-history-search-empty">
+                            {promptHistory.length === 0
+                              ? m.historyEmpty
+                              : m.historyNoMatches}
+                          </div>
+                        ) : (
+                          filteredHistory.map((entry, i) => (
+                            <button
+                              key={`${i}:${entry.slice(0, 48)}`}
+                              type="button"
+                              data-history-idx={i}
+                              className={`prompt-history-search-item ${
+                                i === historySearchIndex ? "active" : ""
+                              }`}
+                              onMouseEnter={() => setHistorySearchIndex(i)}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                pickHistoryEntry(entry);
+                              }}
+                            >
+                              <span className="prompt-history-search-text">
+                                {previewQueueText(entry, 120)}
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                      <div className="prompt-history-search-foot">
+                        {m.historySearchHint}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="composer-row">
                     <div className="textarea-wrap">
                       <textarea
@@ -3175,11 +3945,12 @@ export function App() {
                             ? m.placeholderWaiting
                             : !hasWorkspace
                               ? m.placeholderNeedWorkspace
-                              : m.placeholderReady
+                              : snap.busy
+                                ? m.placeholderBusy
+                                : m.placeholderReady
                         }
                         disabled={
                           !canCompose ||
-                          snap.busy ||
                           snap.replaying ||
                           Boolean(snap.pendingPermission)
                         }
@@ -3191,6 +3962,8 @@ export function App() {
                           setHasDraft((prev) =>
                             prev === nonEmpty ? prev : nonEmpty,
                           );
+                          // Typing while browsing history = edit in place, leave browse mode.
+                          if (historyBrowse) exitHistoryBrowse();
                           resizeTextarea(e.target);
                           // Only schedule @ / slash work when relevant.
                           if (
@@ -3319,7 +4092,11 @@ export function App() {
                         type="button"
                         className="icon-btn attach-btn"
                         title={m.attachFiles}
-                        disabled={!canCompose || snap.busy}
+                        disabled={
+                          !canCompose ||
+                          snap.replaying ||
+                          Boolean(snap.pendingPermission)
+                        }
                         onClick={() => void onPickFiles()}
                       >
                         <svg
@@ -3482,7 +4259,36 @@ export function App() {
                         >
                           ■
                         </button>
-                      ) : (
+                      ) : null}
+                      {snap.busy &&
+                      (hasDraft || attachments.length > 0) ? (
+                        <button
+                          type="button"
+                          className="icon-btn send send-queue"
+                          title={`${m.queueAction} · ${m.queueSendNowHint} (${m.queueSendNowShortcut})`}
+                          disabled={
+                            !canCompose ||
+                            snap.replaying ||
+                            Boolean(snap.pendingPermission)
+                          }
+                          onClick={() => void onSend()}
+                        >
+                          <svg
+                            width="15"
+                            height="15"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.25"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="M5 12h14M12 5l7 7-7 7" />
+                            <path d="M5 7v10" opacity="0.45" />
+                          </svg>
+                        </button>
+                      ) : !snap.busy ? (
                         <button
                           type="button"
                           className="icon-btn send"
@@ -3508,7 +4314,7 @@ export function App() {
                             <path d="M12 19V5M6.5 10.5 12 5l5.5 5.5" />
                           </svg>
                         </button>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 </div>

@@ -279,6 +279,9 @@ body.is-resizing-panels .file-tree {
   overflow: hidden;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
+  /* Drive compact / icon-only nav when the column is narrow. */
+  container-type: inline-size;
+  container-name: sidebar;
 }
 
 .sidebar-rail {
@@ -336,11 +339,14 @@ body.is-resizing-panels .file-tree {
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-width: 0;
   padding: 9px 10px;
   border-radius: 8px;
   font-size: 13px;
   color: var(--text);
   text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
   transition: background 0.12s;
 }
 
@@ -365,9 +371,60 @@ body.is-resizing-panels .file-tree {
 }
 
 .nav-btn .icon {
+  flex: 0 0 auto;
   width: 16px;
   color: var(--text-muted);
   text-align: center;
+}
+
+.nav-btn .nav-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Narrow sidebar: icon-only top actions so labels never wrap mid-character.
+ * ~160px covers the common drag range before collapse (~12% of typical windows).
+ */
+@container sidebar (max-width: 10rem) {
+  .sidebar-top {
+    padding: 12px 6px 8px;
+  }
+
+  .nav-btn {
+    justify-content: center;
+    gap: 0;
+    padding: 9px 6px;
+  }
+
+  .nav-btn .nav-label {
+    display: none;
+  }
+
+  .sidebar-search {
+    padding: 0 6px 8px;
+  }
+
+  .session-search-input {
+    padding-left: 8px;
+    padding-right: 8px;
+    font-size: 12px;
+  }
+}
+
+/* Extra-tight: hide search while dragging near collapse. */
+@container sidebar (max-width: 5.5rem) {
+  .sidebar-search {
+    display: none;
+  }
+
+  .sidebar-scroll {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
 }
 
 .sidebar-search {
@@ -2256,10 +2313,12 @@ body.is-resizing-panels .file-tree {
 /*
  * Workspace context bar: a bit narrower than the composer, shorter height.
  * Fully above the input (no overlap / negative margin).
+ * Keep z-index below .composer so model / effort menus that open upward
+ * are not covered by this bar.
  */
 .workspace-bar {
   position: relative;
-  z-index: 2;
+  z-index: 1;
   box-sizing: border-box;
   align-self: center;
   width: calc(100% - 28px);
@@ -2412,7 +2471,8 @@ body.is-resizing-panels .file-tree {
 
 .composer {
   position: relative;
-  z-index: 1;
+  /* Above .workspace-bar so upward toolbars (model / effort) aren't clipped. */
+  z-index: 2;
   width: 100%;
   box-sizing: border-box;
   background: color-mix(in srgb, var(--bg-elevated) 72%, #000 8%);
@@ -2846,6 +2906,267 @@ html[data-theme="light"] .workspace-bar {
   padding: 10px 12px;
   font-size: 12px;
   color: var(--text-dim);
+}
+
+/* ── Prompt history (↑ browse / /history search) ─── */
+
+.prompt-history-browse {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 2px 4px 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.prompt-history-browse-hint {
+  font-weight: 450;
+  color: var(--text-dim);
+}
+
+.prompt-history-search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-dropdown);
+  box-shadow: 0 10px 28px var(--shadow-strong);
+  max-height: 280px;
+}
+
+.prompt-history-search-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prompt-history-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.prompt-history-search-input:focus {
+  border-color: var(--border-soft);
+}
+
+.prompt-history-search-close {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.prompt-history-search-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.prompt-history-search-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.prompt-history-search-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.prompt-history-search-item:hover,
+.prompt-history-search-item.active {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.prompt-history-search-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-history-search-empty {
+  padding: 12px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.prompt-history-search-foot {
+  padding: 2px 4px 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ── Prompt queue (busy follow-ups) ───────────────── */
+
+.prompt-queue {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0 auto;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 90%, var(--bg) 10%);
+  box-shadow: 0 2px 10px var(--shadow);
+}
+
+.chat-rail .prompt-queue {
+  max-width: none;
+}
+
+.prompt-queue-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 6px;
+}
+
+.prompt-queue-title {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.prompt-queue-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.prompt-queue-clear {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.prompt-queue-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.prompt-queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.prompt-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+
+.prompt-queue-idx {
+  flex: 0 0 auto;
+  width: 16px;
+  text-align: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.prompt-queue-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.prompt-queue-atts {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.prompt-queue-send-now {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.prompt-queue-send-now:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-soft);
+}
+
+.prompt-queue-remove {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.prompt-queue-remove:hover {
+  background: var(--bg-hover);
+  color: var(--danger, #e07070);
+}
+
+.icon-btn.send.send-queue {
+  /* Distinct from stop: queue follow-up while turn runs */
+  opacity: 0.95;
 }
 
 .attach-bar {

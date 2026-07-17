@@ -2591,6 +2591,44 @@ export class AgentBackend {
     return {};
   }
 
+  /**
+   * Load user prompt history for a workspace (newest first).
+   * Prefer session-scoped fast path when `filterSessionId` is set.
+   */
+  async listPromptHistory(
+    cwd: string,
+    filterSessionId?: string,
+  ): Promise<string[]> {
+    const trimmed = cwd.trim();
+    if (!trimmed) return [];
+    try {
+      const params: Record<string, JsonValue> = { cwd: trimmed };
+      if (filterSessionId?.trim()) {
+        params.filter_session_id = filterSessionId.trim();
+      }
+      const raw = await this.requestExt("prompt_history", params, 30_000);
+      const rec = asRecord(raw);
+      const prompts = rec?.prompts;
+      if (!Array.isArray(prompts)) return [];
+      const out: string[] = [];
+      for (const p of prompts) {
+        if (typeof p !== "string") continue;
+        const t = p.trim();
+        if (!t) continue;
+        // Keep API order (newest first); consecutive dedupe only.
+        if (out.length > 0 && out[out.length - 1] === t) continue;
+        out.push(t);
+      }
+      return out;
+    } catch (err) {
+      this.log(
+        "warn",
+        `prompt_history failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return [];
+    }
+  }
+
   async sendPrompt(payload: PromptPayload | string): Promise<void> {
     const p: PromptPayload =
       typeof payload === "string" ? { text: payload } : payload;

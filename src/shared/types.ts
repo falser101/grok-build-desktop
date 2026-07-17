@@ -436,6 +436,14 @@ export interface DesktopApi {
   setModel: (modelId: string, reasoningEffort?: string) => Promise<void>;
   setMode: (modeId: SessionModeId) => Promise<void>;
   sendPrompt: (payload: PromptPayload | string) => Promise<void>;
+  /**
+   * User prompt history for a workspace (newest first).
+   * Uses agent `x.ai/prompt_history`; optional session filter.
+   */
+  listPromptHistory: (
+    cwd: string,
+    filterSessionId?: string,
+  ) => Promise<string[]>;
   cancel: () => Promise<void>;
   /**
    * Resolve a pending permission prompt.

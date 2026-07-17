@@ -50,6 +50,11 @@ export const LOCAL_COMMANDS: AvailableCommand[] = [
     name: "yolo",
     description: "Toggle always-approve mode (alias of /always-approve)",
   },
+  {
+    name: "history",
+    description: "Search prompt history",
+    inputHint: "[filter]",
+  },
 ];
 
 export interface SlashSuggestion {
@@ -196,7 +201,9 @@ export type LocalSlashResult =
   | { kind: "handled"; message?: string }
   | { kind: "send"; text: string }
   | { kind: "error"; message: string }
-  | { kind: "passthrough" };
+  | { kind: "passthrough" }
+  /** Open the prompt-history search UI (optional filter from args). */
+  | { kind: "open_history"; filter?: string };
 
 export interface LocalSlashContext {
   models: ModelInfo[];
@@ -246,6 +253,10 @@ export async function tryHandleLocalSlash(
 
   const name = parsed.name;
   const args = parsed.args.trim();
+
+  if (name === "history") {
+    return { kind: "open_history", filter: args || undefined };
+  }
 
   if (name === "new" || name === "clear") {
     if (ctx.prepareNewChat) {

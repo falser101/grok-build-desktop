@@ -81,6 +81,12 @@ const api: DesktopApi = {
     ipcRenderer.invoke("agent:setMode", modeId) as Promise<void>,
   sendPrompt: (payload: PromptPayload | string) =>
     ipcRenderer.invoke("agent:sendPrompt", payload) as Promise<void>,
+  listPromptHistory: (cwd: string, filterSessionId?: string) =>
+    ipcRenderer.invoke(
+      "agent:listPromptHistory",
+      cwd,
+      filterSessionId,
+    ) as Promise<string[]>,
   cancel: () => ipcRenderer.invoke("agent:cancel") as Promise<void>,
   respondPermission: (requestId: string, optionId: string | null) =>
     ipcRenderer.invoke(

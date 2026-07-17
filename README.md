@@ -36,7 +36,7 @@ Sessions, auth, and config live under `~/.grok` and stay compatible with the Gro
 | **Sidebar status** | Running (spinner), loading, needs permission |
 | **Tools** | Tool cards, expandable output, line-level diff viewer |
 | **Workspace** | File tree, syntax-highlighted preview, `@` path insert |
-| **Input** | Attachments, drag-and-drop, paste images, slash commands |
+| **Input** | Attachments, drag-and-drop, paste images, slash commands; **queue while busy**; **prompt history** (↑ / `/history` / Ctrl+R) |
 | **Models** | Model / Agent·Plan·Ask mode / reasoning effort / token usage |
 | **Permissions** | Confirm panel + queue + Always-approve (YOLO) |
 | **Account** | Login, logout, API key, subscription/credit usage |
@@ -50,7 +50,8 @@ Full inventory: [`docs/FEATURES.md`](./docs/FEATURES.md).
 - Attach to an external live TUI / leader-socket session  
 - Bundled installers with embedded `grok` binary  
 - Auto-update, code signing  
-- Embedded terminal, full command palette (`Ctrl+K`), Plan/TODO panel  
+- Full command palette (`Ctrl+K`), Plan/TODO panel  
+ 
 
 ---
 
