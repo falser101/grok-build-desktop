@@ -1,0 +1,19 @@
+appId: ai.x.grok.build.desktop
+productName: Grok Build Desktop
+directories:
+  buildResources: resources
+  output: dist
+files:
+  - out/**/*
+  - package.json
+linux:
+  target:
+    - AppImage
+  category: Development
+mac:
+  target:
+    - dmg
+  category: public.app-category.developer-tools
+win:
+  target:
+    - nsis
