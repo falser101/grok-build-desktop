@@ -1,0 +1,638 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type {
+  HookEntry,
+  McpServerEntry,
+  PluginEntry,
+  SkillEntry,
+} from "@shared/types";
+import type { Messages } from "./i18n";
+
+export type ExtTab = "mcp" | "skills" | "plugins" | "hooks";
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function ScopeBadge({ label }: { label: string }) {
+  return <span className="ext-badge">{label}</span>;
+}
+
+function Toggle({
+  on,
+  disabled,
+  onChange,
+  labelOn,
+  labelOff,
+}: {
+  on: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+  labelOn: string;
+  labelOff: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`ext-toggle ${on ? "on" : "off"}`}
+      disabled={disabled}
+      aria-pressed={on}
+      onClick={() => onChange(!on)}
+      title={on ? labelOn : labelOff}
+    >
+      {on ? labelOn : labelOff}
+    </button>
+  );
+}
+
+export function ExtensionsView({
+  onBack,
+  initialTab = "mcp",
+  m,
+}: {
+  onBack: () => void;
+  initialTab?: ExtTab;
+  m: Messages;
+}) {
+  const [tab, setTab] = useState<ExtTab>(initialTab);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+
+  const [mcp, setMcp] = useState<McpServerEntry[]>([]);
+  const [skills, setSkills] = useState<SkillEntry[]>([]);
+  const [plugins, setPlugins] = useState<PluginEntry[]>([]);
+  const [hooks, setHooks] = useState<HookEntry[]>([]);
+  const [hookPreview, setHookPreview] = useState<{
+    path: string;
+    text: string;
+  } | null>(null);
+
+  // MCP form
+  const [showAddMcp, setShowAddMcp] = useState(false);
+  const [mcpName, setMcpName] = useState("");
+  const [mcpTransport, setMcpTransport] = useState<"stdio" | "http" | "sse">(
+    "stdio",
+  );
+  const [mcpCmd, setMcpCmd] = useState("");
+  const [mcpArgs, setMcpArgs] = useState("");
+  const [mcpScope, setMcpScope] = useState<"user" | "project">("user");
+
+  // Plugin install
+  const [pluginSource, setPluginSource] = useState("");
+  const [showMarketplace, setShowMarketplace] = useState(false);
+
+  const [filter, setFilter] = useState("");
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
+
+  const load = useCallback(async (which: ExtTab, marketplace = false) => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (which === "mcp") {
+        setMcp(await window.desktop.listMcpServers());
+      } else if (which === "skills") {
+        setSkills(await window.desktop.listSkills());
+      } else if (which === "plugins") {
+        setPlugins(await window.desktop.listPlugins(marketplace));
+      } else {
+        setHooks(await window.desktop.listHooks());
+      }
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load(tab, showMarketplace && tab === "plugins");
+  }, [tab, load, showMarketplace]);
+
+  const q = filter.trim().toLowerCase();
+
+  const filteredMcp = useMemo(
+    () =>
+      !q
+        ? mcp
+        : mcp.filter(
+            (s) =>
+              s.name.toLowerCase().includes(q) ||
+              s.detail.toLowerCase().includes(q),
+          ),
+    [mcp, q],
+  );
+
+  const filteredSkills = useMemo(
+    () =>
+      !q
+        ? skills
+        : skills.filter(
+            (s) =>
+              s.name.toLowerCase().includes(q) ||
+              s.description.toLowerCase().includes(q),
+          ),
+    [skills, q],
+  );
+
+  const filteredPlugins = useMemo(
+    () =>
+      !q
+        ? plugins
+        : plugins.filter(
+            (p) =>
+              p.name.toLowerCase().includes(q) ||
+              (p.description || "").toLowerCase().includes(q) ||
+              (p.marketplace || "").toLowerCase().includes(q),
+          ),
+    [plugins, q],
+  );
+
+  const filteredHooks = useMemo(
+    () =>
+      !q
+        ? hooks
+        : hooks.filter(
+            (h) =>
+              h.name.toLowerCase().includes(q) ||
+              h.events.some((e) => e.toLowerCase().includes(q)) ||
+              h.path.toLowerCase().includes(q),
+          ),
+    [hooks, q],
+  );
+
+  const run = async (fn: () => Promise<void>, okMsg?: string) => {
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      await fn();
+      if (okMsg) setInfo(okMsg);
+      await load(tab, showMarketplace && tab === "plugins");
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onAddMcp = () =>
+    void run(async () => {
+      const args = mcpArgs
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+      await window.desktop.addMcpServer({
+        name: mcpName.trim(),
+        transport: mcpTransport,
+        commandOrUrl: mcpCmd.trim(),
+        args: mcpTransport === "stdio" ? args : undefined,
+        scope: mcpScope,
+      });
+      setShowAddMcp(false);
+      setMcpName("");
+      setMcpCmd("");
+      setMcpArgs("");
+    }, m.extSaved);
+
+  const tabs: { id: ExtTab; label: string }[] = [
+    { id: "mcp", label: m.extTabMcp },
+    { id: "skills", label: m.extTabSkills },
+    { id: "plugins", label: m.extTabPlugins },
+    { id: "hooks", label: m.extTabHooks },
+  ];
+
+  return (
+    <div className="settings-page ext-page">
+      <header className="settings-header">
+        <button type="button" className="settings-back" onClick={onBack}>
+          ← {m.backToChat}
+        </button>
+        <h1 className="settings-title">{m.extTitle}</h1>
+        <p className="settings-subtitle">{m.extSubtitle}</p>
+      </header>
+
+      <div className="ext-tabs" role="tablist">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            className={`ext-tab ${tab === t.id ? "active" : ""}`}
+            onClick={() => {
+              setFilter("");
+              setHookPreview(null);
+              setTab(t.id);
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="ext-toolbar">
+        <input
+          className="ext-filter"
+          type="search"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder={m.extFilter}
+          aria-label={m.extFilter}
+        />
+        <button
+          type="button"
+          className="ext-btn"
+          disabled={busy}
+          onClick={() => void load(tab, showMarketplace && tab === "plugins")}
+        >
+          {m.extRefresh}
+        </button>
+        {tab === "mcp" ? (
+          <button
+            type="button"
+            className="ext-btn primary"
+            disabled={busy}
+            onClick={() => setShowAddMcp((v) => !v)}
+          >
+            {showAddMcp ? m.extCancel : m.extAddMcp}
+          </button>
+        ) : null}
+        {tab === "plugins" ? (
+          <button
+            type="button"
+            className={`ext-btn ${showMarketplace ? "active" : ""}`}
+            disabled={busy}
+            onClick={() => setShowMarketplace((v) => !v)}
+          >
+            {showMarketplace ? m.extInstalledOnly : m.extShowMarketplace}
+          </button>
+        ) : null}
+      </div>
+
+      {error ? <div className="ext-banner error">{error}</div> : null}
+      {info ? <div className="ext-banner info">{info}</div> : null}
+      {busy ? <div className="ext-busy">{m.filesLoading}</div> : null}
+
+      {tab === "mcp" && showAddMcp ? (
+        <section className="settings-card ext-form">
+          <div className="settings-card-head">
+            <h2>{m.extAddMcp}</h2>
+            <p>{m.extAddMcpHint}</p>
+          </div>
+          <div className="ext-form-grid">
+            <label>
+              <span>{m.extMcpName}</span>
+              <input
+                value={mcpName}
+                onChange={(e) => setMcpName(e.target.value)}
+                placeholder="my-server"
+              />
+            </label>
+            <label>
+              <span>{m.extMcpTransport}</span>
+              <select
+                value={mcpTransport}
+                onChange={(e) =>
+                  setMcpTransport(e.target.value as "stdio" | "http" | "sse")
+                }
+              >
+                <option value="stdio">stdio</option>
+                <option value="http">http</option>
+                <option value="sse">sse</option>
+              </select>
+            </label>
+            <label className="span-2">
+              <span>
+                {mcpTransport === "stdio" ? m.extMcpCommand : m.extMcpUrl}
+              </span>
+              <input
+                value={mcpCmd}
+                onChange={(e) => setMcpCmd(e.target.value)}
+                placeholder={
+                  mcpTransport === "stdio"
+                    ? "npx -y @modelcontextprotocol/server-filesystem"
+                    : "https://mcp.example.com/mcp"
+                }
+              />
+            </label>
+            {mcpTransport === "stdio" ? (
+              <label className="span-2">
+                <span>{m.extMcpArgs}</span>
+                <input
+                  value={mcpArgs}
+                  onChange={(e) => setMcpArgs(e.target.value)}
+                  placeholder="/path/to/dir"
+                />
+              </label>
+            ) : null}
+            <label>
+              <span>{m.extScope}</span>
+              <select
+                value={mcpScope}
+                onChange={(e) =>
+                  setMcpScope(e.target.value as "user" | "project")
+                }
+              >
+                <option value="user">{m.extScopeUser}</option>
+                <option value="project">{m.extScopeProject}</option>
+              </select>
+            </label>
+            <div className="ext-form-actions span-2">
+              <button
+                type="button"
+                className="ext-btn primary"
+                disabled={busy || !mcpName.trim() || !mcpCmd.trim()}
+                onClick={onAddMcp}
+              >
+                {m.extSave}
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "plugins" ? (
+        <section className="settings-card ext-form">
+          <div className="settings-card-head">
+            <h2>{m.extInstallPlugin}</h2>
+            <p>{m.extInstallPluginHint}</p>
+          </div>
+          <div className="ext-inline-form">
+            <input
+              value={pluginSource}
+              onChange={(e) => setPluginSource(e.target.value)}
+              placeholder="owner/repo  or  https://…  or  /path"
+            />
+            <button
+              type="button"
+              className="ext-btn primary"
+              disabled={busy || !pluginSource.trim()}
+              onClick={() =>
+                void run(async () => {
+                  await window.desktop.installPlugin(pluginSource.trim());
+                  setPluginSource("");
+                }, m.extSaved)
+              }
+            >
+              {m.extInstall}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      <div className="ext-list">
+        {tab === "mcp" &&
+          (filteredMcp.length === 0 && !busy ? (
+            <div className="ext-empty">{m.extMcpEmpty}</div>
+          ) : (
+            filteredMcp.map((s) => (
+              <div className="ext-row" key={`${s.scope}:${s.name}`}>
+                <div className="ext-row-main">
+                  <div className="ext-row-title">
+                    <strong>{s.name}</strong>
+                    <ScopeBadge
+                      label={
+                        s.scope === "project"
+                          ? m.extScopeProject
+                          : m.extScopeUser
+                      }
+                    />
+                    <ScopeBadge label={s.transport} />
+                    {!s.enabled ? (
+                      <ScopeBadge label={m.extDisabled} />
+                    ) : null}
+                  </div>
+                  <div className="ext-row-detail" title={s.detail}>
+                    {s.detail || "—"}
+                  </div>
+                </div>
+                <div className="ext-row-actions">
+                  <Toggle
+                    on={s.enabled}
+                    disabled={busy}
+                    labelOn={m.extEnabled}
+                    labelOff={m.extDisabled}
+                    onChange={(next) =>
+                      void run(async () => {
+                        await window.desktop.setMcpEnabled(
+                          s.name,
+                          next,
+                          s.scope,
+                        );
+                      })
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="ext-btn danger"
+                    disabled={busy}
+                    onClick={() => {
+                      if (!confirm(m.extRemoveConfirm.replace("{name}", s.name)))
+                        return;
+                      void run(async () => {
+                        await window.desktop.removeMcpServer(s.name, s.scope);
+                      }, m.extSaved);
+                    }}
+                  >
+                    {m.extRemove}
+                  </button>
+                </div>
+              </div>
+            ))
+          ))}
+
+        {tab === "skills" &&
+          (filteredSkills.length === 0 && !busy ? (
+            <div className="ext-empty">{m.extSkillsEmpty}</div>
+          ) : (
+            filteredSkills.map((s) => (
+              <div className="ext-row" key={`${s.scope}:${s.path}`}>
+                <div className="ext-row-main">
+                  <div className="ext-row-title">
+                    <strong>{s.name}</strong>
+                    <ScopeBadge label={s.scope} />
+                    {s.disabled ? (
+                      <ScopeBadge label={m.extDisabled} />
+                    ) : null}
+                  </div>
+                  <div className="ext-row-detail" title={s.description}>
+                    {s.description || s.path}
+                  </div>
+                </div>
+                <div className="ext-row-actions">
+                  <Toggle
+                    on={!s.disabled}
+                    disabled={busy}
+                    labelOn={m.extEnabled}
+                    labelOff={m.extDisabled}
+                    onChange={(next) =>
+                      void run(async () => {
+                        await window.desktop.setSkillDisabled(s.name, !next);
+                      })
+                    }
+                  />
+                </div>
+              </div>
+            ))
+          ))}
+
+        {tab === "plugins" &&
+          (filteredPlugins.length === 0 && !busy ? (
+            <div className="ext-empty">{m.extPluginsEmpty}</div>
+          ) : (
+            filteredPlugins.map((p) => (
+              <div
+                className="ext-row"
+                key={`${p.status}:${p.marketplace || ""}:${p.name}`}
+              >
+                <div className="ext-row-main">
+                  <div className="ext-row-title">
+                    <strong>{p.name}</strong>
+                    <ScopeBadge
+                      label={
+                        p.status === "available"
+                          ? m.extAvailable
+                          : m.extInstalled
+                      }
+                    />
+                    {p.marketplace ? (
+                      <ScopeBadge label={p.marketplace} />
+                    ) : null}
+                    {p.version ? <ScopeBadge label={p.version} /> : null}
+                  </div>
+                  <div className="ext-row-detail" title={p.description || p.path}>
+                    {p.description ||
+                      p.source ||
+                      p.path ||
+                      (p.skillCount != null
+                        ? `${p.skillCount} skills`
+                        : "—")}
+                  </div>
+                </div>
+                <div className="ext-row-actions">
+                  {p.status === "installed" ? (
+                    <>
+                      <Toggle
+                        on={p.enabled !== false}
+                        disabled={busy}
+                        labelOn={m.extEnabled}
+                        labelOff={m.extDisabled}
+                        onChange={(next) =>
+                          void run(async () => {
+                            await window.desktop.setPluginEnabled(p.name, next);
+                          })
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="ext-btn danger"
+                        disabled={busy}
+                        onClick={() => {
+                          if (
+                            !confirm(
+                              m.extUninstallConfirm.replace("{name}", p.name),
+                            )
+                          )
+                            return;
+                          void run(async () => {
+                            await window.desktop.uninstallPlugin(p.name);
+                          }, m.extSaved);
+                        }}
+                      >
+                        {m.extUninstall}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="ext-btn primary"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          const source = p.marketplace
+                            ? p.name
+                            : p.name;
+                          await window.desktop.installPlugin(source);
+                        }, m.extSaved)
+                      }
+                    >
+                      {m.extInstall}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          ))}
+
+        {tab === "hooks" &&
+          (filteredHooks.length === 0 && !busy ? (
+            <div className="ext-empty">{m.extHooksEmpty}</div>
+          ) : (
+            filteredHooks.map((h) => (
+              <div className="ext-row" key={h.path}>
+                <div className="ext-row-main">
+                  <div className="ext-row-title">
+                    <strong>{h.name}</strong>
+                    <ScopeBadge label={h.scope} />
+                  </div>
+                  <div className="ext-row-detail" title={h.path}>
+                    {h.events.join(", ")}
+                    {h.commandCount != null
+                      ? ` · ${h.commandCount} hook(s)`
+                      : ""}
+                  </div>
+                  <div className="ext-row-path">{h.path}</div>
+                </div>
+                <div className="ext-row-actions">
+                  <button
+                    type="button"
+                    className="ext-btn"
+                    disabled={busy}
+                    onClick={() =>
+                      void (async () => {
+                        setBusy(true);
+                        setError(null);
+                        try {
+                          const text = await window.desktop.readHookFile(
+                            h.path,
+                          );
+                          setHookPreview({ path: h.path, text });
+                        } catch (err) {
+                          setError(errMsg(err));
+                        } finally {
+                          setBusy(false);
+                        }
+                      })()
+                    }
+                  >
+                    {m.extView}
+                  </button>
+                </div>
+              </div>
+            ))
+          ))}
+      </div>
+
+      {hookPreview ? (
+        <section className="settings-card ext-preview">
+          <div className="ext-preview-head">
+            <h2>{hookPreview.path}</h2>
+            <button
+              type="button"
+              className="ext-btn"
+              onClick={() => setHookPreview(null)}
+            >
+              {m.filesClose}
+            </button>
+          </div>
+          <pre className="ext-preview-body">{hookPreview.text}</pre>
+        </section>
+      ) : null}
+
+      <p className="ext-footnote">{m.extFootnote}</p>
+    </div>
+  );
+}
