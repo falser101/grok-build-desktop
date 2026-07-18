@@ -6,15 +6,22 @@ import type {
   AddMcpServerInput,
   AgentUiEvent,
   AppSnapshot,
+  AskUserQuestionResponse,
   DesktopApi,
   ExtensionsConfigPaths,
+  FetchModelsInput,
+  FetchedModelInfo,
   FileEntry,
   FileReadResult,
   ForkSessionResult,
   HookEntry,
   McpServerEntry,
   McpServerScope,
+  ModelConfigKeyIndex,
+  ModelProviderConfig,
+  ModelProviderPreset,
   PathSuggestion,
+  PlanApprovalOutcome,
   PluginEntry,
   PromptAttachment,
   PromptPayload,
@@ -24,6 +31,7 @@ import type {
   SkillEntry,
   TermHostEvent,
   TermStartResult,
+  UpsertProviderInput,
   UsageInfo,
 } from "../shared/types";
 
@@ -94,6 +102,28 @@ const api: DesktopApi = {
       requestId,
       optionId,
     ) as Promise<void>,
+  respondAskUserQuestion: (
+    requestId: string,
+    response: AskUserQuestionResponse,
+  ) =>
+    ipcRenderer.invoke(
+      "agent:respondAskUserQuestion",
+      requestId,
+      response,
+    ) as Promise<void>,
+  respondPlanApproval: (
+    requestId: string,
+    outcome: PlanApprovalOutcome,
+    feedback?: string,
+  ) =>
+    ipcRenderer.invoke(
+      "agent:respondPlanApproval",
+      requestId,
+      outcome,
+      feedback,
+    ) as Promise<void>,
+  refreshPlanContent: () =>
+    ipcRenderer.invoke("agent:refreshPlanContent") as Promise<string | null>,
   setAlwaysApprove: (enabled: boolean) =>
     ipcRenderer.invoke("agent:setAlwaysApprove", enabled) as Promise<void>,
   listDir: (relDir?: string) =>
@@ -143,6 +173,35 @@ const api: DesktopApi = {
     ipcRenderer.invoke("ext:readHookFile", path) as Promise<string>,
   getExtensionsPaths: () =>
     ipcRenderer.invoke("ext:getPaths") as Promise<ExtensionsConfigPaths>,
+  listModelPresets: () =>
+    ipcRenderer.invoke("models:listPresets") as Promise<ModelProviderPreset[]>,
+  listModelProviders: () =>
+    ipcRenderer.invoke("models:listProviders") as Promise<ModelProviderConfig[]>,
+  upsertModelProvider: (input: UpsertProviderInput) =>
+    ipcRenderer.invoke(
+      "models:upsertProvider",
+      input,
+    ) as Promise<ModelProviderConfig>,
+  deleteModelProvider: (id: string) =>
+    ipcRenderer.invoke("models:deleteProvider", id) as Promise<void>,
+  addModelProviderFromPreset: (
+    presetId: string,
+    overrides?: Partial<UpsertProviderInput>,
+  ) =>
+    ipcRenderer.invoke(
+      "models:addFromPreset",
+      presetId,
+      overrides,
+    ) as Promise<ModelProviderConfig>,
+  fetchProviderModels: (input: FetchModelsInput) =>
+    ipcRenderer.invoke(
+      "models:fetchModels",
+      input,
+    ) as Promise<FetchedModelInfo[]>,
+  getModelConfigKeyIndex: () =>
+    ipcRenderer.invoke(
+      "models:getConfigKeyIndex",
+    ) as Promise<ModelConfigKeyIndex>,
   getAccountStatus: () =>
     ipcRenderer.invoke("account:getStatus") as Promise<AccountStatus>,
   login: (method: AccountLoginMethod) =>

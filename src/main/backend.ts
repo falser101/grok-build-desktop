@@ -1,11 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import { randomBytes } from "node:crypto";
-import { access } from "node:fs/promises";
+import { access, readFile, readdir, stat } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { basename, relative, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
-import { readdir, stat } from "node:fs/promises";
 import { AcpClient, type JsonValue } from "../shared/acp-client";
 import {
   readAlwaysApproveFromConfig,
@@ -14,6 +13,11 @@ import {
 import type {
   AgentUiEvent,
   AppSnapshot,
+  AskUserQuestionItemUi,
+  AskUserQuestionMode,
+  AskUserQuestionOptionUi,
+  AskUserQuestionResponse,
+  AskUserQuestionUi,
   AvailableCommand,
   ConnectionState,
   ForkSessionResult,
@@ -21,6 +25,8 @@ import type {
   PathSuggestion,
   PermissionOptionUi,
   PermissionRequestUi,
+  PlanApprovalOutcome,
+  PlanApprovalUi,
   PromptAttachment,
   PromptPayload,
   SearchSessionsOptions,
@@ -29,6 +35,9 @@ import type {
   SessionSearchHit,
   SessionSummary,
   TimelineItem,
+  TodoItemUi,
+  TodoPriority,
+  TodoStatus,
   ToolDiff,
   UsageInfo,
 } from "../shared/types";
@@ -47,6 +56,16 @@ interface PendingPermissionEntry {
   ui: PermissionRequestUi;
   /** Session that owns this permission prompt (for concurrent multi-session). */
   sessionId?: string;
+  resolve: (result: JsonValue) => void;
+}
+
+interface PendingPlanApprovalEntry {
+  ui: PlanApprovalUi;
+  resolve: (result: JsonValue) => void;
+}
+
+interface PendingQuestionEntry {
+  ui: AskUserQuestionUi;
   resolve: (result: JsonValue) => void;
 }
 
@@ -72,6 +91,8 @@ interface SessionRuntime {
   reasoningEffort?: string;
   availableModels: ModelInfo[];
   toolIndex: Map<string, string>;
+  todos: TodoItemUi[];
+  planContent?: string;
   /** True once session/new or session/load finished (or prompt started). */
   hydrated: boolean;
 }
@@ -91,8 +112,75 @@ function emptyRuntime(sessionId: string, cwd: string): SessionRuntime {
     sessionMode: "default",
     availableModels: [],
     toolIndex: new Map(),
+    todos: [],
     hydrated: false,
   };
+}
+
+/** Same encoding as CLI `urlencoding::encode` for session dir names. */
+function encodeSessionCwd(cwd: string): string {
+  return encodeURIComponent(cwd);
+}
+
+function planFilePath(cwd: string, sessionId: string): string {
+  return join(
+    homedir(),
+    ".grok",
+    "sessions",
+    encodeSessionCwd(cwd),
+    sessionId,
+    "plan.md",
+  );
+}
+
+function parseTodoStatus(raw: string | undefined): TodoStatus {
+  const s = (raw ?? "pending").toLowerCase().replace(/-/g, "_");
+  if (s === "in_progress" || s === "inprogress") return "in_progress";
+  if (s === "completed" || s === "complete" || s === "done") return "completed";
+  if (s === "cancelled" || s === "canceled") return "cancelled";
+  return "pending";
+}
+
+function parseTodoPriority(raw: string | undefined): TodoPriority {
+  const s = (raw ?? "medium").toLowerCase();
+  if (s === "high") return "high";
+  if (s === "low") return "low";
+  return "medium";
+}
+
+/** Parse ACP Plan entries into UI todos. */
+function parsePlanEntries(raw: JsonValue | undefined): TodoItemUi[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TodoItemUi[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const rec = asRecord(raw[i] as JsonValue);
+    if (!rec) continue;
+    const content =
+      asString(rec.content) ?? asString(rec.text) ?? asString(rec.title);
+    if (!content?.trim()) continue;
+    const meta = asRecord(rec.meta as JsonValue);
+    const cancelled =
+      meta?.cancelled === true ||
+      meta?.canceled === true ||
+      asString(meta?.status)?.toLowerCase() === "cancelled";
+    let status = parseTodoStatus(
+      asString(rec.status) ?? asString(rec.planEntryStatus),
+    );
+    if (cancelled && status === "completed") status = "cancelled";
+    const id =
+      asString(meta?.id) ??
+      asString(rec.id) ??
+      `todo-${i}-${content.slice(0, 24)}`;
+    out.push({
+      id,
+      content: content.trim(),
+      status,
+      priority: parseTodoPriority(
+        asString(rec.priority) ?? asString(rec.planEntryPriority),
+      ),
+    });
+  }
+  return out;
 }
 
 function asRecord(v: JsonValue | undefined): Record<string, JsonValue> | null {
@@ -363,6 +451,21 @@ function newId(prefix: string): string {
 }
 
 /**
+ * Length of the longest suffix of `buf` (starting at `from`) that is also
+ * a strict prefix of `tag`. Used to decide how many trailing characters
+ * of a streaming chunk look like the start of an unclosed <think>/</think>
+ * and should be held until the next chunk arrives.
+ */
+function tailPrefixLen(buf: string, from: number, tag: string): number {
+  const end = buf.length;
+  const max = Math.min(tag.length - 1, end - from);
+  for (let h = max; h >= 1; h--) {
+    if (tag.startsWith(buf.slice(end - h))) return h;
+  }
+  return 0;
+}
+
+/**
  * Parse ACP `ToolCallContent[]` into diffs + concatenated text output.
  * Wire shapes:
  *   { type: "diff", path, oldText?, newText }
@@ -621,9 +724,21 @@ export class AgentBackend {
   private compactTimelineId: string | null = null;
   private streamingAssistantId: string | null = null;
   private streamingThoughtId: string | null = null;
+  /**
+   * Some custom models (DeepSeek R1, Qwen QwQ, MiniMax, …) emit
+   * `<think>...</think>` inline in the assistant content instead of using
+   * a separate thought channel. Track state across chunks so we can split
+   * those tags into their own collapsible thought bubbles.
+   */
+  private inThinkTag = false;
+  private thinkHold = "";
   private tokensUsed?: number;
   private contextWindow?: number;
   private toolIndex = new Map<string, string>();
+  /** Todo list for the focused session (ACP plan updates). */
+  private todos: TodoItemUi[] = [];
+  /** plan.md body for the focused session. */
+  private planContent?: string;
   /**
    * Live/parked runtimes for sessions that have been opened or are mid-turn.
    * The focused session is also mirrored on the fields above for the hot path.
@@ -631,6 +746,16 @@ export class AgentBackend {
   private runtimes = new Map<string, SessionRuntime>();
   /** Queued permission prompts; only the front is exposed in the snapshot. */
   private permissionQueue: PendingPermissionEntry[] = [];
+  /**
+   * Pending plan-mode exit approvals (not YOLO-auto-allowed).
+   * Only the focused-session (or unscoped) entry is exposed in the snapshot.
+   */
+  private planApprovalQueue: PendingPlanApprovalEntry[] = [];
+  /**
+   * Pending `x.ai/ask_user_question` questionnaires (not YOLO-auto-answered).
+   * Only the focused-session (or unscoped) entry is exposed in the snapshot.
+   */
+  private questionQueue: PendingQuestionEntry[] = [];
   /** Always-approve (YOLO) — skip permission UI and auto-allow tools. */
   private alwaysApprove = false;
   private listeners = new Set<(event: AgentUiEvent) => void>();
@@ -710,7 +835,63 @@ export class AgentBackend {
             options: activePerm.ui.options.map((o) => ({ ...o })),
           }
         : undefined,
+      pendingQuestion: this.activeQuestion()
+        ? this.cloneQuestionUi(this.activeQuestion()!)
+        : undefined,
       alwaysApprove: this.alwaysApprove,
+      // Todos / planContent are turn-scoped UI artifacts: only expose them
+      // while the agent is running the current turn. Once `busy` flips to
+      // false, the previous turn's checklist must not linger in the UI
+      // (matches codex / claude desktop behavior). plan.md on disk is
+      // untouched — see planFilePath().
+      todos: this.busy ? this.todos.map((t) => ({ ...t })) : [],
+      planContent: this.busy ? this.planContent : undefined,
+      pendingPlanApproval: this.activePlanApproval()
+        ? { ...this.activePlanApproval()! }
+        : undefined,
+    };
+  }
+
+  /**
+   * Drop the per-turn todos / planContent so the next snapshot (even if it
+   * races ahead of the busy=false write) reports an empty checklist. Safe
+   * to call on the active or a parked session.
+   */
+  private clearTurnPlanArtifacts(): void {
+    this.todos = [];
+    this.planContent = undefined;
+    this.syncActiveIntoRuntimes();
+  }
+
+  /** Front-of-queue plan approval for the focused session (if any). */
+  private activePlanApproval(): PlanApprovalUi | undefined {
+    const entry = this.planApprovalQueue.find(
+      (e) =>
+        !e.ui.sessionId ||
+        !this.sessionId ||
+        e.ui.sessionId === this.sessionId,
+    );
+    return entry?.ui;
+  }
+
+  /** Front-of-queue questionnaire for the focused session (if any). */
+  private activeQuestion(): AskUserQuestionUi | undefined {
+    const entry = this.questionQueue.find(
+      (e) =>
+        !e.ui.sessionId ||
+        !this.sessionId ||
+        e.ui.sessionId === this.sessionId,
+    );
+    return entry?.ui;
+  }
+
+  private cloneQuestionUi(ui: AskUserQuestionUi): AskUserQuestionUi {
+    return {
+      ...ui,
+      questions: ui.questions.map((q) => ({
+        ...q,
+        options: q.options.map((o) => ({ ...o })),
+      })),
     };
   }
 
@@ -736,14 +917,26 @@ export class AgentBackend {
       reasoningEffort: this.reasoningEffort,
       availableModels: this.availableModels,
       toolIndex: this.toolIndex,
+      todos: this.todos,
+      planContent: this.planContent,
       hydrated: prev?.hydrated ?? true,
     });
   }
 
   private sessionRunStatus(sessionId: string): SessionRunStatus {
     if (
+      this.questionQueue.some(
+        (e) => e.ui.sessionId === sessionId,
+      )
+    ) {
+      return "needs_question";
+    }
+    if (
       this.permissionQueue.some(
         (e) => e.sessionId === sessionId,
+      ) ||
+      this.planApprovalQueue.some(
+        (e) => e.ui.sessionId === sessionId,
       )
     ) {
       return "needs_permission";
@@ -773,6 +966,8 @@ export class AgentBackend {
         ...rt,
         timeline: rt.timeline.slice(),
         toolIndex: new Map(rt.toolIndex),
+        todos: rt.todos.map((t) => ({ ...t })),
+        planContent: rt.planContent,
         availableModels: rt.availableModels.map((m) => ({
           ...m,
           reasoningEfforts: m.reasoningEfforts?.map((e) => ({ ...e })),
@@ -783,12 +978,16 @@ export class AgentBackend {
     this.sessionTitle = undefined;
     this.timeline = [];
     this.toolIndex = new Map();
+    this.todos = [];
+    this.planContent = undefined;
     this.busy = false;
     this.replaying = false;
     this.compacting = false;
     this.compactTimelineId = null;
     this.streamingAssistantId = null;
     this.streamingThoughtId = null;
+    this.inThinkTag = false;
+    this.thinkHold = "";
     this.tokensUsed = undefined;
     // Keep workspace until next hydrate — UI may still show path briefly.
   }
@@ -815,6 +1014,8 @@ export class AgentBackend {
       if (cur) this.acceptsImages = cur.acceptsImages !== false;
     }
     this.toolIndex = rt.toolIndex;
+    this.todos = rt.todos;
+    this.planContent = rt.planContent;
   }
 
   /**
@@ -847,6 +1048,8 @@ export class AgentBackend {
           reasoningEffort: this.reasoningEffort,
           availableModels: this.availableModels,
           toolIndex: this.toolIndex,
+          todos: this.todos,
+          planContent: this.planContent,
           hydrated: true,
         }
       : null;
@@ -863,12 +1066,16 @@ export class AgentBackend {
         this.sessionTitle = undefined;
         this.timeline = [];
         this.toolIndex = new Map();
+        this.todos = [];
+        this.planContent = undefined;
         this.busy = false;
         this.replaying = false;
         this.compacting = false;
         this.compactTimelineId = null;
         this.streamingAssistantId = null;
         this.streamingThoughtId = null;
+        this.inThinkTag = false;
+        this.thinkHold = "";
         this.tokensUsed = undefined;
       }
     }
@@ -1021,6 +1228,126 @@ export class AgentBackend {
   }
 
   /**
+   * Resolve a pending `x.ai/ask_user_question` questionnaire.
+   * Never auto-answered by YOLO.
+   */
+  respondAskUserQuestion(
+    requestId: string,
+    response: AskUserQuestionResponse,
+  ): void {
+    const idx = this.questionQueue.findIndex(
+      (e) => e.ui.requestId === requestId,
+    );
+    if (idx < 0) {
+      this.log("warn", `Ask-user-question response for unknown id=${requestId}`);
+      return;
+    }
+    const [entry] = this.questionQueue.splice(idx, 1);
+    if (!entry) return;
+
+    const wire = this.toAskUserQuestionWire(response);
+    this.log(
+      "info",
+      `Ask-user-question ${response.outcome} requestId=${requestId}` +
+        (entry.ui.sessionId ? ` session=${entry.ui.sessionId}` : ""),
+    );
+    entry.resolve(wire);
+    this.emitSnapshot();
+  }
+
+  /** Map UI response → ACP wire JSON (AskUserQuestionExtResponse). */
+  private toAskUserQuestionWire(response: AskUserQuestionResponse): JsonValue {
+    if (response.outcome === "accepted") {
+      const body: Record<string, JsonValue> = {
+        outcome: "accepted",
+        answers: response.answers as unknown as JsonValue,
+      };
+      if (response.annotations && Object.keys(response.annotations).length > 0) {
+        body.annotations = response.annotations as unknown as JsonValue;
+      }
+      return body;
+    }
+    if (response.outcome === "chat_about_this") {
+      return {
+        outcome: "chat_about_this",
+        partial_answers: (response.partial_answers ?? {}) as unknown as JsonValue,
+      };
+    }
+    if (response.outcome === "skip_interview") {
+      return {
+        outcome: "skip_interview",
+        partial_answers: (response.partial_answers ?? {}) as unknown as JsonValue,
+      };
+    }
+    return { outcome: "cancelled" };
+  }
+
+  /**
+   * Resolve a pending `x.ai/exit_plan_mode` approval.
+   * Never auto-approved by YOLO — plan mode always needs an explicit decision.
+   */
+  respondPlanApproval(
+    requestId: string,
+    outcome: PlanApprovalOutcome,
+    feedback?: string,
+  ): void {
+    const idx = this.planApprovalQueue.findIndex(
+      (e) => e.ui.requestId === requestId,
+    );
+    if (idx < 0) {
+      this.log("warn", `Plan approval response for unknown id=${requestId}`);
+      return;
+    }
+    const [entry] = this.planApprovalQueue.splice(idx, 1);
+    if (!entry) return;
+
+    const fb =
+      outcome === "cancelled" && feedback?.trim()
+        ? feedback.trim()
+        : undefined;
+    const result: Record<string, JsonValue> = { outcome };
+    if (fb) result.feedback = fb;
+
+    this.log(
+      "info",
+      `Plan approval ${outcome} requestId=${requestId}` +
+        (fb ? ` feedback=${fb.slice(0, 80)}` : ""),
+    );
+    entry.resolve(result);
+    this.emitSnapshot();
+  }
+
+  /**
+   * Re-read plan.md for the focused session from `~/.grok/sessions/...`.
+   */
+  async refreshPlanContent(): Promise<string | null> {
+    const body = await this.readPlanFile(
+      this.workspace,
+      this.sessionId,
+    );
+    if (body !== null) {
+      this.planContent = body || undefined;
+      this.syncActiveIntoRuntimes();
+      this.emitSnapshot();
+    }
+    return this.planContent ?? null;
+  }
+
+  private async readPlanFile(
+    cwd: string | undefined,
+    sessionId: string | undefined,
+  ): Promise<string | null> {
+    if (!cwd?.trim() || !sessionId?.trim()) return null;
+    try {
+      const path = planFilePath(cwd, sessionId);
+      const text = await readFile(path, "utf8");
+      return text;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Toggle always-approve (YOLO). Notifies the agent, persists config, and
    * when enabling drains any queued permission prompts with allow-once.
    */
@@ -1109,6 +1436,38 @@ export class AgentBackend {
       );
       entry.resolve({ outcome: { outcome: "cancelled" } });
     }
+  }
+
+  private cancelAllQuestions(reason: string): void {
+    if (this.questionQueue.length === 0) return;
+    const pending = this.questionQueue.splice(0);
+    for (const entry of pending) {
+      this.log(
+        "info",
+        `Ask-user-question auto-cancelled (${reason}) requestId=${entry.ui.requestId}`,
+      );
+      entry.resolve({ outcome: "cancelled" });
+    }
+  }
+
+  private cancelQuestionsForSession(sessionId: string, reason: string): void {
+    const kept: PendingQuestionEntry[] = [];
+    for (const entry of this.questionQueue) {
+      if (entry.ui.sessionId && entry.ui.sessionId !== sessionId) {
+        kept.push(entry);
+        continue;
+      }
+      if (!entry.ui.sessionId && this.sessionId !== sessionId) {
+        kept.push(entry);
+        continue;
+      }
+      this.log(
+        "info",
+        `Ask-user-question auto-cancelled (${reason}) requestId=${entry.ui.requestId}`,
+      );
+      entry.resolve({ outcome: "cancelled" });
+    }
+    this.questionQueue = kept;
   }
 
   private applyModelsFromSession(modelsVal: JsonValue | undefined): void {
@@ -1214,7 +1573,14 @@ export class AgentBackend {
   }
 
   private pushTimeline(item: TimelineItem): void {
-    this.timeline.push(item);
+    // Stamp creation time for UI hover-tooltips. Live pushes get the real
+    // wall-clock at send/receive time; replayed items get the load time
+    // (the agent protocol doesn't carry historical timestamps yet).
+    const stamped: TimelineItem =
+      typeof item.createdAt === "number"
+        ? item
+        : { ...item, createdAt: Date.now() };
+    this.timeline.push(stamped);
     // Cold session load: accumulate silently. One snapshot at start (empty +
     // replaying) and one at end (full history) — intermediate frames force the
     // renderer to re-parse growing markdown and feel like a hung switch.
@@ -1248,6 +1614,7 @@ export class AgentBackend {
     // Only drop permissions for the focused session — keep other sessions' queues.
     if (this.sessionId) {
       this.cancelPermissionsForSession(this.sessionId, "timeline clear");
+      this.cancelQuestionsForSession(this.sessionId, "timeline clear");
     }
   }
 
@@ -1321,8 +1688,31 @@ export class AgentBackend {
 
   /** Mark open stream bubbles as finished and drop stream tracking ids. */
   private finalizeStreaming(): void {
+    // Flush any held unclosed <think> tail as thought text (best-effort).
+    if (this.thinkHold) {
+      if (this.streamingThoughtId) {
+        const tail = this.thinkHold;
+        this.updateTimeline(this.streamingThoughtId, (item) =>
+          item.kind === "thought"
+            ? { ...item, text: item.text + tail }
+            : item,
+        );
+      } else {
+        this.streamingThoughtId = newId("th");
+        this.pushTimeline({
+          id: this.streamingThoughtId,
+          kind: "thought",
+          text: this.thinkHold,
+          streaming: false,
+        });
+      }
+      this.thinkHold = "";
+      this.inThinkTag = false;
+    }
     this.finalizeStreamingAssistant();
     this.finalizeStreamingThought();
+    this.inThinkTag = false;
+    this.thinkHold = "";
   }
 
   private finalizeStreamingAssistant(): void {
@@ -1341,6 +1731,85 @@ export class AgentBackend {
       );
     }
     this.streamingThoughtId = null;
+  }
+
+  /**
+   * Stateful parser for `<think>...</think>` tags embedded in assistant
+   * content. Returns deltas to push to the thought/assistant bubbles
+   * plus flags indicating whether a thought region just opened/closed.
+   * Holds any partial tag at the end of the buffer for the next chunk.
+   */
+  private ingestThinkTags(chunk: string): {
+    thoughtDelta: string;
+    assistantDelta: string;
+    openThought: boolean;
+    closeThought: boolean;
+  } {
+    const OPEN = "<think>";
+    const CLOSE = "</think>";
+    const buf0 = this.thinkHold + chunk;
+    this.thinkHold = "";
+    let thoughtDelta = "";
+    let assistantDelta = "";
+    let openThought = false;
+    let closeThought = false;
+    let i = 0;
+
+    while (i < buf0.length) {
+      if (!this.inThinkTag) {
+        // Find next <think> starting at i.
+        const open = buf0.indexOf(OPEN, i);
+        if (open === -1) {
+          // No complete <think> in the rest of the buffer. Check the very
+          // end for a partial prefix we should defer to the next chunk.
+          const held = tailPrefixLen(buf0, i, OPEN);
+          if (held > 0) {
+            assistantDelta += buf0.slice(i, buf0.length - held);
+            this.thinkHold = buf0.slice(buf0.length - held);
+          } else {
+            assistantDelta += buf0.slice(i);
+          }
+          return { thoughtDelta, assistantDelta, openThought, closeThought };
+        }
+        // If the tag itself spills past the end of buf0, hold the whole
+        // tail and let the next chunk complete it.
+        if (open + OPEN.length > buf0.length) {
+          if (open > i) assistantDelta += buf0.slice(i, open);
+          this.thinkHold = buf0.slice(open);
+          return { thoughtDelta, assistantDelta, openThought, closeThought };
+        }
+        // Full <think> present.
+        if (open > i) assistantDelta += buf0.slice(i, open);
+        i = open + OPEN.length;
+        this.inThinkTag = true;
+        openThought = true;
+      } else {
+        // Find next </think> starting at i.
+        const close = buf0.indexOf(CLOSE, i);
+        if (close === -1) {
+          const held = tailPrefixLen(buf0, i, CLOSE);
+          if (held > 0) {
+            thoughtDelta += buf0.slice(i, buf0.length - held);
+            this.thinkHold = buf0.slice(buf0.length - held);
+          } else {
+            thoughtDelta += buf0.slice(i);
+          }
+          return { thoughtDelta, assistantDelta, openThought, closeThought };
+        }
+        if (close + CLOSE.length > buf0.length) {
+          if (close > i) thoughtDelta += buf0.slice(i, close);
+          this.thinkHold = buf0.slice(close);
+          return { thoughtDelta, assistantDelta, openThought, closeThought };
+        }
+        // Full </think> present.
+        if (close > i) thoughtDelta += buf0.slice(i, close);
+        i = close + CLOSE.length;
+        this.inThinkTag = false;
+        closeThought = true;
+      }
+    }
+
+    return { thoughtDelta, assistantDelta, openThought, closeThought };
   }
 
   async connect(): Promise<void> {
@@ -1435,6 +1904,7 @@ export class AgentBackend {
         this.log("warn", `WS closed ${code} ${reason}`);
         this.authenticated = false;
         this.cancelAllPermissions("ws close");
+        this.cancelAllQuestions("ws close");
         if (this.connection === "ready") {
           this.setState({
             connection: "error",
@@ -1656,6 +2126,8 @@ export class AgentBackend {
     this.compactTimelineId = null;
     this.streamingAssistantId = null;
     this.streamingThoughtId = null;
+    this.inThinkTag = false;
+    this.thinkHold = "";
   }
 
   /**
@@ -1673,8 +2145,9 @@ export class AgentBackend {
     const rt = this.runtimes.get(sessionId);
     const wasBusy = isActive ? this.busy : Boolean(rt?.busy);
 
-    // Drop permission prompts belonging to this session only.
+    // Drop permission prompts / questionnaires belonging to this session only.
     this.cancelPermissionsForSession(sessionId, reason);
+    this.cancelQuestionsForSession(sessionId, reason);
 
     if (isActive) {
       this.resetTurnFlags();
@@ -1850,6 +2323,8 @@ export class AgentBackend {
       this.tokensUsed = undefined;
       this.timeline = [];
       this.toolIndex = new Map();
+      this.todos = [];
+      this.planContent = undefined;
       this.resetTurnFlags();
       this.emitSnapshot();
 
@@ -1916,8 +2391,12 @@ export class AgentBackend {
       this.busy = false;
       this.timeline = [];
       this.toolIndex = new Map();
+      this.todos = [];
+      this.planContent = undefined;
       this.streamingAssistantId = null;
       this.streamingThoughtId = null;
+      this.inThinkTag = false;
+      this.thinkHold = "";
       this.compactTimelineId = null;
       this.compacting = false;
       this.workspace = cwd;
@@ -1945,6 +2424,8 @@ export class AgentBackend {
         const result = asRecord(
           await client.request("session/load", loadParams, 180_000),
         );
+        // Best-effort plan.md restore (session load may also replay Plan updates).
+        const planBody = await this.readPlanFile(cwd, sessionId);
         // User may have switched away while loading — apply to the right bag.
         if (this.sessionId !== sessionId) {
           const bag = this.runtimes.get(sessionId) ?? emptyRuntime(sessionId, cwd);
@@ -1954,6 +2435,7 @@ export class AgentBackend {
             this.replaying = false;
             this.busy = false;
             this.compacting = false;
+            if (planBody?.trim()) this.planContent = planBody;
             const known = this.sessions.find((s) => s.sessionId === sessionId);
             if (known) this.sessionTitle = known.title;
             this.markRuntimeHydrated(sessionId, true);
@@ -1963,6 +2445,7 @@ export class AgentBackend {
         }
         this.applyModelsFromSession(result?.models);
         this.finalizeStreaming();
+        if (planBody?.trim()) this.planContent = planBody;
         const known = this.sessions.find((s) => s.sessionId === sessionId);
         if (known) this.sessionTitle = known.title;
         this.markRuntimeHydrated(sessionId, true);
@@ -2286,6 +2769,8 @@ export class AgentBackend {
       this.pushTimeline({ id: newId("user"), kind: "user", text });
       this.streamingAssistantId = null;
       this.streamingThoughtId = null;
+      this.inThinkTag = false;
+      this.thinkHold = "";
       return;
     }
 
@@ -2293,26 +2778,61 @@ export class AgentBackend {
       const content = asRecord(update.content);
       const text = asString(content?.text) ?? "";
       if (!text) return;
-      // Thought block ended when assistant text starts — clear its caret.
+      // Close any open native thought caret before assistant text resumes.
       this.finalizeStreamingThought();
-      if (!this.streamingAssistantId) {
-        this.streamingAssistantId = newId("asst");
-        this.pushTimeline({
-          id: this.streamingAssistantId,
-          kind: "assistant",
-          text,
-          streaming,
-        });
-      } else {
-        const id = this.streamingAssistantId;
-        this.updateTimeline(
-          id,
-          (item) => {
-            if (item.kind !== "assistant") return item;
-            return { ...item, text: item.text + text, streaming };
-          },
-          { throttle: true },
-        );
+      // Some custom models (DeepSeek R1, Qwen QwQ, MiniMax, …) embed
+      // `<think>...</think>` inline in the assistant content. Split it
+      // out into its own collapsible thought bubble, leaving only the
+      // user-visible response text on the assistant bubble.
+      const parsed = this.ingestThinkTags(text);
+
+      // Thought side
+      if (parsed.thoughtDelta) {
+        if (!this.streamingThoughtId) {
+          this.streamingThoughtId = newId("th");
+          this.pushTimeline({
+            id: this.streamingThoughtId,
+            kind: "thought",
+            text: parsed.thoughtDelta,
+            streaming,
+          });
+        } else {
+          const id = this.streamingThoughtId;
+          this.updateTimeline(
+            id,
+            (item) =>
+              item.kind === "thought"
+                ? { ...item, text: item.text + parsed.thoughtDelta, streaming }
+                : item,
+            { throttle: true },
+          );
+        }
+      }
+      if (parsed.closeThought) {
+        this.finalizeStreamingThought();
+      }
+
+      // Assistant side
+      if (parsed.assistantDelta) {
+        if (!this.streamingAssistantId) {
+          this.streamingAssistantId = newId("asst");
+          this.pushTimeline({
+            id: this.streamingAssistantId,
+            kind: "assistant",
+            text: parsed.assistantDelta,
+            streaming,
+          });
+        } else {
+          const id = this.streamingAssistantId;
+          this.updateTimeline(
+            id,
+            (item) =>
+              item.kind === "assistant"
+                ? { ...item, text: item.text + parsed.assistantDelta, streaming }
+                : item,
+            { throttle: true },
+          );
+        }
       }
       return;
     }
@@ -2534,6 +3054,18 @@ export class AgentBackend {
       return;
     }
 
+    // ACP Plan = todo list from todo_write (and turn-end cleanup).
+    if (kind === "plan") {
+      const entries =
+        (update.entries as JsonValue | undefined) ??
+        (update.planEntries as JsonValue | undefined);
+      this.todos = parsePlanEntries(entries);
+      this.syncActiveIntoRuntimes();
+      // Replay can restore the last plan list; live updates always emit.
+      this.emitSnapshot();
+      return;
+    }
+
     // turn_completed / session_recap / retry_state: ignore for now
   }
 
@@ -2587,8 +3119,315 @@ export class AgentBackend {
         this.emitSnapshot();
       });
     }
+
+    // Structured questionnaire: top-level `x.ai/ask_user_question` or nested
+    // under `ext_method` / `_x.ai/ask_user_question`.
+    if (
+      method === "ext_method" ||
+      method === "x.ai/ask_user_question" ||
+      method === "_x.ai/ask_user_question" ||
+      method.endsWith("ask_user_question")
+    ) {
+      const handled = await this.handleAskUserQuestionRequest(method, params);
+      if (handled !== undefined) return handled;
+    }
+
+    // Plan approval: JSON-RPC method may be top-level `x.ai/exit_plan_mode`
+    // or nested under ACP `ext_method` with method field.
+    if (
+      method === "ext_method" ||
+      method === "x.ai/exit_plan_mode" ||
+      method.endsWith("exit_plan_mode")
+    ) {
+      const handled = await this.handleExitPlanModeRequest(method, params);
+      if (handled !== undefined) return handled;
+    }
+
     this.log("warn", `Unhandled reverse request: ${method}`);
     return {};
+  }
+
+  /**
+   * Handle `x.ai/ask_user_question` reverse request.
+   * Returns the ExtResponse body, or `undefined` if params are not a questionnaire
+   * (so `ext_method` can fall through to exit_plan_mode).
+   */
+  private async handleAskUserQuestionRequest(
+    method: string,
+    params: JsonValue | undefined,
+  ): Promise<JsonValue | undefined> {
+    let body = asRecord(params);
+
+    // Wrapped shapes:
+    //   ext_method / _x.ai/ask_user_question:
+    //     { method: "x.ai/ask_user_question", params: { sessionId, questions, … } }
+    // Top-level x.ai/ask_user_question already has the ExtRequest fields as params.
+    if (body) {
+      const nestedMethod =
+        asString(body.method) ?? asString(body.extMethod);
+      const looksWrapped =
+        nestedMethod === "x.ai/ask_user_question" ||
+        (typeof nestedMethod === "string" &&
+          nestedMethod.endsWith("ask_user_question"));
+      const hasNestedParams =
+        asRecord(body.params as JsonValue) != null ||
+        asRecord(body.arguments as JsonValue) != null ||
+        (typeof body.params === "string" &&
+          body.params.trim().startsWith("{"));
+
+      if (method === "ext_method" || method === "_x.ai/ask_user_question") {
+        if (
+          nestedMethod &&
+          nestedMethod !== "x.ai/ask_user_question" &&
+          !nestedMethod.endsWith("ask_user_question")
+        ) {
+          return undefined;
+        }
+        if (looksWrapped || hasNestedParams) {
+          const nested =
+            asRecord(body.params as JsonValue) ??
+            asRecord(body.arguments as JsonValue);
+          if (nested) {
+            body = nested;
+          } else if (
+            typeof body.params === "string" &&
+            body.params.trim().startsWith("{")
+          ) {
+            try {
+              body = asRecord(JSON.parse(body.params) as JsonValue);
+            } catch {
+              /* keep body */
+            }
+          }
+        }
+      } else if (looksWrapped && hasNestedParams) {
+        // Some gateways nest even on top-level method names.
+        const nested =
+          asRecord(body.params as JsonValue) ??
+          asRecord(body.arguments as JsonValue);
+        if (nested) body = nested;
+      }
+    }
+
+    if (!body) {
+      if (method === "ext_method") return undefined;
+      this.log("warn", "ask_user_question with empty params; cancelling");
+      return { outcome: "cancelled" };
+    }
+
+    const questionsRaw =
+      (body.questions as JsonValue | undefined) ??
+      (body.Questions as JsonValue | undefined);
+
+    // For generic ext_method, require a questions array so we don't steal
+    // exit_plan_mode or other extensions.
+    if (method === "ext_method" && !Array.isArray(questionsRaw)) {
+      return undefined;
+    }
+
+    const sessionId =
+      asString(body.sessionId) ??
+      asString(body.session_id) ??
+      this.sessionId;
+    const toolCallId =
+      asString(body.toolCallId) ?? asString(body.tool_call_id);
+    const modeRaw = asString(body.mode)?.toLowerCase() ?? "default";
+    const mode: AskUserQuestionMode =
+      modeRaw === "plan" ? "plan" : "default";
+
+    const questions = this.parseAskUserQuestions(questionsRaw);
+    if (questions.length === 0) {
+      this.log(
+        "warn",
+        "ask_user_question with no parseable questions; cancelling",
+      );
+      return { outcome: "cancelled" };
+    }
+
+    const ui: AskUserQuestionUi = {
+      requestId: newId("askq"),
+      sessionId,
+      toolCallId,
+      questions,
+      mode,
+    };
+
+    this.log(
+      "info",
+      `Ask-user-question requested (${questions.length} q, mode=${mode})` +
+        (sessionId ? ` session=${sessionId}` : "") +
+        (toolCallId ? ` toolCallId=${toolCallId}` : ""),
+    );
+
+    // Never YOLO-auto-answer questionnaires.
+    return await new Promise<JsonValue>((resolve) => {
+      // Replace any prior questionnaire for the same session.
+      for (let i = this.questionQueue.length - 1; i >= 0; i--) {
+        const prev = this.questionQueue[i];
+        if (
+          prev &&
+          prev.ui.sessionId &&
+          sessionId &&
+          prev.ui.sessionId === sessionId
+        ) {
+          prev.resolve({ outcome: "cancelled" });
+          this.questionQueue.splice(i, 1);
+        }
+      }
+      this.questionQueue.push({ ui, resolve });
+      this.emitSnapshot();
+    });
+  }
+
+  private parseAskUserQuestions(
+    raw: JsonValue | undefined,
+  ): AskUserQuestionItemUi[] {
+    if (!Array.isArray(raw)) return [];
+    const out: AskUserQuestionItemUi[] = [];
+    for (const item of raw) {
+      const rec = asRecord(item as JsonValue);
+      if (!rec) continue;
+      const question =
+        asString(rec.question) ?? asString(rec.Question) ?? "";
+      if (!question.trim()) continue;
+      const optsRaw =
+        (rec.options as JsonValue | undefined) ??
+        (rec.Options as JsonValue | undefined);
+      const options: AskUserQuestionOptionUi[] = [];
+      if (Array.isArray(optsRaw)) {
+        for (const o of optsRaw) {
+          const or = asRecord(o as JsonValue);
+          if (!or) continue;
+          const label = asString(or.label) ?? asString(or.Label) ?? "";
+          if (!label.trim()) continue;
+          options.push({
+            label,
+            description:
+              asString(or.description) ??
+              asString(or.Description) ??
+              "",
+            preview:
+              asString(or.preview) ?? asString(or.Preview) ?? undefined,
+          });
+        }
+      }
+      const multi =
+        rec.multiSelect === true ||
+        rec.multi_select === true ||
+        asString(rec.multiSelect)?.toLowerCase() === "true" ||
+        asString(rec.multi_select)?.toLowerCase() === "true";
+      out.push({
+        question,
+        options,
+        multiSelect: multi,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Handle `x.ai/exit_plan_mode` reverse request.
+   * Returns the ExtResponse body, or `undefined` if params are not plan-approval.
+   */
+  private async handleExitPlanModeRequest(
+    method: string,
+    params: JsonValue | undefined,
+  ): Promise<JsonValue | undefined> {
+    let body = asRecord(params);
+    // ACP ExtRequest shape: { method: "x.ai/exit_plan_mode", params: {...} }
+    if (method === "ext_method" && body) {
+      const nestedMethod =
+        asString(body.method) ?? asString(body.extMethod);
+      if (
+        nestedMethod &&
+        nestedMethod !== "x.ai/exit_plan_mode" &&
+        !nestedMethod.endsWith("exit_plan_mode")
+      ) {
+        return undefined;
+      }
+      const nested =
+        asRecord(body.params as JsonValue) ??
+        asRecord(body.arguments as JsonValue);
+      if (nested) body = nested;
+      else if (
+        typeof body.params === "string" &&
+        body.params.trim().startsWith("{")
+      ) {
+        try {
+          body = asRecord(JSON.parse(body.params) as JsonValue);
+        } catch {
+          /* keep body */
+        }
+      }
+    }
+    if (!body) {
+      this.log("warn", "exit_plan_mode with empty params; cancelling");
+      return { outcome: "cancelled" };
+    }
+
+    const sessionId =
+      asString(body.sessionId) ??
+      asString(body.session_id) ??
+      this.sessionId;
+    const toolCallId =
+      asString(body.toolCallId) ?? asString(body.tool_call_id);
+    const planContent =
+      asString(body.planContent) ??
+      asString(body.plan_content) ??
+      undefined;
+    const hasPlan = Boolean(planContent?.trim());
+
+    // Apply plan body to the owning session (may be background).
+    const applyPlan = () => {
+      if (hasPlan && planContent) {
+        this.planContent = planContent;
+      }
+    };
+    if (
+      sessionId &&
+      this.sessionId &&
+      sessionId !== this.sessionId &&
+      this.runtimes.has(sessionId)
+    ) {
+      const bag = this.runtimes.get(sessionId)!;
+      this.withParkedRuntime(bag, applyPlan);
+    } else {
+      applyPlan();
+    }
+
+    const ui: PlanApprovalUi = {
+      requestId: newId("plan"),
+      sessionId,
+      toolCallId,
+      planContent: hasPlan ? planContent : undefined,
+      hasPlan,
+    };
+
+    this.log(
+      "info",
+      `Plan approval requested` +
+        (sessionId ? ` session=${sessionId}` : "") +
+        (hasPlan ? ` (${planContent!.length} chars)` : " (empty plan)"),
+    );
+
+    // Never YOLO-auto-approve plan exits — same as CLI.
+    return await new Promise<JsonValue>((resolve) => {
+      // Replace any prior approval for the same session.
+      for (let i = this.planApprovalQueue.length - 1; i >= 0; i--) {
+        const prev = this.planApprovalQueue[i];
+        if (
+          prev &&
+          prev.ui.sessionId &&
+          sessionId &&
+          prev.ui.sessionId === sessionId
+        ) {
+          prev.resolve({ outcome: "cancelled" });
+          this.planApprovalQueue.splice(i, 1);
+        }
+      }
+      this.planApprovalQueue.push({ ui, resolve });
+      this.emitSnapshot();
+    });
   }
 
   /**
@@ -2767,6 +3606,10 @@ export class AgentBackend {
       applyToPromptSession(() => {
         this.finalizeStreaming();
         this.busy = false;
+        // Drop turn-scoped todo checklist so the next snapshot reports an
+        // empty list. plan.md on disk is preserved; only the UI mirror is
+        // cleared (plan mode approvals in planApprovalQueue stay).
+        this.clearTurnPlanArtifacts();
         // Prompt settled while a compact card is still open (cancel / missed event).
         if (this.compacting) {
           this.finishCompact(isManualCompact ? "cancelled" : "completed");
@@ -2850,6 +3693,7 @@ export class AgentBackend {
     // Only cancel the focused session — other concurrent turns keep running.
     const sid = this.sessionId;
     this.cancelPermissionsForSession(sid, "session cancel");
+    this.cancelQuestionsForSession(sid, "session cancel");
     this.emitSnapshot();
     try {
       await this.client.request("session/cancel", {
@@ -2861,7 +3705,8 @@ export class AgentBackend {
         this.finishCompact("cancelled");
       }
       this.busy = false;
-      this.syncActiveIntoRuntimes();
+      this.clearTurnPlanArtifacts();
+      // clearTurnPlanArtifacts() already syncActiveIntoRuntimes(); just emit.
       this.emitSnapshot();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -2911,6 +3756,7 @@ export class AgentBackend {
     this.sessionId = undefined;
     this.runtimes.clear();
     this.cancelAllPermissions("stop");
+    this.cancelAllQuestions("stop");
     await this.stopProcessOnly();
     this.emitSnapshot();
   }

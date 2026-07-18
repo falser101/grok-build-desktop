@@ -24,14 +24,27 @@ import {
   uninstallPlugin,
   type AddMcpInput,
 } from "./extensions-manager";
+import {
+  addFromPreset,
+  deleteProvider,
+  fetchProviderModels,
+  getConfigKeyIndex,
+  listPresets,
+  listProviders,
+  upsertProvider,
+} from "./model-providers";
 import { listWorkspaceDir, readWorkspaceFile } from "./workspace-fs";
 import { TerminalHost } from "./terminal-host";
 import type {
   AccountLoginMethod,
+  AskUserQuestionResponse,
+  FetchModelsInput,
   McpServerScope,
+  PlanApprovalOutcome,
   PromptPayload,
   SearchSessionsOptions,
   SessionModeId,
+  UpsertProviderInput,
 } from "../shared/types";
 
 const backend = new AgentBackend();
@@ -419,6 +432,60 @@ function registerIpc(): void {
   );
 
   ipcMain.handle(
+    "agent:respondAskUserQuestion",
+    async (_e, requestId: string, response: AskUserQuestionResponse) => {
+      if (typeof requestId !== "string" || !requestId.trim()) {
+        throw new Error("requestId is required");
+      }
+      if (!response || typeof response !== "object") {
+        throw new Error("response is required");
+      }
+      const outcome = (response as { outcome?: string }).outcome;
+      if (
+        outcome !== "accepted" &&
+        outcome !== "chat_about_this" &&
+        outcome !== "skip_interview" &&
+        outcome !== "cancelled"
+      ) {
+        throw new Error(
+          "outcome must be accepted | chat_about_this | skip_interview | cancelled",
+        );
+      }
+      backend.respondAskUserQuestion(requestId, response);
+    },
+  );
+
+  ipcMain.handle(
+    "agent:respondPlanApproval",
+    async (
+      _e,
+      requestId: string,
+      outcome: PlanApprovalOutcome,
+      feedback?: string,
+    ) => {
+      if (typeof requestId !== "string" || !requestId.trim()) {
+        throw new Error("requestId is required");
+      }
+      if (
+        outcome !== "approved" &&
+        outcome !== "cancelled" &&
+        outcome !== "abandoned"
+      ) {
+        throw new Error("outcome must be approved | cancelled | abandoned");
+      }
+      backend.respondPlanApproval(
+        requestId,
+        outcome,
+        typeof feedback === "string" ? feedback : undefined,
+      );
+    },
+  );
+
+  ipcMain.handle("agent:refreshPlanContent", async () => {
+    return backend.refreshPlanContent();
+  });
+
+  ipcMain.handle(
     "agent:setAlwaysApprove",
     async (_e, enabled: boolean) => {
       if (typeof enabled !== "boolean") {
@@ -585,6 +652,45 @@ function registerIpc(): void {
   ipcMain.handle("ext:getPaths", async () => {
     return getConfigPaths(workspaceCwd());
   });
+
+  // ── Custom model providers ──────────────────────────────────────
+
+  ipcMain.handle("models:listPresets", () => listPresets());
+  ipcMain.handle("models:listProviders", async () => listProviders());
+  ipcMain.handle(
+    "models:upsertProvider",
+    async (_e, input: UpsertProviderInput) => {
+      if (!input || typeof input !== "object") {
+        throw new Error("provider input is required");
+      }
+      return upsertProvider(input);
+    },
+  );
+  ipcMain.handle("models:deleteProvider", async (_e, id: string) => {
+    if (typeof id !== "string" || !id.trim()) {
+      throw new Error("provider id is required");
+    }
+    await deleteProvider(id.trim());
+  });
+  ipcMain.handle(
+    "models:addFromPreset",
+    async (_e, presetId: string, overrides?: Partial<UpsertProviderInput>) => {
+      if (typeof presetId !== "string" || !presetId.trim()) {
+        throw new Error("presetId is required");
+      }
+      return addFromPreset(presetId.trim(), overrides);
+    },
+  );
+  ipcMain.handle(
+    "models:fetchModels",
+    async (_e, input: FetchModelsInput) => {
+      if (!input || typeof input.baseUrl !== "string") {
+        throw new Error("baseUrl is required");
+      }
+      return fetchProviderModels(input);
+    },
+  );
+  ipcMain.handle("models:getConfigKeyIndex", async () => getConfigKeyIndex());
 
   // ── Account ─────────────────────────────────────────────────────
 
