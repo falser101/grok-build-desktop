@@ -26,9 +26,9 @@ export interface ToolDiff {
 }
 
 export type TimelineItem =
-  | { id: string; kind: "user"; text: string }
-  | { id: string; kind: "thought"; text: string; streaming?: boolean }
-  | { id: string; kind: "assistant"; text: string; streaming?: boolean }
+  | { id: string; kind: "user"; text: string; createdAt?: number }
+  | { id: string; kind: "thought"; text: string; streaming?: boolean; createdAt?: number }
+  | { id: string; kind: "assistant"; text: string; streaming?: boolean; createdAt?: number }
   | {
       id: string;
       kind: "tool";
@@ -45,6 +45,7 @@ export type TimelineItem =
       outputText?: string;
       /** True when UI truncated large output for display. */
       outputTruncated?: boolean;
+      createdAt?: number;
     }
   | {
       id: string;
@@ -56,15 +57,18 @@ export type TimelineItem =
       tokensBefore?: number;
       tokensAfter?: number;
       message?: string;
+      createdAt?: number;
     }
-  | { id: string; kind: "system"; text: string };
+  | { id: string; kind: "system"; text: string; createdAt?: number };
 
 /** Live status for a session in the sidebar (desktop multi-session). */
 export type SessionRunStatus =
   | "idle"
   | "running"
   | "loading"
-  | "needs_permission";
+  | "needs_permission"
+  /** Waiting on `x.ai/ask_user_question` (interview / structured Q&A). */
+  | "needs_question";
 
 export interface SessionSummary {
   sessionId: string;
@@ -182,6 +186,98 @@ export interface PermissionRequestUi {
   defaultOptionIndex: number;
 }
 
+/** ACP Plan entry status (todo list via sessionUpdate "plan"). */
+export type TodoStatus =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "cancelled";
+
+export type TodoPriority = "high" | "medium" | "low";
+
+/** One todo / plan entry from ACP `sessionUpdate: "plan"`. */
+export interface TodoItemUi {
+  /** Stable-ish id for React keys (meta.id or index-based). */
+  id: string;
+  content: string;
+  status: TodoStatus;
+  priority: TodoPriority;
+}
+
+/**
+ * Pending `x.ai/exit_plan_mode` approval (not YOLO-auto-allowed).
+ * User must approve, request changes, or abandon.
+ */
+export interface PlanApprovalUi {
+  requestId: string;
+  sessionId?: string;
+  toolCallId?: string;
+  /** Markdown body of the proposed plan (may be empty). */
+  planContent?: string;
+  hasPlan: boolean;
+}
+
+/** Outcomes for `x.ai/exit_plan_mode` reverse request. */
+export type PlanApprovalOutcome = "approved" | "cancelled" | "abandoned";
+
+/** One option inside an `ask_user_question` question. */
+export interface AskUserQuestionOptionUi {
+  label: string;
+  description: string;
+  /** Optional focused preview (single-select only). */
+  preview?: string;
+}
+
+/** One structured question from `x.ai/ask_user_question`. */
+export interface AskUserQuestionItemUi {
+  question: string;
+  options: AskUserQuestionOptionUi[];
+  multiSelect: boolean;
+}
+
+/** Mode for the question UI (plan mode shows extra actions). */
+export type AskUserQuestionMode = "default" | "plan";
+
+/**
+ * Pending `x.ai/ask_user_question` questionnaire (blocks the tool call).
+ * Never YOLO-auto-answered.
+ */
+export interface AskUserQuestionUi {
+  requestId: string;
+  sessionId?: string;
+  toolCallId?: string;
+  questions: AskUserQuestionItemUi[];
+  mode: AskUserQuestionMode;
+}
+
+/** Per-question freeform notes / option preview annotations. */
+export interface AskUserQuestionAnnotation {
+  preview?: string;
+  notes?: string;
+}
+
+/**
+ * Client response for `x.ai/ask_user_question`
+ * (wire-compatible with AskUserQuestionExtResponse).
+ */
+export type AskUserQuestionResponse =
+  | {
+      outcome: "accepted";
+      /** Question text → selected label(s). Freeform-only → `["Other"]`. */
+      answers: Record<string, string[]>;
+      annotations?: Record<string, AskUserQuestionAnnotation>;
+    }
+  | {
+      outcome: "chat_about_this";
+      /** Partial answers (label only, no notes). Plan mode only. */
+      partial_answers?: Record<string, string>;
+    }
+  | {
+      outcome: "skip_interview";
+      partial_answers?: Record<string, string>;
+    }
+  | { outcome: "cancelled" };
+
 /**
  * Subscription / coding-credit usage from agent `x.ai/billing`
  * (same source as CLI `/usage`).
@@ -250,10 +346,27 @@ export interface AppSnapshot {
   /** Active permission prompt (front of queue), if any. */
   pendingPermission?: PermissionRequestUi;
   /**
+   * Active structured questionnaire (`x.ai/ask_user_question`) for the
+   * focused session. Takes UI priority over permission prompts.
+   */
+  pendingQuestion?: AskUserQuestionUi;
+  /**
    * Always-approve (YOLO) mode: tools run without permission prompts.
    * Synced with agent via `x.ai/yolo_mode_changed` and `~/.grok/config.toml`.
    */
   alwaysApprove: boolean;
+  /**
+   * Live todo list for the focused session
+   * (from ACP `sessionUpdate: "plan"` / `todo_write`).
+   */
+  todos: TodoItemUi[];
+  /**
+   * Latest plan.md body for the focused session (from approval request
+   * or `~/.grok/sessions/.../plan.md` on load).
+   */
+  planContent?: string;
+  /** Pending plan-mode exit approval for the focused session. */
+  pendingPlanApproval?: PlanApprovalUi;
 }
 
 export type AgentUiEvent =
@@ -349,6 +462,111 @@ export interface ExtensionsConfigPaths {
   skillsUser: string;
   hooksUser: string;
 }
+
+// ── Custom model providers ──────────────────────────────────────────
+
+/** OpenAI / Anthropic wire protocol for a custom model. */
+export type ApiBackend = "chat_completions" | "responses" | "messages";
+
+export type ModelProviderRegion = "intl" | "cn" | "local";
+
+export type ModelProviderAuthStyle = "bearer" | "x-api-key";
+
+/** Built-in catalog entry for quick add. */
+export interface ModelProviderPreset {
+  id: string;
+  name: string;
+  nameZh: string;
+  region: ModelProviderRegion;
+  /** Default base URL for the default apiBackend (full prefix; agent appends protocol path). */
+  baseUrl: string;
+  apiBackend: ApiBackend;
+  /**
+   * Optional full base URLs for each protocol this vendor exposes.
+   * Selecting a protocol in the UI sets `baseUrl` to the matching entry
+   * (e.g. MiniMax messages → `…/anthropic/v1`, chat_completions → `…/v1`).
+   */
+  protocolEndpoints?: Partial<Record<ApiBackend, string>>;
+  /**
+   * Base URL used for `GET …/models` listing when it differs from the
+   * active inference base (e.g. Anthropic-compatible path has no /models).
+   */
+  modelsListBaseUrl?: string;
+  envKey?: string;
+  authStyle?: ModelProviderAuthStyle;
+  extraHeaders?: Record<string, string>;
+  popularModels?: { id: string; name: string }[];
+}
+
+/** One model enabled (or listed) under a provider. */
+export interface ModelProviderModel {
+  /** Model id sent to the provider API. */
+  id: string;
+  /** Display name. */
+  name: string;
+  /** config.toml section key (`[model.<configKey>]`), also agent modelId. */
+  configKey: string;
+  source: "fetched" | "manual";
+  enabled: boolean;
+}
+
+/** User-configured provider instance (may have multiple models). */
+export interface ModelProviderConfig {
+  id: string;
+  presetId?: string;
+  name: string;
+  baseUrl: string;
+  apiBackend: ApiBackend;
+  /** Stored API key (also written into config.toml for the agent). */
+  apiKey?: string;
+  envKey?: string;
+  enabled: boolean;
+  extraHeaders?: Record<string, string>;
+  authStyle?: ModelProviderAuthStyle;
+  models: ModelProviderModel[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface UpsertProviderInput {
+  id?: string;
+  presetId?: string;
+  name?: string;
+  baseUrl?: string;
+  apiBackend?: ApiBackend;
+  apiKey?: string | null;
+  envKey?: string | null;
+  enabled?: boolean;
+  extraHeaders?: Record<string, string>;
+  authStyle?: ModelProviderAuthStyle;
+  models?: Array<{
+    id: string;
+    name: string;
+    configKey?: string;
+    source?: "fetched" | "manual";
+    enabled?: boolean;
+  }>;
+}
+
+export interface FetchedModelInfo {
+  id: string;
+  name: string;
+  ownedBy?: string;
+}
+
+export interface FetchModelsInput {
+  baseUrl: string;
+  apiKey?: string;
+  envKey?: string;
+  authStyle?: ModelProviderAuthStyle;
+  extraHeaders?: Record<string, string>;
+}
+
+/** configKey → provider identity (for composer grouping). */
+export type ModelConfigKeyIndex = Record<
+  string,
+  { providerId: string; providerName: string }
+>;
 
 // ── Account / auth ──────────────────────────────────────────────────
 
@@ -453,6 +671,27 @@ export interface DesktopApi {
     requestId: string,
     optionId: string | null,
   ) => Promise<void>;
+  /**
+   * Resolve a pending `x.ai/ask_user_question` questionnaire.
+   * Wire body matches AskUserQuestionExtResponse (accepted / chat / skip / cancelled).
+   */
+  respondAskUserQuestion: (
+    requestId: string,
+    response: AskUserQuestionResponse,
+  ) => Promise<void>;
+  /**
+   * Resolve a pending plan-mode approval (`x.ai/exit_plan_mode`).
+   * - approved: leave plan mode and implement
+   * - cancelled: request changes (optional feedback text)
+   * - abandoned: quit plan without implementing
+   */
+  respondPlanApproval: (
+    requestId: string,
+    outcome: PlanApprovalOutcome,
+    feedback?: string,
+  ) => Promise<void>;
+  /** Re-read plan.md for the focused session from disk. */
+  refreshPlanContent: () => Promise<string | null>;
   /** Enable or disable always-approve (YOLO) mode. */
   setAlwaysApprove: (enabled: boolean) => Promise<void>;
   /**
@@ -493,6 +732,20 @@ export interface DesktopApi {
   listHooks: () => Promise<HookEntry[]>;
   readHookFile: (path: string) => Promise<string>;
   getExtensionsPaths: () => Promise<ExtensionsConfigPaths>;
+  // ── Custom model providers ──
+  listModelPresets: () => Promise<ModelProviderPreset[]>;
+  listModelProviders: () => Promise<ModelProviderConfig[]>;
+  upsertModelProvider: (
+    input: UpsertProviderInput,
+  ) => Promise<ModelProviderConfig>;
+  deleteModelProvider: (id: string) => Promise<void>;
+  addModelProviderFromPreset: (
+    presetId: string,
+    overrides?: Partial<UpsertProviderInput>,
+  ) => Promise<ModelProviderConfig>;
+  fetchProviderModels: (input: FetchModelsInput) => Promise<FetchedModelInfo[]>;
+  /** Map agent modelId (configKey) → provider for composer grouping. */
+  getModelConfigKeyIndex: () => Promise<ModelConfigKeyIndex>;
   // ── Account ──
   getAccountStatus: () => Promise<AccountStatus>;
   /** Browser OAuth (`--oauth`) or device-code (`--device-auth`). */

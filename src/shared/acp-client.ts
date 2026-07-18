@@ -29,6 +29,39 @@ export type AcpClientHandlers = {
   onOpen?: () => void;
 };
 
+/** Build a readable Error from a JSON-RPC error object (include data when useful). */
+export function formatAcpError(err: {
+  code: number;
+  message: string;
+  data?: JsonValue;
+}): Error {
+  let detail = "";
+  if (err.data != null) {
+    if (typeof err.data === "string" && err.data.trim()) {
+      detail = err.data.trim();
+    } else if (typeof err.data === "object") {
+      try {
+        const o = err.data as Record<string, JsonValue>;
+        const nested =
+          (typeof o.message === "string" && o.message) ||
+          (typeof o.error === "string" && o.error) ||
+          (typeof o.detail === "string" && o.detail) ||
+          "";
+        detail = nested || JSON.stringify(err.data);
+      } catch {
+        detail = String(err.data);
+      }
+    } else {
+      detail = String(err.data);
+    }
+  }
+  // Drop redundant detail when it's the same as message
+  if (detail && detail !== err.message) {
+    return new Error(`ACP error ${err.code}: ${err.message} — ${detail}`);
+  }
+  return new Error(`ACP error ${err.code}: ${err.message}`);
+}
+
 /**
  * Minimal ACP JSON-RPC client over WebSocket text frames.
  * Matches grok `agent serve` framing (one JSON object per WS text message).
@@ -194,9 +227,7 @@ export class AcpClient {
       if (pending) {
         this.pending.delete(msg.id);
         if (msg.error) {
-          pending.reject(
-            new Error(`ACP error ${msg.error.code}: ${msg.error.message}`),
-          );
+          pending.reject(formatAcpError(msg.error));
         } else {
           pending.resolve(msg.result ?? null);
         }
