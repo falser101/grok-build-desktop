@@ -276,6 +276,7 @@ Split into `packages/*` when a second consumer appears.
 - [x] Session list via `x.ai/session/search` + load / fork / rename / delete
 - [x] Per-project new session control
 - [x] Model / mode / effort pickers + context token usage
+- [x] Custom multi-provider models UI (presets, fetch `/models`, config.toml sync, composer grouped by provider)
 - [x] Attachments, `@` path suggest, paste image, slash autocomplete
 - [x] Diff viewer for `ToolCallContent` diffs
 - [x] Expandable tool output details
@@ -295,7 +296,7 @@ Split into `packages/*` when a second consumer appears.
 - [x] Message queue while busy (Enter queue / Ctrl+Enter send-now / auto-drain)
 - [x] Prompt history (↑ browse / `/history` + Ctrl+R search via `x.ai/prompt_history`)
 - [x] Copy / export conversation as Markdown
-- [ ] Plan/TODO panel
+- [x] Plan/TODO panel (todos + plan.md + exit_plan_mode approval)
 - [ ] Full command palette + global shortcut system
 
 ---
@@ -369,11 +370,31 @@ No raw WebSocket, no secret, no child stdin exposed to renderer.
 
 ## 10. Packaging (Alpha+)
 
-| Platform | Artifact |
-|----------|----------|
-| macOS | `.dmg` (arm64 + x64 or universal later) |
-| Windows | NSIS `.exe` |
-| Linux | AppImage + optional `.deb` |
+| Platform   | Artifact                                                       |
+|------------|-----------------------------------------------------------------|
+| macOS      | `.dmg` + `.zip` (arm64 + x64)                                   |
+| Windows    | NSIS installer + portable `.exe` (x64 + arm64)                  |
+| Linux      | AppImage + `.deb` (Debian/Ubuntu) + `.rpm` (Fedora/RHEL/openSUSE) — both x64 and arm64 |
+
+Build scripts:
+
+```bash
+pnpm dist:mac          # dmg + zip
+pnpm dist:linux        # AppImage + deb + rpm
+pnpm dist:win          # NSIS + portable
+```
+
+All three scripts first run `pnpm build` (electron-vite production build) and
+then invoke `electron-builder` with the right `--mac` / `--linux` / `--win`
+flag. Per-target scripts (`dist:linux:deb`, `dist:win:portable`, etc.) build
+a single artifact type.
+
+`electron-builder.yml` references:
+
+- Linux icons + `.desktop` entry → `resources/icon.png`
+- macOS icon + entitlements → `resources/icon.icns`, `resources/macos/entitlements.plist`
+- Windows icon → `resources/icon.ico`
+- Linux post-install hooks → `resources/scripts/after-install.sh`, `before-remove.sh`
 
 Bundle `resources/bin/grok` matching the platform. Pin Desktop app version to a known good `grok` version.
 

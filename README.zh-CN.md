@@ -38,6 +38,7 @@ Electron UI  →  ACP / JSON-RPC  →  grok agent serve （本机 loopback WebSo
 | **工作区** | 文件树、语法高亮预览、`@` 插入路径 |
 | **输入** | 附件、拖拽、粘贴图片、斜杠命令；**忙时消息队列**；**Prompt 历史**（↑ / `/history` / Ctrl+R） |
 | **模型** | 模型切换 / Agent·Plan·Ask / reasoning effort / Token 用量 |
+| **计划 / TODO** | 任务列表 + plan.md 面板；退出计划模式审批；`/view-plan` · Ctrl+Shift+P |
 | **权限** | 确认面板 + 队列 + Always-approve（YOLO） |
 | **账号** | 登录 / 登出 / API Key / 订阅与用量 |
 | **扩展** | MCP、Skills、插件、Hooks |
@@ -50,7 +51,7 @@ Electron UI  →  ACP / JSON-RPC  →  grok agent serve （本机 loopback WebSo
 - 挂接外部正在运行的 TUI / leader-socket 会话  
 - 带内置 `grok` 二进制的完整安装包  
 - 自动更新、代码签名  
-- 完整命令面板（`Ctrl+K`）、Plan/TODO 面板  
+- 完整命令面板（`Ctrl+K`）、`/rewind`
 
 ---
 
@@ -113,7 +114,39 @@ pnpm dev        # 或：npm run dev
 
 ### 打包（骨架）
 
-[`electron-builder.yml`](./electron-builder.yml) 已配置 AppImage / DMG / NSIS 目标。完整发布 CI 与内置 binary 仍为待办。
+### 打包
+
+[`electron-builder.yml`](./electron-builder.yml) 定义了完整的发布目标。
+先跑一次 Vite 生产构建，再由 `electron-builder` 在 `dist/` 下产出各平台产物。
+
+| 脚本 | 产物 |
+|------|------|
+| `pnpm dist:linux`            | AppImage + `.deb` + `.rpm`（x64 / arm64） |
+| `pnpm dist:linux:deb`        | 仅 `.deb` |
+| `pnpm dist:linux:rpm`        | 仅 `.rpm` |
+| `pnpm dist:linux:appimage`   | 仅 AppImage |
+| `pnpm dist:mac`              | `.dmg` + `.zip`（arm64 / x64） |
+| `pnpm dist:mac:dmg`          | 仅 `.dmg` |
+| `pnpm dist:mac:zip`          | 仅 `.zip` |
+| `pnpm dist:win`              | NSIS 安装包 + 便携 `.exe`（x64 / arm64） |
+| `pnpm dist:win:nsis`         | 仅 NSIS 安装包 |
+| `pnpm dist:win:portable`     | 仅便携 `.exe` |
+| `pnpm dist:all`              | 上述全部（在各自主机上分别运行） |
+| `pnpm dist:dir`              | 仅打包未压缩目录（不生成安装器） |
+
+产物命名形如 `Grok Build Desktop-0.1.0-<arch>.<ext>`，位于 `dist/`。
+
+#### 说明
+
+- **Linux** — `.deb` 面向 Debian / Ubuntu，`.rpm` 面向 Fedora / RHEL /
+  openSUSE。安装后脚本（`resources/scripts/`）会刷新桌面/MIME/icon 缓存，
+  安装完立即出现启动项。
+- **macOS** — 仅在 macOS 上构建。需替换 `resources/icon.icns`，授权文件见
+  `resources/macos/entitlements.plist`。签名与公证仍为 TODO。
+- **Windows** — 仅在 Windows（或 Wine）上构建。需替换 `resources/icon.ico`。
+  NSIS 为标准安装器，便携版本为免安装的自解压 `.exe`。
+
+完整发布 CI 与内置 `grok` binary 仍为待办。
 
 ---
 

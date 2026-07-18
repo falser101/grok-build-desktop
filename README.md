@@ -38,6 +38,7 @@ Sessions, auth, and config live under `~/.grok` and stay compatible with the Gro
 | **Workspace** | File tree, syntax-highlighted preview, `@` path insert |
 | **Input** | Attachments, drag-and-drop, paste images, slash commands; **queue while busy**; **prompt history** (↑ / `/history` / Ctrl+R) |
 | **Models** | Model / Agent·Plan·Ask mode / reasoning effort / token usage |
+| **Plan / TODO** | Todo list + plan.md panel; plan-mode exit approval; `/view-plan` · Ctrl+Shift+P |
 | **Permissions** | Confirm panel + queue + Always-approve (YOLO) |
 | **Account** | Login, logout, API key, subscription/credit usage |
 | **Extensions** | MCP servers, Skills, Plugins, Hooks |
@@ -50,7 +51,7 @@ Full inventory: [`docs/FEATURES.md`](./docs/FEATURES.md).
 - Attach to an external live TUI / leader-socket session  
 - Bundled installers with embedded `grok` binary  
 - Auto-update, code signing  
-- Full command palette (`Ctrl+K`), Plan/TODO panel  
+- Full command palette (`Ctrl+K`), `/rewind`
  
 
 ---
@@ -112,9 +113,44 @@ pnpm dev        # or: npm run dev
 | `pnpm build` | Production main / preload / renderer |
 | `pnpm typecheck` | TypeScript (`node` + `web`) |
 
-### Packaging (skeleton)
+### Packaging
 
-[`electron-builder.yml`](./electron-builder.yml) defines AppImage / DMG / NSIS targets. Full release CI and bundled binary are still TODO.
+[`electron-builder.yml`](./electron-builder.yml) defines the full set of release targets.
+A Vite production build runs first, then `electron-builder` produces per-platform
+artifacts under `dist/`.
+
+| Script | Output |
+|--------|--------|
+| `pnpm dist:linux`            | AppImage + `.deb` + `.rpm` for x64 and arm64 |
+| `pnpm dist:linux:deb`        | only `.deb` |
+| `pnpm dist:linux:rpm`        | only `.rpm` |
+| `pnpm dist:linux:appimage`   | only AppImage |
+| `pnpm dist:mac`              | `.dmg` + `.zip` for arm64 and x64 |
+| `pnpm dist:mac:dmg`          | only `.dmg` |
+| `pnpm dist:mac:zip`          | only `.zip` |
+| `pnpm dist:win`              | NSIS installer + portable `.exe` for x64 and arm64 |
+| `pnpm dist:win:nsis`         | only NSIS installer |
+| `pnpm dist:win:portable`     | only portable `.exe` |
+| `pnpm dist:all`              | everything above (run on each host OS) |
+| `pnpm dist:dir`              | unpacked app directory (no installer) |
+
+Artifacts are named `Grok Build Desktop-0.1.0-<arch>.<ext>` and land in
+`dist/` (or `dist_<arch>/` if you set `CSC_IDENTITY_AUTO_DISCOVERY=false`).
+
+#### Notes
+
+- **Linux** — `.deb` targets Debian / Ubuntu, `.rpm` targets Fedora / RHEL /
+  openSUSE. Post-install hooks (`resources/scripts/`) refresh the desktop /
+  MIME / icon caches so the launcher appears immediately.
+- **macOS** — Builds run only on macOS. Replace `resources/icon.icns` with
+  your artwork; entitlements live in `resources/macos/entitlements.plist`.
+  Signing and notarization are still TODO.
+- **Windows** — Builds run only on Windows (or under Wine). Replace
+  `resources/icon.ico` with multi-resolution artwork. NSIS gives a normal
+  installer; the portable target produces a self-extracting `.exe` that runs
+  without installation.
+
+Full release CI and the bundled `grok` binary are still TODO.
 
 ---
 

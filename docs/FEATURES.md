@@ -1,7 +1,7 @@
 # Grok Build Desktop — 能力清单
 
 **状态：** 对照代码与 [`DESIGN.md`](./DESIGN.md) 维护的产品能力表  
-**更新：** 2026-07-17  
+**更新：** 2026-07-18  
 **标注：** ✅ 已做 · 🟡 部分 · ⬜ 未做
 
 ---
@@ -57,7 +57,7 @@
 | Cancel 中断当前 turn | ✅ | 忙碌时 Stop 按钮 |
 | 忙碌时消息队列 / 排队发送 | ✅ | 忙时 Enter 入队；回合结束后 FIFO 自动发送；Ctrl+Enter /「立即发送」取消当前 turn 并优先发出；可移除/清空；按会话隔离 |
 | 复制单条 / 导出对话 Markdown | ✅ | 悬停复制用户/助手/思考；顶栏「导出」→ 复制 MD / 下载 .md |
-| Plan / TODO 可视化面板 | ⬜ | 仅有 plan **模式**切换，无任务列表 UI |
+| Plan / TODO 可视化面板 | ✅ | 右侧面板：Todos 列表 + plan.md 预览；`sessionUpdate: plan` 实时更新；`x.ai/exit_plan_mode` 审批（批准 / 请求修改 / 退出）；`/view-plan` · Ctrl+Shift+P；composer chip |
 
 ---
 
@@ -92,6 +92,7 @@
 | 能力 | 状态 | 备注 |
 |------|------|------|
 | 权限确认面板 | ✅ | 与输入框等宽；选项一行一个；默认项；↑↓/鼠标；Enter/Esc |
+| Ask user question 问卷 | ✅ | 居中 Modal 分步向导；radio/checkbox + Other；plan 四路径；优先于权限面板；侧栏 `needs_question` |
 | 多权限请求排队 | ✅ | 显示「还有 n 个」 |
 | Always-approve / YOLO | ✅ | 工具栏 Ask/Always chip；设置页开关；`/always-approve` `/yolo` |
 | 与 CLI 配置同步 | ✅ | `~/.grok/config.toml` `[ui] permission_mode` + `yolo` |
@@ -131,7 +132,7 @@
 | Permissions 设置（YOLO） | ✅ | Settings 独立区块 |
 | MCP 服务器管理 UI | ✅ | 侧栏入口；list/add/remove/enable；`grok mcp` + config.toml |
 | Skills / Plugins / Hooks 管理 UI | ✅ | 侧栏「扩展」页签；技能禁用、插件装卸、Hook 预览 |
-| 自定义模型配置 UI | ⬜ | — |
+| 自定义模型配置 UI | ✅ | 侧栏「模型」；多提供商（国内外预设 + 自定义）；拉取 `/models` 或手动录入；写入 `config.toml` `[model.dp_*]`；输入框按提供商分组切换 |
 
 ---
 
@@ -140,7 +141,7 @@
 | 能力 | 状态 | 备注 |
 |------|------|------|
 | 开发运行 `pnpm dev` | ✅ | electron-vite |
-| electron-builder 配置骨架 | 🟡 | `electron-builder.yml` 有，无完整 CI/脚本链路 |
+| electron-builder 多目标打包 | ✅ | macOS dmg/zip、Linux deb/rpm/AppImage、Windows NSIS/portable；`pnpm dist:mac` · `dist:linux` · `dist:win` |
 | 内置 `grok` 二进制安装包 | ⬜ | README 与 DESIGN 仍为待办 |
 | 登录引导（浏览器 / 设备码） | ✅ | 设置 → 账号 + 侧栏账号菜单 |
 | 自动更新 | ⬜ | — |
@@ -177,20 +178,22 @@
 | 复制单条 / 导出对话 Markdown | ✅ |
 | 忙碌时消息队列 / 立即发送 | ✅ |
 | Prompt 历史（↑ / `/history`） | ✅ |
+| Plan / TODO 面板 + 计划审批 | ✅ |
 | 登录引导（浏览器 / 设备码） | ✅ |
 | 内嵌终端（xterm + PTY） | ✅ |
 | 安装包 + 内置 binary | ⬜ |
 | MCP / Skills 设置 UI | ✅ |
+| 自定义模型 / 多提供商配置 UI | ✅ |
 | 自动更新 / multi-client attach | ⬜ |
 
 ---
 
 ## 建议下一波
 
-1. **Plan/TODO 可视化面板** — Plan 模式已有，缺任务列表 UI  
-2. **打包内置 binary + 自动更新** — 从「开发者能跑」到「能装」  
-3. **文件树增强**（搜索全文、从 tool/diff 跳转打开、只读→可编辑）— 可选  
-4. **Diff 语法高亮** — 可选  
+1. **打包内置 binary + 自动更新** — 从「开发者能跑」到「能装」  
+2. **文件树增强**（搜索全文、从 tool/diff 跳转打开、只读→可编辑）— 可选  
+3. **Diff 语法高亮** — 可选  
+4. **完整命令面板 `Ctrl+K` / `/rewind`** — 可选  
 
 ---
 
