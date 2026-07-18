@@ -1,22 +1,133 @@
 appId: ai.x.grok.build.desktop
 productName: Grok Build Desktop
+copyright: Copyright © 2026 ${author}
+asar: true
 directories:
   buildResources: resources
   output: dist
+  # Output per-arch subfolder keeps dist/ tidy:
+  #   dist/Grok Build Desktop-0.1.0-x64.deb
+  #   dist/Grok Build Desktop-0.1.0-arm64.AppImage
+  #   dist/Grok Build Desktop-0.1.0.dmg
 files:
   - out/**/*
   - package.json
+  - "!**/.git"
+  - "!**/.DS_Store"
+  - "!**/node_modules/.cache"
+
+# ---------------------------------------------------------------------------
+# Linux targets — deb + rpm + AppImage, both x64 and arm64.
+# Run with: pnpm dist:linux                # both arches, all targets
+#           pnpm dist:linux -- --x64       # only x64
+#           pnpm dist:linux -- --arm64     # only arm64
+# ---------------------------------------------------------------------------
 linux:
-  target:
-    - AppImage
-    - deb
+  icon: resources/icon.png
   category: Development
+  synopsis: Electron desktop client for Grok Build
+  description: |
+    Grok Build Desktop is an Electron shell around the Grok Build agent.
+    It spawns `grok agent serve` on loopback and renders a Claude
+    Desktop-style session UI over ACP / JSON-RPC.
   maintainer: falser101 <falser101@users.noreply.github.com>
   vendor: falser101
+  desktop:
+    entry:
+      Name: Grok Build Desktop
+      Comment: Electron desktop client for Grok Build
+      Categories: Development;Utility;
+      Keywords: grok;ai;agent;acp;
+      StartupNotify: true
+      Terminal: false
+  mimeTypes:
+    - x-scheme-handler/grok
+  target:
+    - target: deb
+      arch:
+        - x64
+        - arm64
+    - target: rpm
+      arch:
+        - x64
+        - arm64
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+deb:
+  priority: optional
+  fpm:
+    - "--deb-no-default-config-files"
+    - "--after-install=resources/scripts/after-install.sh"
+    - "--before-remove=resources/scripts/before-remove.sh"
+rpm:
+  # RHEL/Fedora/OpenSUSE packaging hints.
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - at-spi2-atk
+    - libdrm2
+    - libgbm1
+    - libxcb-dri3-0
+  fpm:
+    - "--rpm-rpmbuild-define=_build_id_links none"
+
+# ---------------------------------------------------------------------------
+# macOS targets — dmg + zip, both arm64 (Apple Silicon) and x64 (Intel).
+# Universal builds can be added later via electron-builder's --universal flag.
+# ---------------------------------------------------------------------------
 mac:
-  target:
-    - dmg
+  icon: resources/icon.icns
   category: public.app-category.developer-tools
-win:
   target:
-    - nsis
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: resources/macos/entitlements.plist
+  entitlementsInherit: resources/macos/entitlements.plist
+dmg:
+  sign: false
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+# ---------------------------------------------------------------------------
+# Windows targets — NSIS installer + portable .exe (no install needed).
+# Both x64 and arm64 are emitted.
+# ---------------------------------------------------------------------------
+win:
+  icon: resources/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+    - target: portable
+      arch:
+        - x64
+        - arm64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Grok Build Desktop
+  artifactName: ${productName}-${version}-${arch}.${ext}
+portable:
+  artifactName: ${productName}-${version}-portable-${arch}.${ext}
+  # No installer UI — just the self-extracting .exe that runs from anywhere.

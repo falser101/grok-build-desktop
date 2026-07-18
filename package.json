@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "description": "Electron desktop client for Grok Build (ACP over agent serve)",
+  "author": {
+    "name": "falser101",
+    "email": "falser101@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/falser101/grok-build-desktop",
   "main": "./out/main/index.js",
   "type": "module",
   "scripts": {
@@ -13,7 +18,19 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "rebuild:native": "electron-rebuild -f -w node-pty",
-    "postinstall": "electron-rebuild -f -w node-pty || true"
+    "postinstall": "electron-rebuild -f -w node-pty || true",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:dir": "npm run build && electron-builder --dir",
+    "dist:linux:deb": "npm run build && electron-builder --linux deb",
+    "dist:linux:rpm": "npm run build && electron-builder --linux rpm",
+    "dist:linux:appimage": "npm run build && electron-builder --linux AppImage",
+    "dist:win:nsis": "npm run build && electron-builder --win nsis",
+    "dist:win:portable": "npm run build && electron-builder --win portable",
+    "dist:mac:dmg": "npm run build && electron-builder --mac dmg",
+    "dist:mac:zip": "npm run build && electron-builder --mac zip"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -34,15 +51,17 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.4.1",
     "electron": "^43.1.1",
+    "electron-builder": "^25.1.8",
     "electron-rebuild": "^3.2.9",
     "electron-vite": "^3.1.0",
     "typescript": "^5.8.3",
     "vite": "^6.3.5"
   },
   "allowScripts": {
-    "electron@35.7.5": true,
-    "esbuild@0.25.12": true,
-    "node-pty@1.1.0": true,
-    "lzma-native@8.0.6": true
+    "electron": true,
+    "esbuild": true,
+    "@electron/rebuild": true,
+    "node-pty": true,
+    "lzma-native": true
   }
 }
