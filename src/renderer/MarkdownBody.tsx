@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useDeferredValue, useMemo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -49,12 +49,26 @@ function MarkdownBodyInner({ text, className, streaming }: Props) {
   // Stable empty fallback so streaming "" still shows caret via CSS.
   const source = useMemo(() => text || "\u00a0", [text]);
 
-  // While tokens stream, skip full remark/GFM parse (O(n) per chunk). Plain
-  // text keeps the caret smooth; markdown is applied once the turn settles.
+  // Parse markdown incrementally while tokens stream. useDeferredValue lets
+  // React coalesce frequent token updates into a single render pass behind a
+  // high-priority overlay (the caret text), so the caret stays smooth even
+  // when remark is busy on a long chunk.
+  const deferredSource = useDeferredValue(source);
+
   if (streaming) {
+    // Two-layer overlay while streaming:
+    //  - foreground: the freshest token text with a blinking caret
+    //  - background: the (slightly stale) parsed markdown so headings, code
+    //    blocks, lists and links render in real time instead of appearing
+    //    all at once when the turn ends.
     return (
       <div className={cls}>
-        <div className="md-streaming-plain">{source}</div>
+        <div className="md-body md-deferred" aria-hidden="true">
+          <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
+            {deferredSource}
+          </ReactMarkdown>
+        </div>
+        <div className="md-streaming-fresh">{source}</div>
       </div>
     );
   }

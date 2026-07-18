@@ -29,6 +29,8 @@ export interface Messages {
   sessionStatusLoading: string;
   /** Sidebar: session is waiting for a permission decision. */
   sessionStatusNeedsPermission: string;
+  /** Sidebar: session is waiting for structured Q&A answers. */
+  sessionStatusNeedsQuestion: string;
 
   // Home
   greeting: string;
@@ -44,6 +46,11 @@ export interface Messages {
   /** Sticky bar: user turn for the scroll section; click jumps to it. */
   currentTurnPin: string;
   currentTurnPinHint: string;
+  /** Left-edge history timeline rail: each tick is one user message. */
+  historyTimelineTooltip: string;
+  historyTimelineJump: string;
+  /** Floating button above the composer that returns to the latest message. */
+  jumpToBottom: string;
   loadingConversation: string;
   compactRunning: string;
   compactRunningAuto: string;
@@ -131,6 +138,26 @@ export interface Messages {
   alwaysApproveOff: string;
   alwaysApproveTitle: string;
   alwaysApproveHint: string;
+
+  // Ask user question modal
+  askqTitle: string;
+  askqKicker: string;
+  askqKickerPlan: string;
+  /** e.g. "Question {i} of {n}" */
+  askqProgress: string;
+  askqMultiHint: string;
+  askqOther: string;
+  askqOtherHint: string;
+  askqOtherPlaceholder: string;
+  askqBack: string;
+  askqNext: string;
+  askqSubmit: string;
+  askqCancel: string;
+  askqChatAbout: string;
+  askqChatAboutHint: string;
+  askqSkipInterview: string;
+  askqSkipInterviewHint: string;
+  askqHint: string;
 
   // Account menu
   account: string;
@@ -249,12 +276,14 @@ export interface Messages {
   sidePanelTerminal: string;
   sidePanelReview: string;
   sidePanelBrowser: string;
+  sidePanelPlan: string;
   sidePanelReviewHint: string;
   sidePanelBrowserHint: string;
   sidePanelFilesShortcut: string;
   sidePanelTerminalShortcut: string;
   sidePanelReviewShortcut: string;
   sidePanelBrowserShortcut: string;
+  sidePanelPlanShortcut: string;
   openFileTitle: string;
   openFileEmpty: string;
   openFileEmptyHint: string;
@@ -277,6 +306,35 @@ export interface Messages {
   termClear: string;
   termRun: string;
   termExited: string;
+
+  // Plan / TODO panel
+  planPanelTitle: string;
+  planTabTodos: string;
+  planTabPlan: string;
+  planRefresh: string;
+  planTodoEmpty: string;
+  planTodoAllDone: string;
+  planTodoHideDone: string;
+  planTodoProgress: string;
+  planTodoInProgressCount: string;
+  planTodoPendingCount: string;
+  planTodoDoneCount: string;
+  planTodoHigh: string;
+  planEmpty: string;
+  planEmptyInPlanMode: string;
+  planApprovalNeeded: string;
+  planApprovalTitle: string;
+  planApprovalEmptyTitle: string;
+  planApprovalHint: string;
+  planApprovalEmptyHint: string;
+  planApprovalApprove: string;
+  planApprovalRequestChanges: string;
+  planApprovalAbandon: string;
+  planApprovalFeedbackPlaceholder: string;
+  planApprovalSendFeedback: string;
+  planApprovalCancelFeedback: string;
+  /** Composer chip when todos exist. */
+  planTodosChip: string;
 
   // Extensions (MCP / Skills / Plugins / Hooks)
   navMcp: string;
@@ -323,6 +381,101 @@ export interface Messages {
   extFootnote: string;
   /** Composer drop zone hint. */
   dropFilesHint: string;
+
+  // Custom model providers
+  navModels: string;
+  modelsTitle: string;
+  modelsSubtitle: string;
+  modelsAddProvider: string;
+  modelsEditProvider: string;
+  modelsChoosePreset: string;
+  modelsChoosePresetHint: string;
+  modelsRegionIntl: string;
+  modelsRegionCn: string;
+  modelsRegionLocal: string;
+  modelsCustomEndpoint: string;
+  modelsPresetAdded: string;
+  modelsEmpty: string;
+  modelsEdit: string;
+  modelsDeleteConfirm: string;
+  modelsDeleted: string;
+  modelsSaved: string;
+  modelsNameRequired: string;
+  modelsBaseUrlRequired: string;
+  modelsProviderName: string;
+  modelsBaseUrl: string;
+  modelsApiKey: string;
+  modelsApiKeyPlaceholder: string;
+  modelsEnvKey: string;
+  modelsApiBackend: string;
+  modelsAuthStyle: string;
+  modelsProviderEnabled: string;
+  modelsListTitle: string;
+  modelsFetch: string;
+  modelsFetchHint: string;
+  modelsFetchedCount: string;
+  modelsEnableAll: string;
+  modelsDisableAll: string;
+  modelsAddManual: string;
+  modelsManualIdPlaceholder: string;
+  modelsManualNamePlaceholder: string;
+  modelsFilterModels: string;
+  modelsNoModelsYet: string;
+  modelsSourceFetched: string;
+  modelsSourceManual: string;
+  modelsEnabledCount: string;
+  modelsReconnect: string;
+  modelsReconnectHint: string;
+  modelsReconnected: string;
+  modelsFootnote: string;
+  modelsEditorHint: string;
+  /** Built-in / default models group in composer. */
+  modelsGroupBuiltin: string;
+  modelsManage: string;
+  modelsNoModelsInProvider: string;
+  /** Composer: switch provider tab */
+  modelsAllProviders: string;
+
+  // Tool card (timeline) labels — translate agent-side kind/status ids.
+  toolKindEdit: string;
+  toolKindSearch: string;
+  toolKindThink: string;
+  toolKindRead: string;
+  toolKindWrite: string;
+  toolKindRun: string;
+  toolKindWeb: string;
+  toolKindTool: string;
+  toolStatusPending: string;
+  toolStatusRunning: string;
+  toolStatusCompleted: string;
+  toolStatusFailed: string;
+  toolStatusCancelled: string;
+  toolStatusAwaiting: string;
+
+  // Reasoning effort values displayed on the composer chip.
+  effortLow: string;
+  effortMedium: string;
+  effortHigh: string;
+  effortXhigh: string;
+  effortAuto: string;
+  /** Fallback label when effort is unset. */
+  effortOff: string;
+
+  // Models page sections / hints (mixed-in English in the UI).
+  modelsSectionConnection: string;
+  modelsSectionAuth: string;
+  modelsEndpointFixedHint: string;
+  modelsEmptyNoMatches: string;
+  modelsEmptyNoMatchesHint: string;
+  modelsEnabledModelsStat: string;
+  modelsClearSearchAria: string;
+  modelsBackendChatCompletions: string;
+  modelsBackendChatCompletionsDefault: string;
+  modelsBackendResponses: string;
+  modelsBackendMessages: string;
+  modelsPresetSearchPlaceholder: string;
+  modelsGlobalSearchPlaceholder: string;
+  modelsProtocolHint: string;
 }
 
 const en: Messages = {
@@ -349,6 +502,7 @@ const en: Messages = {
   sessionStatusRunning: "Running",
   sessionStatusLoading: "Loading",
   sessionStatusNeedsPermission: "Needs approval",
+  sessionStatusNeedsQuestion: "Needs answers",
 
   greeting: "What's up next?",
   homeHint:
@@ -362,6 +516,9 @@ const en: Messages = {
   thoughtStreaming: "Thought · streaming",
   currentTurnPin: "You",
   currentTurnPinHint: "Jump to this message",
+  historyTimelineTooltip: "Message history",
+  historyTimelineJump: "Jump to this message",
+  jumpToBottom: "Jump to latest message",
   loadingConversation: "Loading conversation…",
   compactRunning: "Compacting conversation…",
   compactRunningAuto: "Auto-compacting conversation…",
@@ -440,6 +597,26 @@ const en: Messages = {
   alwaysApproveTitle: "Always-approve (YOLO)",
   alwaysApproveHint:
     "When on, tools run without permission prompts. Toggle with click or /always-approve.",
+
+  askqTitle: "Questions for you",
+  askqKicker: "Agent question",
+  askqKickerPlan: "Plan interview",
+  askqProgress: "Question {i} of {n}",
+  askqMultiHint: "Select one or more options",
+  askqOther: "Other",
+  askqOtherHint: "Type your own answer",
+  askqOtherPlaceholder: "Your answer…",
+  askqBack: "Back",
+  askqNext: "Next",
+  askqSubmit: "Submit",
+  askqCancel: "Cancel",
+  askqChatAbout: "Chat about this",
+  askqChatAboutHint:
+    "Send partial answers and keep talking — agent will reformulate questions",
+  askqSkipInterview: "Skip interview",
+  askqSkipInterviewHint:
+    "Stop asking questions and plan with what you already have",
+  askqHint: "Enter next/submit · Esc cancel · ← → step",
 
   account: "Account",
   accountMenu: "Account menu",
@@ -561,12 +738,14 @@ const en: Messages = {
   sidePanelTerminal: "Terminal",
   sidePanelReview: "Review",
   sidePanelBrowser: "Browser",
+  sidePanelPlan: "Plan / TODO",
   sidePanelReviewHint: "Review is not available yet.",
   sidePanelBrowserHint: "Browser is not available yet.",
   sidePanelFilesShortcut: "Ctrl+P",
   sidePanelTerminalShortcut: "Ctrl+`",
   sidePanelReviewShortcut: "Ctrl+Shift+C",
   sidePanelBrowserShortcut: "Ctrl+T",
+  sidePanelPlanShortcut: "Ctrl+Shift+P",
   openFileTitle: "Open file",
   openFileEmpty: "Open a file",
   openFileEmptyHint: "Select a file from the workspace tree",
@@ -589,6 +768,37 @@ const en: Messages = {
   termClear: "Clear terminal",
   termRun: "Run",
   termExited: "Shell exited (code {code})",
+
+  planPanelTitle: "Plan / TODO",
+  planTabTodos: "Todos",
+  planTabPlan: "Plan",
+  planRefresh: "Reload plan.md",
+  planTodoEmpty: "No todo items yet. The agent fills this via todo_write.",
+  planTodoAllDone: "All visible todos are done.",
+  planTodoHideDone: "Hide done",
+  planTodoProgress: "Completed / total (excluding cancelled)",
+  planTodoInProgressCount: "{n} in progress",
+  planTodoPendingCount: "{n} pending",
+  planTodoDoneCount: "{n} done",
+  planTodoHigh: "High priority",
+  planEmpty:
+    "No plan written yet. Enter plan mode with /plan or wait for the agent to write plan.md.",
+  planEmptyInPlanMode:
+    "Plan mode is active. The agent will write plan.md as it explores.",
+  planApprovalNeeded: "Approval",
+  planApprovalTitle: "Approve this plan?",
+  planApprovalEmptyTitle: "No plan written yet",
+  planApprovalHint:
+    "Approve to start implementing, request changes to revise, or quit plan mode.",
+  planApprovalEmptyHint:
+    "The agent exited plan mode without a plan. Approve to continue, request changes, or quit.",
+  planApprovalApprove: "Approve",
+  planApprovalRequestChanges: "Request changes",
+  planApprovalAbandon: "Quit plan",
+  planApprovalFeedbackPlaceholder: "Describe what to change…",
+  planApprovalSendFeedback: "Send feedback",
+  planApprovalCancelFeedback: "Back",
+  planTodosChip: "Todos",
 
   navMcp: "MCP",
   navExtensions: "Skills",
@@ -638,6 +848,107 @@ const en: Messages = {
   extFootnote:
     "Config is shared with the CLI. Agent sessions may need a new turn or reconnect to reload MCP/plugins.",
   dropFilesHint: "Drop files to attach",
+
+  navModels: "Models",
+  modelsTitle: "Models & providers",
+  modelsSubtitle:
+    "Add domestic and international providers, fetch or enter models, then switch them from the composer. Writes [model.*] into ~/.grok/config.toml (same as CLI).",
+  modelsAddProvider: "Add provider",
+  modelsEditProvider: "Edit provider",
+  modelsChoosePreset: "Choose a provider",
+  modelsChoosePresetHint:
+    "Pick a preset or a custom OpenAI-compatible endpoint. You can add multiple providers.",
+  modelsRegionIntl: "International",
+  modelsRegionCn: "China",
+  modelsRegionLocal: "Local",
+  modelsCustomEndpoint: "Custom endpoint",
+  modelsPresetAdded: "Already added",
+  modelsEmpty:
+    "No providers yet. Add OpenAI, DeepSeek, Moonshot, Ollama, and more.",
+  modelsEdit: "Edit",
+  modelsDeleteConfirm: 'Remove provider "{name}" and its models from config?',
+  modelsDeleted: "Provider removed",
+  modelsSaved:
+    "Saved to config.toml — reconnect or start a new session to load models",
+  modelsNameRequired: "Provider name is required",
+  modelsBaseUrlRequired: "Base URL is required",
+  modelsProviderName: "Display name",
+  modelsBaseUrl: "Base URL",
+  modelsApiKey: "API key",
+  modelsApiKeyPlaceholder: "Optional if env var is set",
+  modelsEnvKey: "Env var for key",
+  modelsApiBackend: "API backend",
+  modelsAuthStyle: "Auth style",
+  modelsProviderEnabled: "Provider enabled",
+  modelsListTitle: "Models",
+  modelsFetch: "Fetch model list",
+  modelsFetchHint:
+    "Calls GET {base_url}/models. Check the models you want to enable, or add ids manually below.",
+  modelsFetchedCount: "Fetched {n} model(s)",
+  modelsEnableAll: "Enable all",
+  modelsDisableAll: "Disable all",
+  modelsAddManual: "Add model",
+  modelsManualIdPlaceholder: "Model id (e.g. gpt-4o)",
+  modelsManualNamePlaceholder: "Display name (optional)",
+  modelsFilterModels: "Filter models…",
+  modelsNoModelsYet:
+    "No models yet. Fetch from the API or add a model id manually.",
+  modelsSourceFetched: "API",
+  modelsSourceManual: "Manual",
+  modelsEnabledCount: "{n} enabled",
+  modelsReconnect: "Reconnect agent",
+  modelsReconnectHint:
+    "Reload agent so newly saved models appear in the picker",
+  modelsReconnected: "Agent reconnected",
+  modelsFootnote:
+    "Enabled models are written as [model.dp_*] in ~/.grok/config.toml. Shared with CLI (`grok models`, /model). After saving, reconnect or open a new session.",
+  modelsEditorHint:
+    "API key is stored in desktop-providers.json and config.toml (mode 0600). Prefer env vars when possible.",
+  modelsGroupBuiltin: "Built-in",
+  modelsManage: "Manage models…",
+  modelsNoModelsInProvider: "No models in this provider",
+  modelsAllProviders: "All",
+
+  toolKindEdit: "edit",
+  toolKindSearch: "search",
+  toolKindThink: "think",
+  toolKindRead: "read",
+  toolKindWrite: "write",
+  toolKindRun: "run",
+  toolKindWeb: "web",
+  toolKindTool: "tool",
+  toolStatusPending: "pending",
+  toolStatusRunning: "running",
+  toolStatusCompleted: "completed",
+  toolStatusFailed: "failed",
+  toolStatusCancelled: "cancelled",
+  toolStatusAwaiting: "awaiting",
+
+  effortLow: "Low",
+  effortMedium: "Medium",
+  effortHigh: "High",
+  effortXhigh: "Extra high",
+  effortAuto: "Auto",
+  effortOff: "Off",
+
+  modelsSectionConnection: "Connection",
+  modelsSectionAuth: "Auth & protocol",
+  modelsEndpointFixedHint:
+    "Full endpoint prefix is set by the selected protocol and cannot be edited. Switching protocol swaps the official endpoint.",
+  modelsEmptyNoMatches: "No matching providers",
+  modelsEmptyNoMatchesHint:
+    "Try clearing the search or add a new provider.",
+  modelsEnabledModelsStat: "enabled models",
+  modelsClearSearchAria: "Clear",
+  modelsBackendChatCompletions: "chat_completions (OpenAI-compatible)",
+  modelsBackendChatCompletionsDefault:
+    "chat_completions (OpenAI-compatible) — default",
+  modelsBackendResponses: "responses (OpenAI Responses)",
+  modelsBackendMessages: "messages (Anthropic Messages)",
+  modelsPresetSearchPlaceholder: "Search providers…",
+  modelsGlobalSearchPlaceholder: "Search providers or models…",
+  modelsProtocolHint:
+    "Each protocol maps to a full base URL. MiniMax messages → https://api.minimaxi.com/anthropic/v1 (POST …/messages); chat_completions → https://api.minimaxi.com/v1.",
 };
 
 const zh: Messages = {
@@ -664,6 +975,7 @@ const zh: Messages = {
   sessionStatusRunning: "运行中",
   sessionStatusLoading: "加载中",
   sessionStatusNeedsPermission: "等待审批",
+  sessionStatusNeedsQuestion: "等待回答",
 
   greeting: "接下来做什么？",
   homeHint:
@@ -677,6 +989,9 @@ const zh: Messages = {
   thoughtStreaming: "思考 · 生成中",
   currentTurnPin: "你",
   currentTurnPinHint: "定位到这条消息",
+  historyTimelineTooltip: "消息时间轴",
+  historyTimelineJump: "定位到这条消息",
+  jumpToBottom: "回到最新消息",
   loadingConversation: "正在加载对话…",
   compactRunning: "正在压缩对话…",
   compactRunningAuto: "正在自动压缩对话…",
@@ -754,6 +1069,24 @@ const zh: Messages = {
   alwaysApproveTitle: "始终批准（YOLO）",
   alwaysApproveHint:
     "开启后工具无需确认即可执行。点击或输入 /always-approve 切换。",
+
+  askqTitle: "需要你回答",
+  askqKicker: "Agent 提问",
+  askqKickerPlan: "计划访谈",
+  askqProgress: "第 {i} / {n} 题",
+  askqMultiHint: "可多选",
+  askqOther: "其他",
+  askqOtherHint: "填写自定义答案",
+  askqOtherPlaceholder: "输入你的答案…",
+  askqBack: "上一步",
+  askqNext: "下一步",
+  askqSubmit: "提交",
+  askqCancel: "取消",
+  askqChatAbout: "先聊聊再说",
+  askqChatAboutHint: "提交已选部分，继续对话让 Agent 重新提问",
+  askqSkipInterview: "跳过访谈",
+  askqSkipInterviewHint: "停止追问，用已有信息直接进入规划",
+  askqHint: "Enter 下一步/提交 · Esc 取消 · ← → 切换",
 
   account: "账号",
   accountMenu: "账号菜单",
@@ -873,12 +1206,14 @@ const zh: Messages = {
   sidePanelTerminal: "终端",
   sidePanelReview: "审阅",
   sidePanelBrowser: "浏览器",
+  sidePanelPlan: "计划 / TODO",
   sidePanelReviewHint: "审阅功能暂未开放。",
   sidePanelBrowserHint: "浏览器功能暂未开放。",
   sidePanelFilesShortcut: "Ctrl+P",
   sidePanelTerminalShortcut: "Ctrl+`",
   sidePanelReviewShortcut: "Ctrl+Shift+C",
   sidePanelBrowserShortcut: "Ctrl+T",
+  sidePanelPlanShortcut: "Ctrl+Shift+P",
   openFileTitle: "打开文件",
   openFileEmpty: "打开文件",
   openFileEmptyHint: "从工作区目录树中选择文件",
@@ -901,6 +1236,34 @@ const zh: Messages = {
   termClear: "清屏",
   termRun: "运行",
   termExited: "Shell 已退出（code {code}）",
+
+  planPanelTitle: "计划 / TODO",
+  planTabTodos: "任务",
+  planTabPlan: "计划",
+  planRefresh: "重新加载 plan.md",
+  planTodoEmpty: "暂无任务。代理通过 todo_write 更新此列表。",
+  planTodoAllDone: "可见任务已全部完成。",
+  planTodoHideDone: "隐藏已完成",
+  planTodoProgress: "已完成 / 总数（不含已取消）",
+  planTodoInProgressCount: "{n} 进行中",
+  planTodoPendingCount: "{n} 待办",
+  planTodoDoneCount: "{n} 完成",
+  planTodoHigh: "高优先级",
+  planEmpty: "尚无计划。使用 /plan 进入计划模式，或等待代理写入 plan.md。",
+  planEmptyInPlanMode: "已处于计划模式。代理探索时会写入 plan.md。",
+  planApprovalNeeded: "待审批",
+  planApprovalTitle: "批准此计划？",
+  planApprovalEmptyTitle: "尚未写入计划",
+  planApprovalHint: "批准后开始实现；请求修改可退回规划；退出则放弃计划模式。",
+  planApprovalEmptyHint:
+    "代理退出计划模式但未写入计划。可批准继续、请求修改或退出。",
+  planApprovalApprove: "批准",
+  planApprovalRequestChanges: "请求修改",
+  planApprovalAbandon: "退出计划",
+  planApprovalFeedbackPlaceholder: "说明需要如何修改…",
+  planApprovalSendFeedback: "发送反馈",
+  planApprovalCancelFeedback: "返回",
+  planTodosChip: "任务",
 
   navMcp: "MCP",
   navExtensions: "技能",
@@ -949,10 +1312,140 @@ const zh: Messages = {
   extFootnote:
     "配置与 CLI 共享。MCP / 插件变更可能需要新会话或重连后生效。",
   dropFilesHint: "拖入文件以添加附件",
+
+  navModels: "模型",
+  modelsTitle: "模型与提供商",
+  modelsSubtitle:
+    "添加国内外模型提供商，可自动拉取或手动录入模型，并在输入框中切换。写入 ~/.grok/config.toml 的 [model.*]（与 CLI 一致）。",
+  modelsAddProvider: "添加提供商",
+  modelsEditProvider: "编辑提供商",
+  modelsChoosePreset: "选择提供商",
+  modelsChoosePresetHint:
+    "选择预设或自定义 OpenAI 兼容端点。可同时配置多个提供商。",
+  modelsRegionIntl: "国际",
+  modelsRegionCn: "国内",
+  modelsRegionLocal: "本地",
+  modelsCustomEndpoint: "自定义端点",
+  modelsPresetAdded: "已添加",
+  modelsEmpty: "尚未配置提供商。可添加 OpenAI、DeepSeek、月之暗面、Ollama 等。",
+  modelsEdit: "编辑",
+  modelsDeleteConfirm: '移除提供商「{name}」及其模型配置？',
+  modelsDeleted: "已移除提供商",
+  modelsSaved: "已写入 config.toml — 请重连或新开会话以加载模型",
+  modelsNameRequired: "请填写提供商名称",
+  modelsBaseUrlRequired: "请填写 Base URL",
+  modelsProviderName: "显示名称",
+  modelsBaseUrl: "Base URL",
+  modelsApiKey: "API Key",
+  modelsApiKeyPlaceholder: "若已配置环境变量可留空",
+  modelsEnvKey: "密钥环境变量",
+  modelsApiBackend: "API 协议",
+  modelsAuthStyle: "鉴权方式",
+  modelsProviderEnabled: "启用此提供商",
+  modelsListTitle: "模型列表",
+  modelsFetch: "拉取模型列表",
+  modelsFetchHint:
+    "请求 GET {base_url}/models。勾选要启用的模型，或在下方手动添加 id。",
+  modelsFetchedCount: "已拉取 {n} 个模型",
+  modelsEnableAll: "全选启用",
+  modelsDisableAll: "全部取消",
+  modelsAddManual: "添加模型",
+  modelsManualIdPlaceholder: "模型 id（如 gpt-4o）",
+  modelsManualNamePlaceholder: "显示名（可选）",
+  modelsFilterModels: "筛选模型…",
+  modelsNoModelsYet: "暂无模型。可从 API 拉取，或手动输入模型 id。",
+  modelsSourceFetched: "API",
+  modelsSourceManual: "手动",
+  modelsEnabledCount: "已启用 {n} 个",
+  modelsReconnect: "重连 Agent",
+  modelsReconnectHint: "重载 agent 后，新保存的模型会出现在选择器中",
+  modelsReconnected: "Agent 已重连",
+  modelsFootnote:
+    "启用的模型会写入 ~/.grok/config.toml 的 [model.dp_*]。与 CLI（`grok models`、/model）共享。保存后请重连或新开会话。",
+  modelsEditorHint:
+    "API Key 保存在 desktop-providers.json 与 config.toml（权限 0600）。尽量优先使用环境变量。",
+  modelsGroupBuiltin: "内置",
+  modelsManage: "管理模型…",
+  modelsNoModelsInProvider: "此提供商下暂无模型",
+  modelsAllProviders: "全部",
+
+  toolKindEdit: "编辑",
+  toolKindSearch: "搜索",
+  toolKindThink: "思考",
+  toolKindRead: "读取",
+  toolKindWrite: "写入",
+  toolKindRun: "执行",
+  toolKindWeb: "联网",
+  toolKindTool: "工具",
+  toolStatusPending: "等待",
+  toolStatusRunning: "运行中",
+  toolStatusCompleted: "已完成",
+  toolStatusFailed: "失败",
+  toolStatusCancelled: "已取消",
+  toolStatusAwaiting: "待审批",
+
+  effortLow: "低",
+  effortMedium: "中",
+  effortHigh: "高",
+  effortXhigh: "极高",
+  effortAuto: "自动",
+  effortOff: "关",
+
+  modelsSectionConnection: "连接信息",
+  modelsSectionAuth: "鉴权与协议",
+  modelsEndpointFixedHint:
+    "已选提供商的接口地址由协议决定，不可手动修改。切换协议会自动切换到对应的官方地址。",
+  modelsEmptyNoMatches: "没有匹配的提供商",
+  modelsEmptyNoMatchesHint: "试试清空搜索关键词，或添加新的提供商。",
+  modelsEnabledModelsStat: "已启用模型",
+  modelsClearSearchAria: "清空",
+  modelsBackendChatCompletions: "chat_completions（OpenAI 兼容）",
+  modelsBackendChatCompletionsDefault:
+    "chat_completions（OpenAI 兼容）— 默认",
+  modelsBackendResponses: "responses（OpenAI Responses）",
+  modelsBackendMessages: "messages（Anthropic Messages）",
+  modelsPresetSearchPlaceholder: "搜索提供商…",
+  modelsGlobalSearchPlaceholder: "搜索提供商或模型…",
+  modelsProtocolHint:
+    "协议与完整 Base URL 一一对应。例如 MiniMax 的 messages 对应 https://api.minimaxi.com/anthropic/v1（实际请求 …/messages）；chat_completions 对应 https://api.minimaxi.com/v1。",
 };
 
 const ALL: Record<ResolvedLocale, Messages> = { en, zh };
 
 export function getMessages(locale: ResolvedLocale): Messages {
   return ALL[locale];
+}
+
+/**
+ * Render a reasoning-effort id (low / medium / high / xhigh / auto / …) using
+ * the localized label when possible, otherwise the raw id. Falls back to the
+ * generic "effort" / "off" label when no value is set.
+ */
+export function localizeEffort(raw: string | undefined, m: Messages): string {
+  if (!raw) return m.effortOff;
+  const key = raw.trim().toLowerCase();
+  switch (key) {
+    case "low":
+      return m.effortLow;
+    case "medium":
+    case "med":
+    case "default":
+      return m.effortMedium;
+    case "high":
+      return m.effortHigh;
+    case "xhigh":
+    case "extra_high":
+    case "extra-high":
+    case "max":
+      return m.effortXhigh;
+    case "auto":
+    case "adaptive":
+      return m.effortAuto;
+    case "off":
+    case "none":
+    case "disabled":
+      return m.effortOff;
+    default:
+      return raw;
+  }
 }

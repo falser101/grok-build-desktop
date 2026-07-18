@@ -16,9 +16,13 @@ import {
 import type {
   AccountStatus,
   AppSnapshot,
+  AskUserQuestionResponse,
+  ModelConfigKeyIndex,
+  ModelInfo,
   PathSuggestion,
   PermissionOptionKind,
   PermissionRequestUi,
+  PlanApprovalOutcome,
   PromptAttachment,
   SessionModeId,
   SessionRunStatus,
@@ -27,11 +31,15 @@ import type {
   TimelineItem,
 } from "@shared/types";
 import type { Messages } from "./i18n";
+import { localizeEffort } from "./i18n";
+import { AskUserQuestionModal } from "./AskUserQuestionModal";
 import { MarkdownBody } from "./MarkdownBody";
 import { AccountMenu } from "./AccountMenu";
 import { ExtensionsView, type ExtTab } from "./ExtensionsView";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
+import { ModelsView } from "./ModelsView";
+import { PlanPanel } from "./PlanPanel";
 import { usePrefs } from "./PrefsContext";
 import { SettingsView } from "./SettingsView";
 import { TerminalPanel } from "./TerminalPanel";
@@ -63,6 +71,7 @@ const initial: AppSnapshot = {
   acceptsImages: true,
   busy: false,
   alwaysApprove: false,
+  todos: [],
 };
 
 /**
@@ -397,11 +406,47 @@ function msgDomId(id: string): string {
   return `msg-${id}`;
 }
 
+/**
+ * History Timeline layout constants. Ticks are short horizontal dashes
+ * stacked at `MIN_STEP` pixels apart along the rail. When the resulting
+ * track height exceeds the rail's `max-height`, the rail scrolls.
+ */
+const HISTORY_TIMELINE_MIN_STEP = 14;
+const HISTORY_TIMELINE_PAD = 8;
+
+/** Compute the inner track height needed to hold N evenly-spaced ticks. */
+function historyTrackHeight(count: number): number {
+  if (count <= 0) return 0;
+  return HISTORY_TIMELINE_PAD * 2 + (count - 1) * HISTORY_TIMELINE_MIN_STEP;
+}
+
 /** Single-line preview for the scroll-linked sticky user pin. */
 function previewText(text: string, max = 140): string {
   const one = text.replace(/\s+/g, " ").trim();
   if (one.length <= max) return one;
   return `${one.slice(0, max - 1)}…`;
+}
+
+/** Pad a number to two digits. */
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : `${n}`;
+}
+
+/**
+ * Format a wall-clock timestamp for the message hover tooltip.
+ * Today: `HH:MM`; older: `YYYY-MM-DD HH:MM`.
+ */
+function formatMessageTime(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const hh = pad2(d.getHours());
+  const mm = pad2(d.getMinutes());
+  if (sameDay) return `${hh}:${mm}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${hh}:${mm}`;
 }
 
 type UserTimelineItem = Extract<TimelineItem, { kind: "user" }>;
@@ -526,37 +571,54 @@ const TimelineRow = memo(function TimelineRow({
     return <div className="system-line">{item.text}</div>;
   }
   if (item.kind === "user") {
+    const time = item.createdAt ? formatMessageTime(item.createdAt) : null;
     return (
       <div
-        className={`msg${highlight ? " msg-flash" : ""}`}
+        className={`msg msg-user${highlight ? " msg-flash" : ""}`}
         id={msgDomId(item.id)}
       >
-        <div className="msg-head">
-          <div className="msg-role user">{m.you}</div>
-          <MsgCopyButton item={item} m={m} />
+        <div className="msg-bubble">
+          {/* User messages skip the role label — the right-aligned bubble
+             shape + accent color already identifies the speaker. */}
+          <div className="msg-body">{item.text}</div>
+          <div className="msg-actions">
+            <MsgCopyButton item={item} m={m} />
+          </div>
         </div>
-        <div className="msg-body">{item.text}</div>
+        {time ? (
+          <div className="msg-time" title={time}>
+            {time}
+          </div>
+        ) : null}
       </div>
     );
   }
   if (item.kind === "assistant") {
+    const time = item.createdAt ? formatMessageTime(item.createdAt) : null;
     return (
-      <div className="msg">
-        <div className="msg-head">
-          <div className="msg-role assistant">{m.grok}</div>
-          <MsgCopyButton item={item} m={m} />
+      <div className="msg msg-assistant">
+        <div className="msg-bubble">
+          <div className="msg-head">
+            <div className="msg-role assistant">{m.grok}</div>
+            <MsgCopyButton item={item} m={m} />
+          </div>
+          <MarkdownBody
+            className="msg-body"
+            text={item.text}
+            streaming={item.streaming}
+          />
         </div>
-        <MarkdownBody
-          className="msg-body"
-          text={item.text}
-          streaming={item.streaming}
-        />
+        {time ? (
+          <div className="msg-time" title={time}>
+            {time}
+          </div>
+        ) : null}
       </div>
     );
   }
   if (item.kind === "thought") {
     return (
-      <details className="thought">
+      <details className="thought msg-assistant">
         <summary className="thought-summary">
           <span className="thought-summary-label">
             {item.streaming ? m.thoughtStreaming : m.thought}
@@ -698,7 +760,47 @@ function userPromptsFromTimeline(timeline: TimelineItem[]): string[] {
   }
   return chrono.reverse();
 }
-type MainView = "chat" | "settings" | "extensions";
+type MainView = "chat" | "settings" | "extensions" | "models";
+
+interface ModelGroup {
+  id: string;
+  name: string;
+  models: ModelInfo[];
+}
+
+function groupModelsByProvider(
+  models: ModelInfo[],
+  index: ModelConfigKeyIndex,
+  builtinLabel: string,
+): ModelGroup[] {
+  const order: string[] = [];
+  const map = new Map<string, ModelGroup>();
+  const ensure = (id: string, name: string) => {
+    let g = map.get(id);
+    if (!g) {
+      g = { id, name, models: [] };
+      map.set(id, g);
+      order.push(id);
+    }
+    return g;
+  };
+
+  for (const mod of models) {
+    const meta = index[mod.modelId];
+    if (meta) {
+      ensure(meta.providerId, meta.providerName).models.push(mod);
+    } else {
+      ensure("builtin", builtinLabel).models.push(mod);
+    }
+  }
+
+  // Prefer builtin first, then others in discovery order
+  const builtin = order.filter((id) => id === "builtin");
+  const rest = order.filter((id) => id !== "builtin");
+  return [...builtin, ...rest]
+    .map((id) => map.get(id)!)
+    .filter((g) => g.models.length > 0);
+}
 
 interface SessionCtxMenu {
   session: SessionSummary;
@@ -717,6 +819,7 @@ function sessionStatusLabel(
   if (!status || status === "idle") return undefined;
   if (status === "running") return m.sessionStatusRunning;
   if (status === "loading") return m.sessionStatusLoading;
+  if (status === "needs_question") return m.sessionStatusNeedsQuestion;
   if (status === "needs_permission") return m.sessionStatusNeedsPermission;
   return undefined;
 }
@@ -729,10 +832,12 @@ function SessionStatusIcon({
   label?: string;
 }) {
   if (!status || status === "idle") return null;
-  if (status === "needs_permission") {
+  if (status === "needs_permission" || status === "needs_question") {
     return (
       <span
-        className="session-status-dot"
+        className={`session-status-dot${
+          status === "needs_question" ? " question" : ""
+        }`}
         title={label}
         aria-label={label}
         role="status"
@@ -765,6 +870,10 @@ export function App() {
   const [menu, setMenu] = useState<MenuKind>(null);
   const [view, setView] = useState<MainView>("chat");
   const [extTab, setExtTab] = useState<ExtTab>("mcp");
+  /** Desktop provider configKey → provider (for composer grouping). */
+  const [modelKeyIndex, setModelKeyIndex] = useState<ModelConfigKeyIndex>({});
+  /** Filter model menu by provider id (`all` = every group). */
+  const [modelProviderFilter, setModelProviderFilter] = useState<string>("all");
   const [dragOver, setDragOver] = useState(false);
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
   /**
@@ -817,12 +926,20 @@ export function App() {
   const [permIndex, setPermIndex] = useState(0);
   /**
    * Right side panel (Codex): top-right button toggles the whole region.
-   * Inside: tool menu → pick files / terminal / review / browser.
+   * Inside: tool menu → pick files / terminal / plan / review / browser.
    */
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<
-    "menu" | "files" | "terminal" | "review" | "browser"
+    "menu" | "files" | "terminal" | "plan" | "review" | "browser"
   >("menu");
+  /**
+   * True after the user manually closes the right panel during the current
+   * run. Resets when a new run starts; suppresses the auto-pop of PlanPanel
+   * so we don't fight the user's choice.
+   */
+  const planAutoPopDismissed = useRef(false);
+  /** Track the session id so the dismissed flag resets between sessions. */
+  const lastSessionIdRef = useRef<string | undefined>(undefined);
   /** Keep PTY + xterm mounted after first open (VS Code-style session). */
   const [termKeepAlive, setTermKeepAlive] = useState(false);
   const [panelLayout, setPanelLayout] = useState<PanelLayout>(() =>
@@ -843,8 +960,9 @@ export function App() {
   /** Brief status after export / download. */
   const [exportToast, setExportToast] = useState<string | null>(null);
   /**
-   * User message that owns the current scroll position (sticky header).
-   * Updates as you scroll past each user turn — not always "latest turn".
+   * User message that owns the current scroll position (drives the
+   * highlighted tick on the left-edge History Timeline rail). Updates as
+   * you scroll past each user turn — not always "latest turn".
    */
   const [pinnedUser, setPinnedUser] = useState<UserTimelineItem | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -855,6 +973,17 @@ export function App() {
   );
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pinScrollRafRef = useRef<number | null>(null);
+  /** Y-position of each user-message tick within the main-chat container. */
+  const [historyTickY, setHistoryTickY] = useState<Record<string, number>>({});
+  /** id of the tick currently hovered (drives the preview popover). */
+  const [historyHoverId, setHistoryHoverId] = useState<string | null>(null);
+  /** Anchor rect (relative to viewport) for the preview popover. */
+  const [historyPopover, setHistoryPopover] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const historyRailRef = useRef<HTMLDivElement | null>(null);
+  const historyScrollRef = useRef<HTMLDivElement | null>(null);
   /**
    * After pin click: keep this user id sticky until the user scrolls manually.
    * Prevents jump/`scroll-margin` from flipping the pin to the previous turn.
@@ -867,6 +996,9 @@ export function App() {
   );
   /** When true, keep the chat pinned to the latest message. */
   const stickToBottomRef = useRef(true);
+  /** Mirror of stickToBottomRef that triggers re-renders for the
+      "jump to bottom" button visibility. */
+  const [isAtBottom, setIsAtBottom] = useState(true);
   const prevSessionIdRef = useRef<string | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const selectsRef = useRef<HTMLDivElement | null>(null);
@@ -1206,9 +1338,10 @@ export function App() {
   }, [snap.pendingPermission?.requestId]);
 
   // Capture keys while a permission prompt is open (even if focus drifts).
+  // Disabled while a questionnaire modal is open (higher priority).
   useEffect(() => {
     const p = snap.pendingPermission;
-    if (!p) return;
+    if (!p || snap.pendingQuestion) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
       const n = p.options.length;
       if (n === 0) return;
@@ -1244,7 +1377,7 @@ export function App() {
     // Capture phase so we win over the composer textarea / menus.
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [snap.pendingPermission, permIndex]);
+  }, [snap.pendingPermission, snap.pendingQuestion, permIndex]);
 
   // Keep keyboard-highlighted suggest items in view when arrowing through a tall list.
   useEffect(() => {
@@ -1365,7 +1498,90 @@ export function App() {
       if (prev?.id === next?.id && prev?.text === next?.text) return prev;
       return next;
     });
+    // Also refresh the History Timeline tick Y positions so they track each
+    // user message's top edge inside the main-chat viewport.
+    refreshHistoryTicks();
   }, [userTimelineItems, snap.replaying, snap.sessionId]);
+
+  /**
+   * Compute a Y position for every user message. The rail is a fixed-height
+   * scrollable strip — ticks are evenly spaced at `HISTORY_TIMELINE_MIN_STEP`
+   * pixels apart, anchored to the top of the inner track. When the
+   * conversation has more ticks than fit, the rail scrolls vertically.
+   */
+  const refreshHistoryTicks = useCallback(() => {
+    const rail = historyRailRef.current;
+    if (!rail) return;
+    const n = userTimelineItems.length;
+    if (n === 0) {
+      setHistoryTickY({});
+      return;
+    }
+    const next: Record<string, number> = {};
+    for (let i = 0; i < n; i++) {
+      next[userTimelineItems[i].id] =
+        HISTORY_TIMELINE_PAD + i * HISTORY_TIMELINE_MIN_STEP;
+    }
+    setHistoryTickY((prev) => {
+      // Cheap shallow-equal: avoid state churn on no-op updates.
+      const ids = Object.keys(next);
+      if (ids.length === Object.keys(prev).length) {
+        let same = true;
+        for (const id of ids) {
+          if (Math.abs((prev[id] ?? 0) - next[id]) > 0.5) {
+            same = false;
+            break;
+          }
+        }
+        if (same) return prev;
+      }
+      return next;
+    });
+    // If a tick is currently hovered, keep the popover anchored to it as
+    // the user scrolls the chat pane.
+    if (historyHoverIdRef.current) {
+      const id = historyHoverIdRef.current;
+      const tickEl = rail.querySelector<HTMLButtonElement>(
+        `.history-timeline-tick[data-id="${CSS.escape(id)}"]`,
+      );
+      if (tickEl) {
+        const r = tickEl.getBoundingClientRect();
+        setHistoryPopover({ top: r.top + r.height / 2, left: r.right + 8 });
+      }
+    }
+    // Auto-scroll the rail so the active tick stays visible whenever
+    // pinnedUser changes (e.g., scrolling the chat, jumping to a
+    // message, or new stream updates landing).
+    const scrollEl = historyScrollRef.current;
+    if (pinnedUser && scrollEl && scrollEl.scrollHeight > scrollEl.clientHeight) {
+      const y = next[pinnedUser.id];
+      if (typeof y === "number") {
+        const visibleTop = scrollEl.scrollTop;
+        const visibleBottom = visibleTop + scrollEl.clientHeight;
+        if (y < visibleTop || y > visibleBottom) {
+          // Center the tick in the viewport if possible, otherwise clamp.
+          const target = Math.max(
+            0,
+            Math.min(
+              scrollEl.scrollHeight - scrollEl.clientHeight,
+              y - scrollEl.clientHeight / 2,
+            ),
+          );
+          scrollEl.scrollTop = target;
+        }
+      }
+    }
+  }, [userTimelineItems, pinnedUser]);
+
+  /**
+   * Mirror of `historyHoverId` so refreshHistoryTicks can read the current
+   * hovered tick without taking it as a dependency (which would invalidate
+   * the callback every hover).
+   */
+  const historyHoverIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    historyHoverIdRef.current = historyHoverId;
+  }, [historyHoverId]);
 
   const scheduleScrollPin = useCallback(() => {
     if (pinScrollRafRef.current != null) return;
@@ -1380,6 +1596,24 @@ export function App() {
     scheduleScrollPin();
   }, [scheduleScrollPin, snap.timeline, lastTimelineSig]);
 
+  // Recompute History Timeline ticks when the rail/scroll pane resize
+  // (window resize, sidebar/panel open/close) so the layout adapts to
+  // the new rail height.
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const rail = historyRailRef.current;
+    const scroll = historyScrollRef.current;
+    const pane = chatPaneRef.current;
+    if (!rail && !scroll && !pane) return;
+    const ro = new ResizeObserver(() => {
+      refreshHistoryTicks();
+    });
+    if (rail) ro.observe(rail);
+    if (scroll) ro.observe(scroll);
+    if (pane) ro.observe(pane);
+    return () => ro.disconnect();
+  }, [refreshHistoryTicks]);
+
   useEffect(() => {
     return () => {
       if (pinScrollRafRef.current != null) {
@@ -1393,14 +1627,14 @@ export function App() {
     };
   }, []);
 
-  const jumpToPinnedUser = useCallback(() => {
-    if (!pinnedUser) return;
-    const el = document.getElementById(msgDomId(pinnedUser.id));
+  /** Smooth-scroll the chat pane to a message and briefly flash it. */
+  const jumpToMsg = useCallback((id: string) => {
+    const el = document.getElementById(msgDomId(id));
     if (!el) return;
     // Don't fight auto-stick while the user is inspecting their prompt.
     stickToBottomRef.current = false;
     // Keep this turn on the pin; ignore scroll events from scrollIntoView.
-    pinHoldIdRef.current = pinnedUser.id;
+    pinHoldIdRef.current = id;
     pinIgnoreScrollRef.current = true;
     if (pinIgnoreScrollTimerRef.current) {
       clearTimeout(pinIgnoreScrollTimerRef.current);
@@ -1416,13 +1650,35 @@ export function App() {
       pane.addEventListener("scrollend", endIgnore, { once: true });
     }
     pinIgnoreScrollTimerRef.current = setTimeout(endIgnore, 700);
-    setFlashMsgId(pinnedUser.id);
+    setFlashMsgId(id);
     if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
     flashTimerRef.current = setTimeout(() => {
-      setFlashMsgId((id) => (id === pinnedUser.id ? null : id));
+      setFlashMsgId((cur) => (cur === id ? null : cur));
       flashTimerRef.current = null;
     }, 1600);
-  }, [pinnedUser]);
+  }, []);
+
+  /** Smooth-scroll the chat pane to the bottom and re-engage stick. */
+  const scrollToBottom = useCallback(() => {
+    const pane = chatPaneRef.current;
+    if (!pane) return;
+    // Suppress the auto-stick override while programmatic scroll runs.
+    pinIgnoreScrollRef.current = true;
+    if (pinIgnoreScrollTimerRef.current) {
+      clearTimeout(pinIgnoreScrollTimerRef.current);
+    }
+    pane.scrollTo({ top: pane.scrollHeight, behavior: "smooth" });
+    const endIgnore = () => {
+      pinIgnoreScrollRef.current = false;
+      pinIgnoreScrollTimerRef.current = null;
+    };
+    if ("onscrollend" in pane) {
+      pane.addEventListener("scrollend", endIgnore, { once: true });
+    }
+    pinIgnoreScrollTimerRef.current = setTimeout(endIgnore, 700);
+    stickToBottomRef.current = true;
+    setIsAtBottom(true);
+  }, []);
 
   useEffect(() => {
     if (view !== "chat") return;
@@ -1457,6 +1713,43 @@ export function App() {
     lastTimelineSig,
     scheduleScrollPin,
   ]);
+
+  // Auto-pop the right-side Plan panel while the agent is running and we
+  // have something to show (todos or pending plan approval). Resets per
+  // session / new turn, but respects a manual close mid-run.
+  useEffect(() => {
+    if (lastSessionIdRef.current !== snap.sessionId) {
+      lastSessionIdRef.current = snap.sessionId;
+      planAutoPopDismissed.current = false;
+    }
+    if (!snap.busy) {
+      planAutoPopDismissed.current = false;
+      return;
+    }
+    const hasContent =
+      (snap.todos?.length ?? 0) > 0 || Boolean(snap.pendingPlanApproval);
+    if (!hasContent) return;
+    if (planAutoPopDismissed.current) return;
+    if (rightPanelOpenRef.current && rightPanelTabRef.current === "plan") return;
+    if (viewRef.current !== "chat") return;
+    setRightPanelOpen(true);
+    setRightPanelTab("plan");
+  }, [
+    snap.busy,
+    snap.sessionId,
+    snap.todos?.length,
+    snap.pendingPlanApproval,
+    setRightPanelOpen,
+    setRightPanelTab,
+  ]);
+
+  // If the user closes the right panel mid-run, remember it so we don't
+  // re-pop it on every todos update.
+  useEffect(() => {
+    if (snap.busy && !rightPanelOpen) {
+      planAutoPopDismissed.current = true;
+    }
+  }, [snap.busy, rightPanelOpen]);
 
   // Close model/mode/effort menus on outside click or Escape
   useEffect(() => {
@@ -2140,6 +2433,7 @@ export function App() {
           modelId: snap.modelId,
           workspace: snap.workspace,
           alwaysApprove: snap.alwaysApprove,
+          m,
           newSession: (ws) => window.desktop.newSession(ws),
           prepareNewChat: () => window.desktop.prepareNewChat(),
           setModel: (id, effort) => window.desktop.setModel(id, effort),
@@ -2154,6 +2448,11 @@ export function App() {
         if (result.kind === "open_history") {
           clearComposerText();
           openHistorySearch(result.filter);
+          return;
+        }
+        if (result.kind === "open_plan") {
+          clearComposerText();
+          openRightTool("plan");
           return;
         }
         if (result.kind === "handled") {
@@ -2257,6 +2556,7 @@ export function App() {
               modelId: snap.modelId,
               workspace: snap.workspace,
               alwaysApprove: snap.alwaysApprove,
+              m,
               newSession: (ws) => window.desktop.newSession(ws),
               prepareNewChat: () => window.desktop.prepareNewChat(),
               setModel: (id, effort) => window.desktop.setModel(id, effort),
@@ -2271,6 +2571,11 @@ export function App() {
             if (result.kind === "open_history") {
               clearComposerText();
               openHistorySearch(result.filter);
+              return;
+            }
+            if (result.kind === "open_plan") {
+              clearComposerText();
+              openRightTool("plan");
               return;
             }
             if (result.kind === "handled") {
@@ -2433,6 +2738,19 @@ export function App() {
     }
   }, [snap.pendingPermission]);
 
+  const onAskUserQuestion = useCallback(
+    async (response: AskUserQuestionResponse) => {
+      const req = snap.pendingQuestion;
+      if (!req) return;
+      try {
+        await window.desktop.respondAskUserQuestion(req.requestId, response);
+      } catch (err) {
+        setLocalError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [snap.pendingQuestion],
+  );
+
   const onRetryConnect = useCallback(async () => {
     setLocalError(null);
     try {
@@ -2522,6 +2840,23 @@ export function App() {
     setExtTab(tab);
     setView("extensions");
   }, []);
+
+  const openModels = useCallback(() => {
+    setView("models");
+  }, []);
+
+  const refreshModelIndex = useCallback(async () => {
+    try {
+      const idx = await window.desktop.getModelConfigKeyIndex();
+      setModelKeyIndex(idx);
+    } catch {
+      // Non-fatal: composer falls back to flat list
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshModelIndex();
+  }, [refreshModelIndex, snap.availableModels]);
 
   // Prevent Chromium from navigating to file:// when dropping outside composer.
   useEffect(() => {
@@ -2881,7 +3216,31 @@ export function App() {
     }
   };
 
-  const modelChipLabel = currentModel?.name || snap.modelId || "Model";
+  const modelGroups = useMemo(
+    () =>
+      groupModelsByProvider(
+        snap.availableModels,
+        modelKeyIndex,
+        m.modelsGroupBuiltin,
+      ),
+    [snap.availableModels, modelKeyIndex, m.modelsGroupBuiltin],
+  );
+
+  const filteredModelGroups = useMemo(() => {
+    if (modelProviderFilter === "all") return modelGroups;
+    return modelGroups.filter((g) => g.id === modelProviderFilter);
+  }, [modelGroups, modelProviderFilter]);
+
+  const currentProviderName = useMemo(() => {
+    if (!snap.modelId) return undefined;
+    return modelKeyIndex[snap.modelId]?.providerName;
+  }, [snap.modelId, modelKeyIndex]);
+
+  const modelChipLabel = currentModel
+    ? currentProviderName
+      ? `${currentProviderName} · ${currentModel.name}`
+      : currentModel.name
+    : snap.modelId || "Model";
   const tokensUsed = snap.tokensUsed;
   const contextWindow =
     snap.contextWindow ?? currentModel?.contextWindow ?? undefined;
@@ -2913,8 +3272,13 @@ export function App() {
     contextWindow > 0
       ? Math.min(100, (tokensUsed / contextWindow) * 100)
       : null;
-  const effortLabel =
-    snap.reasoningEffort || currentModel?.reasoningEffort || m.effort;
+  const effortLabel = useMemo(() => {
+    const raw =
+      snap.reasoningEffort ||
+      currentModel?.reasoningEffort ||
+      "";
+    return localizeEffort(raw, m);
+  }, [snap.reasoningEffort, currentModel?.reasoningEffort, m]);
 
   const accountEmailDisplay =
     accountStatus?.email?.trim() || snap.accountEmail?.trim() || undefined;
@@ -2982,6 +3346,23 @@ export function App() {
   const showViewerColumn =
     view === "chat" && (Boolean(openFilePath) || filesPanelActive);
 
+  /**
+   * Height of the History Timeline's inner track. Drives both the inline
+   * `height` on the scroll container and the rail's overflow (it scrolls
+   * when this exceeds the rail's max-height).
+   */
+  const historyTrackHeightValue = historyTrackHeight(
+    userTimelineItems.length,
+  );
+  /**
+   * Index of the currently hovered tick within `userTimelineItems`, or
+   * -1 when no tick is hovered. Computed once per render so each tick
+   * can O(1) compute its fishbone distance to the hover point.
+   */
+  const historyHoverIdx = historyHoverId
+    ? userTimelineItems.findIndex((u) => u.id === historyHoverId)
+    : -1;
+
   const toggleRightPanel = useCallback(() => {
     setRightPanelOpen((open) => {
       if (open) return false;
@@ -2999,13 +3380,28 @@ export function App() {
   }, []);
 
   const openRightTool = useCallback(
-    (tab: "files" | "terminal" | "review" | "browser") => {
+    (tab: "files" | "terminal" | "plan" | "review" | "browser") => {
       if (tab === "terminal") setTermKeepAlive(true);
       setRightPanelTab(tab);
       setRightPanelOpen(true);
     },
     [],
   );
+
+  const respondPlanApproval = useCallback(
+    (
+      requestId: string,
+      outcome: PlanApprovalOutcome,
+      feedback?: string,
+    ) => {
+      void window.desktop.respondPlanApproval(requestId, outcome, feedback);
+    },
+    [],
+  );
+
+  const refreshPlanContent = useCallback(() => {
+    void window.desktop.refreshPlanContent();
+  }, []);
 
   // Ctrl/Cmd+B toggles the left session sidebar (always available).
   useEffect(() => {
@@ -3029,7 +3425,12 @@ export function App() {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod || e.altKey) return;
       if (e.key === "p" || e.key === "P") {
-        if (e.shiftKey) return;
+        if (e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          openRightTool("plan");
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
         openRightTool("files");
@@ -3057,6 +3458,31 @@ export function App() {
     return () => document.removeEventListener("keydown", onKey, true);
   }, [view, openRightTool]);
 
+  // Auto-open Plan panel when a plan approval arrives or todos first appear.
+  const prevPlanApprovalRef = useRef<string | null>(null);
+  const prevTodoCountRef = useRef(0);
+  useEffect(() => {
+    if (view !== "chat") return;
+    const approvalId = snap.pendingPlanApproval?.requestId ?? null;
+    if (approvalId && approvalId !== prevPlanApprovalRef.current) {
+      openRightTool("plan");
+    }
+    prevPlanApprovalRef.current = approvalId;
+
+    const n = snap.todos?.length ?? 0;
+    if (n > 0 && prevTodoCountRef.current === 0 && !rightPanelOpen) {
+      // Soft open: only when panel is closed and todos appear for the first time.
+      openRightTool("plan");
+    }
+    prevTodoCountRef.current = n;
+  }, [
+    view,
+    snap.pendingPlanApproval?.requestId,
+    snap.todos?.length,
+    rightPanelOpen,
+    openRightTool,
+  ]);
+
   return (
     <div
       ref={shellRef}
@@ -3065,6 +3491,14 @@ export function App() {
       } ${showViewerColumn ? "shell-viewer-open" : ""}`}
     >
       {loading && view === "chat" ? <div className="loading-bar" /> : null}
+
+      {snap.pendingQuestion ? (
+        <AskUserQuestionModal
+          request={snap.pendingQuestion}
+          m={m}
+          onSubmit={(response) => void onAskUserQuestion(response)}
+        />
+      ) : null}
 
       {panelLayout.sidebarCollapsed ? (
         <div className="sidebar-rail">
@@ -3111,6 +3545,15 @@ export function App() {
           >
             <span className="icon">🧩</span>
             <span className="nav-label">{m.navExtensions}</span>
+          </button>
+          <button
+            className={`nav-btn ${view === "models" ? "active" : ""}`}
+            onClick={() => openModels()}
+            title={m.navModels}
+            aria-label={m.navModels}
+          >
+            <span className="icon">◎</span>
+            <span className="nav-label">{m.navModels}</span>
           </button>
         </div>
 
@@ -3384,38 +3827,142 @@ export function App() {
               m={m}
             />
           </div>
+        ) : view === "models" ? (
+          <div className="main-scroll settings-scroll">
+            <ModelsView
+              onBack={() => setView("chat")}
+              m={m}
+              onProvidersChanged={() => void refreshModelIndex()}
+            />
+          </div>
         ) : (
           <div className="main-chat">
+            {/* Left-edge History Timeline rail. Replaces the old "current turn"
+                pin chip: a fixed-height vertical strip centered on the chat
+                column. Each user message is a short horizontal tick. The rail
+                scrolls internally if there are more messages than fit.
+                Hover → floating preview popover; click → jump & flash. */}
+            {!showHome && userTimelineItems.length > 0 ? (
+              <div
+                className="history-timeline-rail"
+                ref={historyRailRef}
+                aria-label={m.historyTimelineTooltip}
+                title={m.historyTimelineTooltip}
+              >
+                <div
+                  className="history-timeline-scroll"
+                  ref={historyScrollRef}
+                >
+                <div
+                  className="history-timeline-track"
+                  style={{ height: `${historyTrackHeightValue}px` }}
+                >
+                  <div className="history-timeline-track-line" />
+                  {userTimelineItems.map((item, idx) => {
+                    const y = historyTickY[item.id];
+                    if (typeof y !== "number") return null;
+                    const active = pinnedUser?.id === item.id;
+                    const hovered = historyHoverId === item.id;
+                    // Fishbone: when a tick is hovered, adjacent ticks within
+                    // 3 positions stretch progressively shorter (1→2→3).
+                    // distance === 0 means the hovered tick itself.
+                    const hoverIdx = hovered
+                      ? idx
+                      : historyHoverIdx;
+                    const distance =
+                      hoverIdx >= 0 ? Math.abs(idx - hoverIdx) : -1;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        data-id={item.id}
+                        className={`history-timeline-tick${
+                          active ? " is-active" : ""
+                        }${hovered ? " is-hovered" : ""}${
+                          distance === 1 ? " is-near-1" : ""
+                        }${distance === 2 ? " is-near-2" : ""}${
+                          distance === 3 ? " is-near-3" : ""
+                        }`}
+                        style={{ top: `${y}px` }}
+                        onMouseEnter={(e) => {
+                          setHistoryHoverId(item.id);
+                          const rect = (
+                            e.currentTarget as HTMLButtonElement
+                          ).getBoundingClientRect();
+                          setHistoryPopover({
+                            top: rect.top + rect.height / 2,
+                            left: rect.right + 8,
+                          });
+                        }}
+                        onMouseLeave={() => {
+                          setHistoryHoverId((cur) =>
+                            cur === item.id ? null : cur,
+                          );
+                          setHistoryPopover(null);
+                        }}
+                        onFocus={(e) => {
+                          setHistoryHoverId(item.id);
+                          const rect = (
+                            e.currentTarget as HTMLButtonElement
+                          ).getBoundingClientRect();
+                          setHistoryPopover({
+                            top: rect.top + rect.height / 2,
+                            left: rect.right + 8,
+                          });
+                        }}
+                        onBlur={() => {
+                          setHistoryHoverId((cur) =>
+                            cur === item.id ? null : cur,
+                          );
+                          setHistoryPopover(null);
+                        }}
+                        onClick={() => jumpToMsg(item.id)}
+                        title={`${m.historyTimelineJump} (${idx + 1})`}
+                        aria-label={`${m.historyTimelineJump}: ${previewText(
+                          item.text,
+                          80,
+                        )}`}
+                      >
+                        <span className="history-timeline-tick-mark" />
+                      </button>
+                    );
+                  })}
+                </div>
+                </div>
+              </div>
+            ) : null}
+            {historyHoverId != null && historyPopover != null
+              ? (() => {
+                  const item = userTimelineItems.find(
+                    (u) => u.id === historyHoverId,
+                  );
+                  if (!item) return null;
+                  return (
+                    <div
+                      className="history-timeline-popover"
+                      role="tooltip"
+                      style={{
+                        top: historyPopover.top,
+                        left: historyPopover.left,
+                      }}
+                    >
+                      <div className="history-timeline-popover-text">
+                        {previewText(item.text, 240)}
+                      </div>
+                      <span className="history-timeline-popover-arrow" />
+                    </div>
+                  );
+                })()
+              : null}
+
             {/* Chat column only: pin + timeline + composer share identical width. */}
             <div className="chat-rail">
             <div className="chat-topbar">
-              {pinnedUser && !showHome && !snap.replaying ? (
-                <button
-                  type="button"
-                  className={`current-turn-pin${
-                    snap.busy &&
-                    userTimelineItems[userTimelineItems.length - 1]?.id ===
-                      pinnedUser.id
-                      ? " is-busy"
-                      : ""
-                  }`}
-                  onClick={jumpToPinnedUser}
-                  title={m.currentTurnPinHint}
-                  aria-label={`${m.currentTurnPinHint}: ${previewText(pinnedUser.text, 200)}`}
-                >
-                  <span className="current-turn-pin-label">
-                    {m.currentTurnPin}
-                  </span>
-                  <span className="current-turn-pin-text">
-                    {previewText(pinnedUser.text)}
-                  </span>
-                  <span className="current-turn-pin-go" aria-hidden>
-                    ↵
-                  </span>
-                </button>
-              ) : (
-                <div className="chat-topbar-spacer" />
-              )}
+              {/* The top-of-chat "current turn" pin has been replaced by the
+                  left-edge History Timeline rail. The topbar keeps a spacer so
+                  trailing topbar buttons (export menu, etc.) keep their right
+                  alignment. */}
+              <div className="chat-topbar-spacer" />
               {!showHome && snap.timeline.length > 0 ? (
                 <div className="export-menu-wrap" ref={exportMenuRef}>
                   <button
@@ -3484,6 +4031,7 @@ export function App() {
                   const dist =
                     el.scrollHeight - el.scrollTop - el.clientHeight;
                   stickToBottomRef.current = dist < 96;
+                  setIsAtBottom(dist < 96);
                   // Programmatic pin jump: keep current pin, don't re-resolve.
                   if (pinIgnoreScrollRef.current) return;
                   // Real user scroll: release hold, then follow viewport.
@@ -3532,10 +4080,40 @@ export function App() {
             </div>
 
             <div className="composer-wrap">
+              {/* "Jump to bottom" button — floats above the composer and
+                  only appears when the chat has been scrolled away from
+                  the latest message. Clicking returns to the bottom and
+                  re-engages the auto-stick behaviour. */}
+              {!showHome && !isAtBottom ? (
+                <button
+                  type="button"
+                  className="chat-jump-to-bottom"
+                  onClick={() => scrollToBottom()}
+                  title={m.jumpToBottom}
+                  aria-label={m.jumpToBottom}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    aria-hidden
+                  >
+                    <path
+                      d="M3.5 6.5 8 11l4.5-4.5"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              ) : null}
               {errorText && !showHome ? (
                 <div className="composer-error">{errorText}</div>
               ) : null}
-              {snap.pendingPermission ? (
+              {/* Questionnaires take priority over permission prompts. */}
+              {!snap.pendingQuestion && snap.pendingPermission ? (
                 <PermissionPanel
                   request={snap.pendingPermission}
                   activeIndex={Math.min(
@@ -4112,6 +4690,40 @@ export function App() {
                           <path d="M12 5v14M5 12h14" />
                         </svg>
                       </button>
+                      {snap.busy ||
+                      snap.pendingPlanApproval ||
+                      (snap.sessionMode === "plan" &&
+                        Boolean(snap.planContent?.trim())) ? (
+                        <button
+                          type="button"
+                          className={`chip chip-btn plan-todos-chip ${
+                            snap.pendingPlanApproval ? "needs-approval" : ""
+                          }`}
+                          onClick={() => openRightTool("plan")}
+                          title={m.sidePanelPlan}
+                        >
+                          <strong>
+                            {snap.pendingPlanApproval
+                              ? m.planApprovalNeeded
+                              : m.planTodosChip}
+                          </strong>
+                          {(snap.todos?.length ?? 0) > 0 ? (
+                            <span className="chip-meta">
+                              {
+                                snap.todos.filter(
+                                  (t) => t.status === "completed",
+                                ).length
+                              }
+                              /
+                              {
+                                snap.todos.filter(
+                                  (t) => t.status !== "cancelled",
+                                ).length
+                              }
+                            </span>
+                          ) : null}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className={`chip chip-btn always-approve-chip ${
@@ -4165,41 +4777,116 @@ export function App() {
                         <button
                           className={`chip chip-btn ${menu === "model" ? "open" : ""}`}
                           disabled={!connectionReady}
-                          onClick={() =>
+                          onClick={() => {
                             setMenu((cur) =>
                               cur === "model" ? null : "model",
-                            )
-                          }
+                            );
+                            void refreshModelIndex();
+                          }}
                           title={m.switchModel}
                         >
                           <strong>{modelChipLabel}</strong>
                         </button>
                         {menu === "model" ? (
-                          <div className="dropdown dropdown-end">
+                          <div className="dropdown dropdown-end dropdown-models">
                             {snap.availableModels.length === 0 ? (
                               <div className="dropdown-empty">
                                 {m.openSessionForModels}
                               </div>
                             ) : (
-                              snap.availableModels.map((mod) => (
+                              <>
+                                {modelGroups.length > 1 ? (
+                                  <div className="model-provider-tabs">
+                                    <button
+                                      type="button"
+                                      className={`model-provider-tab ${
+                                        modelProviderFilter === "all"
+                                          ? "active"
+                                          : ""
+                                      }`}
+                                      onClick={() =>
+                                        setModelProviderFilter("all")
+                                      }
+                                    >
+                                      {m.modelsAllProviders}
+                                    </button>
+                                    {modelGroups.map((g) => (
+                                      <button
+                                        key={g.id}
+                                        type="button"
+                                        className={`model-provider-tab ${
+                                          modelProviderFilter === g.id
+                                            ? "active"
+                                            : ""
+                                        }`}
+                                        onClick={() =>
+                                          setModelProviderFilter(g.id)
+                                        }
+                                        title={g.name}
+                                      >
+                                        {g.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {filteredModelGroups.length === 0 ? (
+                                  <div className="dropdown-empty">
+                                    {m.modelsNoModelsInProvider}
+                                  </div>
+                                ) : (
+                                  filteredModelGroups.map((group) => (
+                                    <div
+                                      key={group.id}
+                                      className="model-group"
+                                    >
+                                      {modelProviderFilter === "all" &&
+                                      modelGroups.length > 1 ? (
+                                        <div className="model-group-label">
+                                          {group.name}
+                                        </div>
+                                      ) : null}
+                                      {group.models.map((mod) => (
+                                        <button
+                                          key={mod.modelId}
+                                          type="button"
+                                          className={`dropdown-item ${
+                                            mod.modelId === snap.modelId
+                                              ? "active"
+                                              : ""
+                                          }`}
+                                          onClick={() => {
+                                            void onSetModel(mod.modelId);
+                                            setMenu(null);
+                                          }}
+                                        >
+                                          <span className="di-title">
+                                            {mod.name}
+                                          </span>
+                                          <span className="di-desc">
+                                            {mod.modelId}
+                                            {mod.description &&
+                                            mod.description !== group.name
+                                              ? ` · ${mod.description}`
+                                              : ""}
+                                          </span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ))
+                                )}
                                 <button
-                                  key={mod.modelId}
-                                  className={`dropdown-item ${
-                                    mod.modelId === snap.modelId ? "active" : ""
-                                  }`}
+                                  type="button"
+                                  className="dropdown-item model-manage-item"
                                   onClick={() => {
-                                    void onSetModel(mod.modelId);
                                     setMenu(null);
+                                    openModels();
                                   }}
                                 >
-                                  <span className="di-title">{mod.name}</span>
-                                  {mod.description ? (
-                                    <span className="di-desc">
-                                      {mod.description}
-                                    </span>
-                                  ) : null}
+                                  <span className="di-title">
+                                    {m.modelsManage}
+                                  </span>
                                 </button>
-                              ))
+                              </>
                             )}
                           </div>
                         ) : null}
@@ -4237,7 +4924,9 @@ export function App() {
                                     setMenu(null);
                                   }}
                                 >
-                                  <span className="di-title">{e.label}</span>
+                                  <span className="di-title">
+                                    {localizeEffort(e.id, m) || e.label}
+                                  </span>
                                   {e.description ? (
                                     <span className="di-desc">
                                       {e.description}
@@ -4385,7 +5074,7 @@ export function App() {
         >
           <span className="icon" aria-hidden>
             {rightPanelOpen ? (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                 <rect
                   x="2"
                   y="3"
@@ -4398,7 +5087,7 @@ export function App() {
                 <path d="M10 3v10" stroke="currentColor" strokeWidth="1.3" />
               </svg>
             ) : (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                 <rect
                   x="2"
                   y="3"
@@ -4429,6 +5118,34 @@ export function App() {
           <div className="right-panel-body">
             {rightPanelTab === "menu" ? (
               <nav className="right-tools-menu in-panel" aria-label={m.sidePanelToggle}>
+                <button
+                  type="button"
+                  className="right-tools-item"
+                  onClick={() => setRightPanelTab("plan")}
+                >
+                  <span className="right-tools-icon" aria-hidden>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <path
+                        d="M3.5 2.5h9A.5.5 0 0 1 13 3v10a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13V3a.5.5 0 0 1 .5-.5Z"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                      />
+                      <path
+                        d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="right-tools-label">{m.sidePanelPlan}</span>
+                  <span className="right-tools-kbd">
+                    {m.sidePanelPlanShortcut}
+                  </span>
+                  {(snap.todos?.length ?? 0) > 0 || snap.pendingPlanApproval ? (
+                    <span className="right-tools-dot" aria-hidden />
+                  ) : null}
+                </button>
                 <button
                   type="button"
                   className="right-tools-item"
@@ -4554,15 +5271,19 @@ export function App() {
                 onClose={() => setRightPanelTab("menu")}
                 m={m}
               />
+            ) : rightPanelTab === "plan" ? (
+              <PlanPanel
+                todos={snap.todos ?? []}
+                planContent={snap.planContent}
+                pendingApproval={snap.pendingPlanApproval}
+                sessionMode={snap.sessionMode}
+                m={m}
+                onClose={() => setRightPanelTab("menu")}
+                onRespondApproval={respondPlanApproval}
+                onRefreshPlan={refreshPlanContent}
+              />
             ) : rightPanelTab === "review" || rightPanelTab === "browser" ? (
               <div className="right-panel-placeholder">
-                <button
-                  type="button"
-                  className="right-panel-back"
-                  onClick={() => setRightPanelTab("menu")}
-                >
-                  ← {m.sidePanelToggle}
-                </button>
                 <div className="right-panel-placeholder-title">
                   {rightPanelTab === "review"
                     ? m.sidePanelReview
@@ -4585,15 +5306,6 @@ export function App() {
                 }}
                 aria-hidden={rightPanelTab !== "terminal"}
               >
-                <div className="right-panel-tool-bar">
-                  <button
-                    type="button"
-                    className="right-panel-back"
-                    onClick={() => setRightPanelTab("menu")}
-                  >
-                    ← {m.sidePanelToggle}
-                  </button>
-                </div>
                 <TerminalPanel
                   workspace={snap.workspace}
                   active={rightOpen && rightPanelTab === "terminal"}

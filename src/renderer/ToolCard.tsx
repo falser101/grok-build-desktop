@@ -13,6 +13,60 @@ function statusClass(status: string): string {
   return "idle";
 }
 
+function kindLabel(m: Messages, kind: string | undefined): string {
+  const k = (kind || "").toLowerCase();
+  switch (k) {
+    case "edit":
+    case "apply_patch":
+    case "search_replace":
+    case "write":
+    case "create":
+    case "patch":
+      return m.toolKindEdit;
+    case "search":
+    case "grep":
+    case "find":
+    case "query":
+      return m.toolKindSearch;
+    case "think":
+    case "reasoning":
+      return m.toolKindThink;
+    case "read":
+    case "view":
+    case "fetch":
+    case "load":
+      return m.toolKindRead;
+    case "execute":
+    case "run":
+    case "bash":
+    case "shell":
+    case "command":
+    case "cmd":
+      return m.toolKindRun;
+    case "web":
+    case "browser":
+    case "http":
+    case "fetch_url":
+    case "url":
+      return m.toolKindWeb;
+    default:
+      return kind || m.toolKindTool;
+  }
+}
+
+function statusLabel(m: Messages, status: string): string {
+  const s = status.toLowerCase();
+  if (s === "completed" || s === "complete" || s === "success")
+    return m.toolStatusCompleted;
+  if (s === "failed" || s === "error") return m.toolStatusFailed;
+  if (s === "cancelled" || s === "canceled") return m.toolStatusCancelled;
+  if (s === "in_progress" || s === "running") return m.toolStatusRunning;
+  if (s === "awaiting_permission" || s === "awaiting" || s === "needs_permission")
+    return m.toolStatusAwaiting;
+  if (s === "pending") return m.toolStatusPending;
+  return status;
+}
+
 export const ToolCard = memo(function ToolCard({
   item,
   m,
@@ -31,7 +85,7 @@ export const ToolCard = memo(function ToolCard({
 
   const header = (
     <div className="tool-card-header">
-      <span className="badge">{item.toolKind || "tool"}</span>
+      <span className="badge">{kindLabel(m, item.toolKind)}</span>
       <span className="title" title={item.title}>
         {item.title}
       </span>
@@ -43,7 +97,7 @@ export const ToolCard = memo(function ToolCard({
           )}
         </span>
       ) : null}
-      <span className={`status status-${sc}`}>{item.status}</span>
+      <span className={`status status-${sc}`}>{statusLabel(m, item.status)}</span>
     </div>
   );
 

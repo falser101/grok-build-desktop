@@ -3,6 +3,8 @@ import type {
   ModelInfo,
   SessionModeId,
 } from "@shared/types";
+import type { Messages } from "./i18n";
+import { localizeEffort } from "./i18n";
 
 /** Desktop-local slash commands (not always advertised by the shell). */
 export const LOCAL_COMMANDS: AvailableCommand[] = [
@@ -33,6 +35,14 @@ export const LOCAL_COMMANDS: AvailableCommand[] = [
     name: "plan",
     description: "Enter plan mode",
     inputHint: "[description]",
+  },
+  {
+    name: "view-plan",
+    description: "Open the Plan / TODO panel",
+  },
+  {
+    name: "show-plan",
+    description: "Open the Plan / TODO panel (alias of /view-plan)",
   },
   {
     name: "ask",
@@ -203,13 +213,17 @@ export type LocalSlashResult =
   | { kind: "error"; message: string }
   | { kind: "passthrough" }
   /** Open the prompt-history search UI (optional filter from args). */
-  | { kind: "open_history"; filter?: string };
+  | { kind: "open_history"; filter?: string }
+  /** Open the Plan / TODO right panel. */
+  | { kind: "open_plan" };
 
 export interface LocalSlashContext {
   models: ModelInfo[];
   modelId?: string;
   workspace?: string;
   alwaysApprove?: boolean;
+  /** Localized messages used for slash command toasts / errors. */
+  m?: Messages;
   newSession: (workspace: string) => Promise<void>;
   /** Empty chat without workspace (user must pick one). */
   prepareNewChat?: () => Promise<void>;
@@ -217,6 +231,20 @@ export interface LocalSlashContext {
   setMode: (modeId: SessionModeId) => Promise<void>;
   setAlwaysApprove: (enabled: boolean) => Promise<void>;
   pickFolder: () => Promise<string | null>;
+}
+
+const FALLBACK_M: Pick<Messages, "you" | "grok"> = {
+  you: "You",
+  grok: "Grok",
+};
+
+function t(
+  ctx: LocalSlashContext,
+  zh: (m: Messages) => string,
+  en: (m: Messages) => string,
+): string {
+  const m = ctx.m ?? (FALLBACK_M as Messages);
+  return m.you === "你" ? zh(m) : en(m);
 }
 
 function resolveModel(
@@ -263,22 +291,44 @@ export async function tryHandleLocalSlash(
       await ctx.prepareNewChat();
       return {
         kind: "handled",
-        message: "New chat ready — choose a workspace to start.",
+        message: t(
+          ctx,
+          (mm) => "新会话就绪 — 请选择工作区后开始。",
+          () => "New chat ready — choose a workspace to start.",
+        ),
       };
     }
     const folder = ctx.workspace || (await ctx.pickFolder());
     if (!folder) {
-      return { kind: "error", message: "Choose a workspace to start a new session." };
+      return {
+        kind: "error",
+        message: t(
+          ctx,
+          (mm) => "请选择工作区后再开始新会话。",
+          () => "Choose a workspace to start a new session.",
+        ),
+      };
     }
     await ctx.newSession(folder);
-    return { kind: "handled", message: "Started a new session." };
+    return {
+      kind: "handled",
+      message: t(
+        ctx,
+        (mm) => "已开启新会话。",
+        () => "Started a new session.",
+      ),
+    };
   }
 
   if (name === "model" || name === "m") {
     if (!args) {
       return {
         kind: "error",
-        message: "Usage: /model <name> [effort]",
+        message: t(
+          ctx,
+          (mm) => "用法：/model <名称> [推理力度]",
+          () => "Usage: /model <name> [effort]",
+        ),
       };
     }
     // Prefer full-string match (display names may contain spaces).
@@ -296,7 +346,11 @@ export async function tryHandleLocalSlash(
     if (!model) {
       return {
         kind: "error",
-        message: `Unknown model: ${args}`,
+        message: t(
+          ctx,
+          (mm) => `未找到模型：${args}`,
+          () => `Unknown model: ${args}`,
+        ),
       };
     }
     if (
@@ -310,7 +364,11 @@ export async function tryHandleLocalSlash(
       if (!ok) {
         return {
           kind: "error",
-          message: `Unknown effort for ${model.name}: ${effort}`,
+          message: t(
+            ctx,
+            (mm) => `${model!.name} 不支持推理力度：${effort}`,
+            () => `Unknown effort for ${model!.name}: ${effort}`,
+          ),
         };
       }
     } else if (effort && !model.supportsReasoningEffort) {
@@ -327,16 +385,34 @@ export async function tryHandleLocalSlash(
 
   if (name === "effort") {
     if (!args) {
-      return { kind: "error", message: "Usage: /effort <level>" };
+      return {
+        kind: "error",
+        message: t(
+          ctx,
+          (mm) => "用法：/effort <力度>",
+          () => "Usage: /effort <level>",
+        ),
+      };
     }
     const model = ctx.models.find((m) => m.modelId === ctx.modelId);
     if (!model) {
-      return { kind: "error", message: "No active model." };
+      return {
+        kind: "error",
+        message: t(
+          ctx,
+          (mm) => "当前没有激活的模型。",
+          () => "No active model.",
+        ),
+      };
     }
     if (!model.supportsReasoningEffort) {
       return {
         kind: "error",
-        message: `${model.name} does not support reasoning effort.`,
+        message: t(
+          ctx,
+          (mm) => `${model.name} 不支持推理力度。`,
+          () => `${model.name} does not support reasoning effort.`,
+        ),
       };
     }
     const level = args.split(/\s+/)[0]!;
@@ -345,14 +421,28 @@ export async function tryHandleLocalSlash(
     );
     if (!ok) {
       const opts =
-        model.reasoningEfforts?.map((e) => e.id).join(", ") || "none";
+        model.reasoningEfforts
+          ?.map((e) => localizeEffort(e.id, ctx.m ?? (FALLBACK_M as Messages)))
+          .join("、") || (ctx.m ? ctx.m.effortOff : "none");
       return {
         kind: "error",
-        message: `Unknown effort "${level}". Options: ${opts}`,
+        message: t(
+          ctx,
+          (mm) => `未知的推理力度「${level}」。可选：${opts}`,
+          () => `Unknown effort "${level}". Options: ${opts}`,
+        ),
       };
     }
     await ctx.setModel(model.modelId, level);
-    return { kind: "handled", message: `Reasoning effort set to ${level}.` };
+    const label = localizeEffort(level, ctx.m ?? (FALLBACK_M as Messages));
+    return {
+      kind: "handled",
+      message: t(
+        ctx,
+        (mm) => `已设置推理力度：${label}`,
+        () => `Reasoning effort set to ${label}.`,
+      ),
+    };
   }
 
   if (name === "plan") {
@@ -360,17 +450,42 @@ export async function tryHandleLocalSlash(
     if (args) {
       return { kind: "send", text: args };
     }
-    return { kind: "handled", message: "Switched to plan mode." };
+    return {
+      kind: "handled",
+      message: t(
+        ctx,
+        (mm) => "已切换到计划模式。",
+        () => "Switched to plan mode.",
+      ),
+    };
+  }
+
+  if (name === "view-plan" || name === "show-plan" || name === "plan-view") {
+    return { kind: "open_plan" };
   }
 
   if (name === "ask") {
     await ctx.setMode("ask");
-    return { kind: "handled", message: "Switched to ask mode." };
+    return {
+      kind: "handled",
+      message: t(
+        ctx,
+        (mm) => "已切换到问答模式。",
+        () => "Switched to ask mode.",
+      ),
+    };
   }
 
   if (name === "agent" || name === "default") {
     await ctx.setMode("default");
-    return { kind: "handled", message: "Switched to agent mode." };
+    return {
+      kind: "handled",
+      message: t(
+        ctx,
+        (mm) => "已切换到 Agent 模式。",
+        () => "Switched to agent mode.",
+      ),
+    };
   }
 
   if (name === "always-approve" || name === "yolo") {
@@ -390,15 +505,27 @@ export async function tryHandleLocalSlash(
     } else {
       return {
         kind: "error",
-        message: "Usage: /always-approve [on|off]",
+        message: t(
+          ctx,
+          (mm) => "用法：/always-approve [on|off]",
+          () => "Usage: /always-approve [on|off]",
+        ),
       };
     }
     await ctx.setAlwaysApprove(next);
     return {
       kind: "handled",
-      message: next
-        ? "Always-approve enabled — tools run without prompts."
-        : "Always-approve disabled — tools will ask for permission.",
+      message: t(
+        ctx,
+        (mm) =>
+          next
+            ? "已开启始终批准 — 工具无需确认即可运行。"
+            : "已关闭始终批准 — 工具每次都会请求授权。",
+        () =>
+          next
+            ? "Always-approve enabled — tools run without prompts."
+            : "Always-approve disabled — tools will ask for permission.",
+      ),
     };
   }
 
