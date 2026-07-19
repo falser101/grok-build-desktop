@@ -77,8 +77,6 @@ export function PlanPanel({
   const [tab, setTab] = useState<PlanPanelTab>(
     pendingApproval ? "plan" : todos.length > 0 ? "todos" : "plan",
   );
-  const [feedback, setFeedback] = useState("");
-  const [showFeedback, setShowFeedback] = useState(false);
   const [hideDone, setHideDone] = useState(false);
 
   const c = useMemo(() => counts(todos), [todos]);
@@ -165,85 +163,15 @@ export function PlanPanel({
       </div>
 
       {approval ? (
-        <div className="plan-approval-banner">
-          <div className="plan-approval-banner-title">
-            {approval.hasPlan
-              ? m.planApprovalTitle
-              : m.planApprovalEmptyTitle}
+        <div className="plan-approval-callout">
+          <div className="plan-approval-callout-title">
+            {m.planApprovalNeeded}
           </div>
-          <div className="plan-approval-banner-hint">
+          <div className="plan-approval-callout-hint">
             {approval.hasPlan
               ? m.planApprovalHint
               : m.planApprovalEmptyHint}
           </div>
-          {showFeedback ? (
-            <div className="plan-approval-feedback">
-              <textarea
-                className="plan-approval-feedback-input"
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                placeholder={m.planApprovalFeedbackPlaceholder}
-                rows={3}
-                autoFocus
-              />
-              <div className="plan-approval-feedback-actions">
-                <button
-                  type="button"
-                  className="plan-approval-btn secondary"
-                  onClick={() => {
-                    setShowFeedback(false);
-                    setFeedback("");
-                  }}
-                >
-                  {m.planApprovalCancelFeedback}
-                </button>
-                <button
-                  type="button"
-                  className="plan-approval-btn primary"
-                  disabled={!feedback.trim()}
-                  onClick={() => {
-                    onRespondApproval(
-                      approval.requestId,
-                      "cancelled",
-                      feedback.trim(),
-                    );
-                    setShowFeedback(false);
-                    setFeedback("");
-                  }}
-                >
-                  {m.planApprovalSendFeedback}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="plan-approval-actions">
-              <button
-                type="button"
-                className="plan-approval-btn primary"
-                onClick={() =>
-                  onRespondApproval(approval.requestId, "approved")
-                }
-              >
-                {m.planApprovalApprove}
-              </button>
-              <button
-                type="button"
-                className="plan-approval-btn secondary"
-                onClick={() => setShowFeedback(true)}
-              >
-                {m.planApprovalRequestChanges}
-              </button>
-              <button
-                type="button"
-                className="plan-approval-btn danger"
-                onClick={() =>
-                  onRespondApproval(approval.requestId, "abandoned")
-                }
-              >
-                {m.planApprovalAbandon}
-              </button>
-            </div>
-          )}
         </div>
       ) : null}
 
