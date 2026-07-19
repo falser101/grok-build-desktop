@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type {
-  InstallerChannel,
-  InstallerResult,
-  InstallerStatus,
-} from "@shared/types";
-import { OptionCard } from "./SettingsView";
+import type { InstallerResult, InstallerStatus } from "@shared/types";
 import type { Messages } from "./i18n";
 
 type UpdateCheck = {
@@ -15,12 +10,9 @@ type UpdateCheck = {
 
 interface AgentSettingsViewProps {
   status: InstallerStatus;
-  channel: InstallerChannel;
   lastCheck?: string;
   m: Messages;
 }
-
-const CHANNELS: InstallerChannel[] = ["stable", "alpha", "enterprise"];
 
 function statusLabel(
   status: InstallerStatus,
@@ -69,7 +61,6 @@ function formatRelative(iso?: string): string {
 
 export function AgentSettingsView({
   status,
-  channel,
   lastCheck,
   m,
 }: AgentSettingsViewProps) {
@@ -129,18 +120,6 @@ export function AgentSettingsView({
     } finally {
       setBusy(null);
     }
-  }, []);
-
-  const onSelectChannel = useCallback(async (c: InstallerChannel) => {
-    await window.desktop.setInstallerChannel(c).catch((err) => {
-      setResult({
-        ok: false,
-        output: "",
-        code: null,
-        durationMs: 0,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
   }, []);
 
   const meta = statusLabel(status, m);
@@ -218,34 +197,6 @@ export function AgentSettingsView({
             }
           />
         ) : null}
-      </div>
-
-      <div className="settings-card-head" style={{ marginBottom: 8 }}>
-        <h3 className="settings-subhead">{m.agentChannelTitle}</h3>
-      </div>
-      <div
-        className="settings-options"
-        role="radiogroup"
-        aria-label={m.agentChannelTitle}
-      >
-        {CHANNELS.map((c) => (
-          <OptionCard
-            key={c}
-            value={c}
-            selected={channel === c}
-            title={
-              c === "stable"
-                ? m.agentChannelStable
-                : c === "alpha"
-                  ? m.agentChannelAlpha
-                  : m.agentChannelEnterprise
-            }
-            description={
-              c === "stable" ? m.agentChannelStableDesc : undefined
-            }
-            onSelect={(v: string) => void onSelectChannel(v as InstallerChannel)}
-          />
-        ))}
       </div>
 
       <div className="settings-card-actions">

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   AccountStatus,
-  InstallerChannel,
   InstallerStatus,
   UsageInfo,
 } from "@shared/types";
@@ -68,7 +67,6 @@ export function SettingsView({
   usage,
   onRefreshUsage,
   installerStatus,
-  installerChannel,
   lastUpdateCheckAt,
 }: {
   onBack: () => void;
@@ -81,7 +79,6 @@ export function SettingsView({
   usage?: UsageInfo | null;
   onRefreshUsage?: () => Promise<void>;
   installerStatus: InstallerStatus;
-  installerChannel: InstallerChannel;
   lastUpdateCheckAt?: string;
 }) {
   const {
@@ -579,7 +576,6 @@ export function SettingsView({
 
         <AgentSettingsView
           status={installerStatus}
-          channel={installerChannel}
           lastCheck={lastUpdateCheckAt}
           m={m}
         />

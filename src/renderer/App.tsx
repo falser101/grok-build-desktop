@@ -4113,7 +4113,6 @@ export function App() {
                 await window.desktop.refreshUsage();
               }}
               installerStatus={snap.installerStatus}
-              installerChannel={snap.installerChannel}
               lastUpdateCheckAt={snap.lastUpdateCheckAt}
             />
           </div>
