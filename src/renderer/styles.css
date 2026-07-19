@@ -830,23 +830,9 @@ body.is-resizing-panels .file-tree {
   color: var(--text-dim);
 }
 
-/* "未登录" pill on the AccountMenu trigger. Red dot accents the
-   account name so users see at a glance that official Grok models
-   are unavailable, without hiding the rest of the UI. */
-.account-trigger-unauth {
-  flex: 0 0 auto;
-  margin: 0 4px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text-bright, #fff);
-  background: rgba(220, 38, 38, 0.85);
-  border: 1px solid rgba(220, 38, 38, 0.4);
-  cursor: help;
-  user-select: none;
-}
+/* "未登录" pill on the AccountMenu trigger has been removed —
+   the not-signed-in state is now surfaced via the trigger's primary
+   text and the title attribute instead of a red badge. */
 
 .account-popover {
   position: fixed;

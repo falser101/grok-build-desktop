@@ -4054,8 +4054,6 @@ export function App() {
             agentVersion={snap.agentVersion}
             usage={snap.usage}
             signedIn={accountSignedIn}
-            accountAvailable={snap.accountAvailable}
-            accountAvailableFalseHint={m.accountAvailableFalseHint}
             loginBusy={accountBusy || !!accountStatus?.loginInProgress}
             onOpenSettings={() => setView("settings")}
             onLoginBrowser={() => void onAccountLogin("oauth")}

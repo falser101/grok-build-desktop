@@ -245,6 +245,11 @@ export interface Messages {
   // Account menu
   account: string;
   accountMenu: string;
+  /**
+   * Product brand name shown in the left-bottom status when the agent
+   * is connected (e.g. "grok-build v0.1.0").
+   */
+  appBrandName: string;
 
   // Account / auth (CLI parity)
   accountLoginBrowser: string;
@@ -264,7 +269,8 @@ export interface Messages {
    * Tooltip on the account menu trigger when the desktop is connected
    * to agent serve but no Grok credentials exist (no `grok login`, no
    * `XAI_API_KEY`, no desktop-stored key). Custom providers can still
-   * be used.
+   * be used. (Previously used as the tooltip for the red "Not signed in"
+   * pill on the account trigger; pill has been removed.)
    */
   accountAvailableFalseHint: string;
   /**
@@ -787,6 +793,7 @@ const en: Messages = {
 
   account: "Account",
   accountMenu: "Account menu",
+  appBrandName: "grok-build",
 
   accountLoginBrowser: "Sign in with browser",
   accountLoginDevice: "Sign in with device code",
@@ -1330,6 +1337,7 @@ const zh: Messages = {
 
   account: "账号",
   accountMenu: "账号菜单",
+  appBrandName: "grok-build",
 
   accountLoginBrowser: "浏览器登录",
   accountLoginDevice: "设备码登录",

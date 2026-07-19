@@ -13,17 +13,6 @@ interface AccountMenuProps {
   agentVersion?: string | null;
   usage?: UsageInfo | null;
   signedIn?: boolean;
-  /**
-   * True iff ANY Grok credential is available (login / env var /
-   * desktop-stored key). When false, the trigger shows a small
-   * "未登录" badge so users know official models are off, but they can
-   * still use custom providers.
-   */
-  accountAvailable?: boolean;
-  /**
-   * Tooltip for the "未登录" badge.
-   */
-  accountAvailableFalseHint?: string;
   loginBusy?: boolean;
   onOpenSettings: () => void;
   onLoginBrowser?: () => void;
@@ -46,8 +35,6 @@ export function AccountMenu({
   agentVersion,
   usage,
   signedIn,
-  accountAvailable,
-  accountAvailableFalseHint,
   loginBusy,
   onOpenSettings,
   onLoginBrowser,
@@ -144,10 +131,14 @@ export function AccountMenu({
       ? `${m.followSystem} · ${systemThemeLabel}`
       : themeLabel(prefs.theme);
 
-  const displayName = accountEmail?.trim() || m.account;
-  const versionLabel = agentVersion?.trim()
-    ? `agent ${agentVersion.trim()}`
-    : null;
+  const displayName = accountEmail?.trim() || m.notSignedIn;
+  // Brand label: when the agent is connected we show "grok-build · vX.Y.Z"
+  // instead of a generic "Connected" — the version is only knowable once
+  // the connection succeeds, so this naturally replaces the connected label.
+  const brandVersionLabel =
+    connection === "ready" && agentVersion?.trim()
+      ? `${m.appBrandName} ${agentVersion.trim().replace(/^v/i, "")}`
+      : null;
   const usageLine =
     usage && !usage.error
       ? `${usage.usageLabel}: ${usage.usageShort}${
@@ -156,9 +147,14 @@ export function AccountMenu({
       : usage?.error
         ? m.accountUsageUnavailable
         : null;
-  const displaySub = [connectionLabel, versionLabel, usageLine]
-    .filter(Boolean)
-    .join(" · ");
+  // When connected, prefer the brand+version line over the raw connection
+  // label. Otherwise (still starting/connecting/error) keep the connection
+  // status so the user sees what's happening.
+  const subParts: string[] = [];
+  if (brandVersionLabel) subParts.push(brandVersionLabel);
+  else subParts.push(connectionLabel);
+  if (usageLine) subParts.push(usageLine);
+  const displaySub = subParts.join(" · ");
 
   const localeOptions: LocalePref[] = ["system", "en", "zh"];
   const themeOptions: ThemePref[] = ["system", "dark", "light"];
@@ -442,8 +438,7 @@ export function AccountMenu({
         aria-label={m.accountMenu}
         title={[
           accountEmail?.trim(),
-          connectionLabel,
-          versionLabel,
+          brandVersionLabel ?? connectionLabel,
           usageLine,
         ]
           .filter(Boolean)
@@ -462,19 +457,10 @@ export function AccountMenu({
           <span className="account-trigger-name">{displayName}</span>
           <span className="account-trigger-status">
             {usage && !usage.error
-              ? `${connectionLabel} · ${usage.usageShort}`
+              ? `${brandVersionLabel ?? connectionLabel} · ${usage.usageShort}`
               : displaySub}
           </span>
         </span>
-        {accountAvailable === false ? (
-          <span
-            className="account-trigger-unauth"
-            title={accountAvailableFalseHint}
-            aria-label={accountAvailableFalseHint}
-          >
-            {m.notSignedIn}
-          </span>
-        ) : null}
         <span className="account-trigger-chev" aria-hidden>
           {open ? "▾" : "▴"}
         </span>
