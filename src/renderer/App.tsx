@@ -1911,42 +1911,38 @@ export function App() {
     scheduleScrollPin,
   ]);
 
-  // Auto-pop the right-side Plan panel while the agent is running and we
-  // have something to show (todos or pending plan approval). Resets per
-  // session / new turn, but respects a manual close mid-run.
+  // Auto-pop the right-side Plan panel only when the agent actually has
+  // a plan awaiting user approval — we don't want to yank the panel open
+  // just because todos showed up. Resets per session; respects a manual
+  // close mid-run.
   useEffect(() => {
     if (lastSessionIdRef.current !== snap.sessionId) {
       lastSessionIdRef.current = snap.sessionId;
       planAutoPopDismissed.current = false;
     }
-    if (!snap.busy) {
+    if (!snap.pendingPlanApproval) {
       planAutoPopDismissed.current = false;
       return;
     }
-    const hasContent =
-      (snap.todos?.length ?? 0) > 0 || Boolean(snap.pendingPlanApproval);
-    if (!hasContent) return;
     if (planAutoPopDismissed.current) return;
     if (rightPanelOpenRef.current && rightPanelTabRef.current === "plan") return;
     if (viewRef.current !== "chat") return;
     setRightPanelOpen(true);
     setRightPanelTab("plan");
   }, [
-    snap.busy,
     snap.sessionId,
-    snap.todos?.length,
     snap.pendingPlanApproval,
     setRightPanelOpen,
     setRightPanelTab,
   ]);
 
-  // If the user closes the right panel mid-run, remember it so we don't
-  // re-pop it on every todos update.
+  // If the user closes the right panel mid-run while a plan is awaiting
+  // approval, remember it so we don't re-pop it on every approval update.
   useEffect(() => {
-    if (snap.busy && !rightPanelOpen) {
+    if (snap.pendingPlanApproval && !rightPanelOpen) {
       planAutoPopDismissed.current = true;
     }
-  }, [snap.busy, rightPanelOpen]);
+  }, [snap.pendingPlanApproval, rightPanelOpen]);
 
   // Close model/mode/effort menus on outside click or Escape
   useEffect(() => {
