@@ -1,7 +1,7 @@
 allowBuilds:
-  esbuild: set this to true or false
-  lzma-native: set this to true or false
-  node-pty: set this to true or false
+  esbuild: true
+  lzma-native: true
+  node-pty: true
 onlyBuiltDependencies:
   - electron
   - esbuild

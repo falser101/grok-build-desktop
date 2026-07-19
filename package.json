@@ -54,6 +54,7 @@
     "electron-builder": "^25.1.8",
     "electron-rebuild": "^3.2.9",
     "electron-vite": "^3.1.0",
+    "node-gyp": "^13.0.1",
     "typescript": "^5.8.3",
     "vite": "^6.3.5"
   },
