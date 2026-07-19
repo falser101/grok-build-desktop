@@ -31,12 +31,80 @@ export interface Messages {
   sessionStatusNeedsPermission: string;
   /** Sidebar: session is waiting for structured Q&A answers. */
   sessionStatusNeedsQuestion: string;
+  /** Sidebar: session is waiting for a folder-trust grant. */
+  sessionStatusNeedsTrust: string;
 
   // Home
   greeting: string;
   homeHint: string;
   cantReachAgent: string;
   retryConnect: string;
+  /** Caption shown in the error card when the agent CLI is missing. */
+  agentMissingTitle: string;
+  /** Button label that opens the agent install URL in the system browser. */
+  agentInstallButton: string;
+  /** Button label that runs the official installer from inside the app. */
+  agentInstallAutoButton: string;
+  /** Caption shown while the installer is running. */
+  agentInstallRunning: string;
+  /** Caption shown after the installer finishes successfully. */
+  agentInstallDone: string;
+  /** Caption shown after the installer fails (the output is shown too). */
+  agentInstallFailed: string;
+  /** Settings → Agent section title. */
+  agentSectionTitle: string;
+  /** Settings → Agent section subtitle. */
+  agentSectionSubtitle: string;
+  /** Status row label. */
+  agentStatusLabel: string;
+  /** Install path row label. */
+  agentInstallPathLabel: string;
+  /** "Last check at" row label. */
+  agentLastCheckLabel: string;
+  /** "Latest version" row label. */
+  agentLatestVersionLabel: string;
+  /** Channel sub-section title. */
+  agentChannelTitle: string;
+  /** Channel: stable. */
+  agentChannelStable: string;
+  /** Channel: alpha. */
+  agentChannelAlpha: string;
+  /** Channel: enterprise. */
+  agentChannelEnterprise: string;
+  /** Stable channel description. */
+  agentChannelStableDesc: string;
+  /** Button: trigger an update check. */
+  agentCheckUpdate: string;
+  /** Button label while the check is in flight. */
+  agentChecking: string;
+  /** Button: trigger a fresh install. */
+  agentInstall: string;
+  /** Button: trigger an upgrade. */
+  agentUpgrade: string;
+  /** Button label while the upgrade is in flight. */
+  agentUpgrading: string;
+  /** Tooltip on the upgrade button when an upgrade is ready. */
+  agentUpgradeReady: string;
+  /** Tooltip on the upgrade button when there's no update. */
+  agentNoUpdate: string;
+  /** Banner shown after a successful upgrade. */
+  agentUpgradeSuccess: string;
+  /** Banner shown after a failed upgrade. */
+  agentUpgradeFailed: string;
+  /** Status badge: ready (with version). */
+  agentStatusReady: string;
+  /** Status badge: update available. */
+  agentStatusUpdateAvailable: string;
+  /** Status badge: installing. */
+  agentStatusInstalling: string;
+  /** Status badge: upgrading. */
+  agentStatusUpgrading: string;
+  /** Status badge: rolled back. */
+  agentStatusRollback: string;
+  /** Status badge: not installed. */
+  agentStatusAbsent: string;
+  /** Status badge: error. */
+  agentStatusError: string;
 
   // Timeline
   you: string;
@@ -147,6 +215,10 @@ export interface Messages {
   alwaysApproveOff: string;
   alwaysApproveTitle: string;
   alwaysApproveHint: string;
+  autoTrustSetting: string;
+  autoTrustSettingDesc: string;
+  autoTrustDisabled: string;
+  autoTrustEnabled: string;
 
   // Ask user question modal
   askqTitle: string;
@@ -272,6 +344,8 @@ export interface Messages {
   filesClose: string;
   filesBinary: string;
   filesTruncated: string;
+  /** Shown under very large images that got truncated for inline preview. */
+  filesImageTruncated: string;
   filesShowSource: string;
   filesShowPreview: string;
   filesInsertMention: string;
@@ -342,6 +416,23 @@ export interface Messages {
   planApprovalFeedbackPlaceholder: string;
   planApprovalSendFeedback: string;
   planApprovalCancelFeedback: string;
+
+  // Folder-trust prompt (x.ai/folder_trust/request)
+  trustKicker: string;
+  trustTitle: string;
+  trustBadge: string;
+  /** {path} → workspace path, when cwd === workspace. */
+  trustBodySame: string;
+  /** {path} → session cwd. */
+  trustBodyCwd: string;
+  /** {path} → canonicalized workspace key (git-root of cwd). */
+  trustBodyWorkspace: string;
+  /** "{mcp, hooks, plugins, lsp, envrc, …}" */
+  trustKindsLabel: string;
+  trustWarn: string;
+  trustHint: string;
+  trustGrant: string;
+  trustReject: string;
   /** Composer chip when todos exist. */
   planTodosChip: string;
 
@@ -354,7 +445,20 @@ export interface Messages {
   extTabSkills: string;
   extTabPlugins: string;
   extTabHooks: string;
+  extTabTrust: string;
   extFilter: string;
+  /** Trusted folders panel */
+  trustPanelTitle: string;
+  trustPanelSubtitle: string;
+  trustPanelEmpty: string;
+  trustEntryTrusted: string;
+  trustEntryDeclined: string;
+  trustEntryRevoke: string;
+  trustEntryRevoked: string;
+  trustEntryRevokeConfirm: string;
+  trustEntryPathLabel: string;
+  trustEntryDecidedAtLabel: string;
+  trustEntryRevokeFailed: string;
   extRefresh: string;
   extAddMcp: string;
   extAddMcpHint: string;
@@ -512,12 +616,48 @@ const en: Messages = {
   sessionStatusLoading: "Loading",
   sessionStatusNeedsPermission: "Needs approval",
   sessionStatusNeedsQuestion: "Needs answers",
+  sessionStatusNeedsTrust: "Needs trust",
 
   greeting: "What's up next?",
   homeHint:
     "Pick a workspace above the input, then describe a task. Or open a past session from the sidebar.",
   cantReachAgent: "Can't reach agent",
   retryConnect: "Retry connect",
+  agentMissingTitle: "Grok CLI not found",
+  agentInstallButton: "Open install instructions",
+  agentInstallAutoButton: "Install automatically",
+  agentInstallRunning: "Running official installer…",
+  agentInstallDone: "Installed. Connecting…",
+  agentInstallFailed: "Installer failed — see output below.",
+
+  agentSectionTitle: "Agent",
+  agentSectionSubtitle:
+    "Install, upgrade, and pick the release channel for the grok CLI.",
+  agentStatusLabel: "Status",
+  agentInstallPathLabel: "Install path",
+  agentLastCheckLabel: "Last check",
+  agentLatestVersionLabel: "Latest version",
+  agentChannelTitle: "Update channel",
+  agentChannelStable: "Stable",
+  agentChannelAlpha: "Alpha",
+  agentChannelEnterprise: "Enterprise",
+  agentChannelStableDesc: "Recommended for most users.",
+  agentCheckUpdate: "Check for updates",
+  agentChecking: "Checking…",
+  agentInstall: "Install",
+  agentUpgrade: "Upgrade",
+  agentUpgrading: "Upgrading…",
+  agentUpgradeReady: "An update is available — click to upgrade.",
+  agentNoUpdate: "No update available.",
+  agentUpgradeSuccess: "Upgraded successfully ({path}).",
+  agentUpgradeFailed: "Upgrade failed.",
+  agentStatusReady: "Ready",
+  agentStatusUpdateAvailable: "Update available",
+  agentStatusInstalling: "Installing…",
+  agentStatusUpgrading: "Upgrading…",
+  agentStatusRollback: "Rolled back",
+  agentStatusAbsent: "Not installed",
+  agentStatusError: "Error",
 
   you: "You",
   grok: "Grok",
@@ -610,6 +750,11 @@ const en: Messages = {
   alwaysApproveTitle: "Always-approve (YOLO)",
   alwaysApproveHint:
     "When on, tools run without permission prompts. Toggle with click or /always-approve.",
+  autoTrustSetting: "Auto-trust new sessions",
+  autoTrustSettingDesc:
+    "When enabled, every new session implicitly trusts its workspace (writes ~/.grok/trusted_folders.toml) so the agent never prompts you. Equivalent to the CLI's `grok --trust <cwd>`.",
+  autoTrustDisabled: "Ask on first open",
+  autoTrustEnabled: "Auto-grant trust",
 
   askqTitle: "Questions for you",
   askqKicker: "Agent question",
@@ -740,6 +885,7 @@ const en: Messages = {
   filesClose: "Close file",
   filesBinary: "Binary file — cannot preview as text.",
   filesTruncated: "Preview truncated (first 512 KB).",
+  filesImageTruncated: "Image preview truncated — file is {size} on disk.",
   filesShowSource: "Source",
   filesShowPreview: "Preview",
   filesInsertMention: "Insert @path into composer",
@@ -811,6 +957,20 @@ const en: Messages = {
   planApprovalFeedbackPlaceholder: "Describe what to change…",
   planApprovalSendFeedback: "Send feedback",
   planApprovalCancelFeedback: "Back",
+
+  trustKicker: "Trust folder",
+  trustTitle: "Trust this workspace?",
+  trustBadge: "Trust",
+  trustBodySame:
+    "This workspace contains repo-local code-exec markers. The agent will only run hooks, MCP servers, plugins, LSP, etc. after you grant trust.",
+  trustBodyCwd: "Current session cwd:",
+  trustBodyWorkspace: "Granting trust will allow execution across this workspace:",
+  trustKindsLabel: "Detected",
+  trustWarn:
+    "Trust is recorded in ~/.grok/trusted_folders.toml. You can revoke it later from Settings → Extensions → Trusted folders.",
+  trustHint: "T/Enter trust · R/Esc reject",
+  trustGrant: "Trust workspace",
+  trustReject: "Reject",
   planTodosChip: "Todos",
 
   navMcp: "MCP",
@@ -822,7 +982,22 @@ const en: Messages = {
   extTabSkills: "Skills",
   extTabPlugins: "Plugins",
   extTabHooks: "Hooks",
+  extTabTrust: "Trusted folders",
   extFilter: "Filter…",
+
+  trustPanelTitle: "Trusted folders",
+  trustPanelSubtitle:
+    "Workspaces that the agent has been granted (or explicitly declined) trust for. Stored in ~/.grok/trusted_folders.toml.",
+  trustPanelEmpty:
+    "No trust decisions recorded yet. The agent will prompt you the first time you open a workspace with repo-local hooks, MCP servers, plugins, or LSP.",
+  trustEntryTrusted: "Trusted",
+  trustEntryDeclined: "Declined",
+  trustEntryRevoke: "Revoke",
+  trustEntryRevoked: "Revoked",
+  trustEntryRevokeConfirm: "Revoke trust for this workspace?",
+  trustEntryPathLabel: "Path",
+  trustEntryDecidedAtLabel: "Decided",
+  trustEntryRevokeFailed: "Could not revoke trust",
   extRefresh: "Refresh",
   extAddMcp: "Add server",
   extAddMcpHint:
@@ -989,12 +1164,47 @@ const zh: Messages = {
   sessionStatusLoading: "加载中",
   sessionStatusNeedsPermission: "等待审批",
   sessionStatusNeedsQuestion: "等待回答",
+  sessionStatusNeedsTrust: "等待信任",
 
   greeting: "接下来做什么？",
   homeHint:
     "先在输入框上方选择工作区，再描述任务；也可从侧边栏打开历史会话。",
   cantReachAgent: "无法连接 agent",
   retryConnect: "重新连接",
+  agentMissingTitle: "未找到 Grok CLI",
+  agentInstallButton: "打开安装指引",
+  agentInstallAutoButton: "自动安装",
+  agentInstallRunning: "正在运行官方安装脚本…",
+  agentInstallDone: "安装完成，正在连接…",
+  agentInstallFailed: "安装失败，请查看下方输出。",
+
+  agentSectionTitle: "Agent",
+  agentSectionSubtitle: "安装、升级 grok CLI，并选择更新通道。",
+  agentStatusLabel: "状态",
+  agentInstallPathLabel: "安装路径",
+  agentLastCheckLabel: "上次检查",
+  agentLatestVersionLabel: "最新版本",
+  agentChannelTitle: "更新通道",
+  agentChannelStable: "Stable",
+  agentChannelAlpha: "Alpha",
+  agentChannelEnterprise: "Enterprise",
+  agentChannelStableDesc: "推荐大多数用户使用。",
+  agentCheckUpdate: "检查更新",
+  agentChecking: "正在检查…",
+  agentInstall: "安装",
+  agentUpgrade: "升级",
+  agentUpgrading: "正在升级…",
+  agentUpgradeReady: "有可用更新，点击升级。",
+  agentNoUpdate: "暂无更新。",
+  agentUpgradeSuccess: "升级成功（{path}）。",
+  agentUpgradeFailed: "升级失败。",
+  agentStatusReady: "就绪",
+  agentStatusUpdateAvailable: "有可用更新",
+  agentStatusInstalling: "正在安装…",
+  agentStatusUpgrading: "正在升级…",
+  agentStatusRollback: "已回滚",
+  agentStatusAbsent: "未安装",
+  agentStatusError: "错误",
 
   you: "你",
   grok: "Grok",
@@ -1086,6 +1296,11 @@ const zh: Messages = {
   alwaysApproveTitle: "始终批准（YOLO）",
   alwaysApproveHint:
     "开启后工具无需确认即可执行。点击或输入 /always-approve 切换。",
+  autoTrustSetting: "新 session 自动信任",
+  autoTrustSettingDesc:
+    "开启后，每个新 session 会自动信任其工作区（写入 ~/.grok/trusted_folders.toml），Agent 不再弹出询问。等价于 CLI 的 `grok --trust <cwd>`。",
+  autoTrustDisabled: "首次打开时询问",
+  autoTrustEnabled: "自动授予信任",
 
   askqTitle: "需要你回答",
   askqKicker: "Agent 提问",
@@ -1212,6 +1427,7 @@ const zh: Messages = {
   filesClose: "关闭文件",
   filesBinary: "二进制文件，无法以文本预览。",
   filesTruncated: "预览已截断（仅前 512 KB）。",
+  filesImageTruncated: "图片预览已截断，原始文件大小 {size}。",
   filesShowSource: "源码",
   filesShowPreview: "预览",
   filesInsertMention: "将 @路径 插入输入框",
@@ -1280,6 +1496,20 @@ const zh: Messages = {
   planApprovalFeedbackPlaceholder: "说明需要如何修改…",
   planApprovalSendFeedback: "发送反馈",
   planApprovalCancelFeedback: "返回",
+
+  trustKicker: "信任文件夹",
+  trustTitle: "信任此工作区？",
+  trustBadge: "信任",
+  trustBodySame:
+    "此工作区包含仓库本地的代码执行标记。在你授权信任前，Agent 不会运行其中的 hooks、MCP 服务器、插件、LSP 等。",
+  trustBodyCwd: "当前 session 的 cwd：",
+  trustBodyWorkspace: "授权后将允许在整个工作区内执行：",
+  trustKindsLabel: "检测到",
+  trustWarn:
+    "信任记录保存在 ~/.grok/trusted_folders.toml，可稍后在 Settings → Extensions → Trusted folders 撤销。",
+  trustHint: "T/Enter 信任 · R/Esc 拒绝",
+  trustGrant: "信任此工作区",
+  trustReject: "拒绝",
   planTodosChip: "任务",
 
   navMcp: "MCP",
@@ -1291,7 +1521,22 @@ const zh: Messages = {
   extTabSkills: "Skills",
   extTabPlugins: "Plugins",
   extTabHooks: "Hooks",
+  extTabTrust: "信任文件夹",
   extFilter: "筛选…",
+
+  trustPanelTitle: "信任文件夹",
+  trustPanelSubtitle:
+    "已授权（或明确拒绝）信任的工作区。记录保存在 ~/.grok/trusted_folders.toml。",
+  trustPanelEmpty:
+    "暂无任何信任记录。首次打开包含仓库本地 hooks、MCP、plugins 或 LSP 的工作区时，Agent 会弹出询问。",
+  trustEntryTrusted: "已信任",
+  trustEntryDeclined: "已拒绝",
+  trustEntryRevoke: "撤销信任",
+  trustEntryRevoked: "已撤销",
+  trustEntryRevokeConfirm: "确认撤销此工作区的信任？",
+  trustEntryPathLabel: "路径",
+  trustEntryDecidedAtLabel: "决定时间",
+  trustEntryRevokeFailed: "无法撤销信任",
   extRefresh: "刷新",
   extAddMcp: "添加服务器",
   extAddMcpHint:

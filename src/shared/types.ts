@@ -68,7 +68,10 @@ export type SessionRunStatus =
   | "loading"
   | "needs_permission"
   /** Waiting on `x.ai/ask_user_question` (interview / structured Q&A). */
-  | "needs_question";
+  | "needs_question"
+  /** Waiting on `x.ai/folder_trust/request` (workspace has repo-local
+   *  hooks/MCP/plugins/LSP/etc. that need an explicit trust grant). */
+  | "needs_trust";
 
 export interface SessionSummary {
   sessionId: string;
@@ -82,6 +85,53 @@ export interface SessionSummary {
    * permission). Populated by the desktop backend from live runtime state.
    */
   status?: SessionRunStatus;
+}
+
+/** Outcome string accepted by the agent for `x.ai/folder_trust/request`. */
+export type FolderTrustOutcome = "trust" | "reject";
+
+/** Single repo-local code-exec marker detected by the agent. */
+export type FolderTrustConfigKind =
+  | "mcp"
+  | "plugins"
+  | "lsp"
+  | "envrc"
+  | "claude"
+  | "hooks"
+  | "agents"
+  | string;
+
+/**
+ * Active folder-trust request surfaced to the renderer. Mirrors the
+ * ACP `x.ai/folder_trust/request` payload (camelCase on the wire).
+ */
+export interface FolderTrustPromptUi {
+  requestId: string;
+  /** Session this prompt belongs to (for per-session scoping). */
+  sessionId?: string;
+  /** The session cwd the prompt applies to. */
+  cwd: string;
+  /**
+   * Display path of the canonical workspace key — the actual scope of
+   * the trust grant (usually the git-root of `cwd`).
+   */
+  workspace: string;
+  /** Detected repo-local config kinds driving the gate. */
+  configKinds: FolderTrustConfigKind[];
+}
+
+/**
+ * Single entry from `~/.grok/trusted_folders.toml` — surfaced to the
+ * renderer's "Trusted folders" panel so users can see what they've
+ * granted and revoke individual decisions.
+ */
+export interface TrustedFolderEntry {
+  /** Canonical absolute workspace key. */
+  path: string;
+  /** true = grant; false = explicit decline. */
+  trusted: boolean;
+  /** ISO 8601 timestamp of the most recent decision (if recorded). */
+  decidedAt?: string;
 }
 
 /** Hit from `x.ai/session/search` (full-text). */
@@ -335,6 +385,12 @@ export interface AppSnapshot {
   /** True while conversation compaction is in progress. */
   compacting?: boolean;
   binaryPath?: string;
+  /**
+   * URL pointing to installation instructions for the `grok` CLI.
+   * Surfaced in the connection-error card so the user can install the
+   * missing agent with one click.
+   */
+  agentInstallUrl?: string;
   replaying?: boolean;
   /**
    * Estimated tokens currently filling the context window
@@ -356,6 +412,18 @@ export interface AppSnapshot {
    */
   alwaysApprove: boolean;
   /**
+   * Settings → Permissions: when true, the desktop grants folder trust
+   * for the workspace cwd before each `session/new` (equivalent to the
+   * CLI's `grok --trust <cwd>`). Persisted in `~/.grok/config.toml
+   * [ui].auto_trust_new_sessions`.
+   */
+  autoTrustNewSessions: boolean;
+  /**
+   * Active folder-trust prompt (`x.ai/folder_trust/request`) for the
+   * focused session. Only the front of the queue is surfaced to the UI.
+   */
+  pendingTrustPrompt?: FolderTrustPromptUi;
+  /**
    * Live todo list for the focused session
    * (from ACP `sessionUpdate: "plan"` / `todo_write`).
    */
@@ -367,6 +435,49 @@ export interface AppSnapshot {
   planContent?: string;
   /** Pending plan-mode exit approval for the focused session. */
   pendingPlanApproval?: PlanApprovalUi;
+  /**
+   * Installer state — surfaced to Settings → Agent and to the connection
+   * error card so the user can see "absent / ready / update-available /
+   * installing / upgrading / rollback / error" at a glance.
+   */
+  installerStatus: InstallerStatus;
+  /** Currently-selected installer channel. Defaults to `stable`. */
+  installerChannel: InstallerChannel;
+  /** ISO timestamp of the last successful background update check. */
+  lastUpdateCheckAt?: string;
+}
+
+/** Channels the desktop exposes for the `grok` CLI release stream. */
+export type InstallerChannel = "stable" | "alpha" | "enterprise";
+
+/**
+ * Installer state machine. Kinds are mutually exclusive; the renderer
+ * picks UI elements based on `kind`. Transitions are driven by the
+ * `agent-installer` module and the renderer-initiated install / upgrade
+ * IPC calls.
+ */
+export type InstallerStatus =
+  | { kind: "absent" }
+  | { kind: "ready"; version: string; path: string }
+  | {
+      kind: "update-available";
+      current: string;
+      latest: string;
+      path: string;
+    }
+  | { kind: "installing"; startedAt: number }
+  | { kind: "upgrading"; from: string; to: string; startedAt: number }
+  | { kind: "rollback"; fromVersion: string; reason: string }
+  | { kind: "error"; message: string };
+
+/** Result envelope returned by the `agent:install` / `agent:upgrade` IPC. */
+export interface InstallerResult {
+  ok: boolean;
+  path?: string;
+  output: string;
+  code: number | null;
+  durationMs: number;
+  error?: string;
 }
 
 export type AgentUiEvent =
@@ -399,6 +510,10 @@ export interface FileReadResult {
   binary: boolean;
   /** highlight.js language id */
   language: string;
+  /** When the file is an image, the detected MIME type (e.g. "image/png"). */
+  imageMime?: string;
+  /** When the file is an image, base64 payload (no `data:` prefix) for inline rendering. */
+  imageBase64?: string;
 }
 
 /** MCP server row for management UI. */
@@ -695,6 +810,33 @@ export interface DesktopApi {
   /** Enable or disable always-approve (YOLO) mode. */
   setAlwaysApprove: (enabled: boolean) => Promise<void>;
   /**
+   * Toggle "auto-grant folder trust for new sessions" (the desktop
+   * equivalent of `grok --trust <cwd>`). When enabled, every new session
+   * implicitly trusts the chosen workspace; the agent's interactive
+   * trust prompt will NOT fire for that workspace.
+   */
+  setAutoTrustNewSessions: (enabled: boolean) => Promise<void>;
+  /**
+   * Resolve a pending folder-trust prompt (`x.ai/folder_trust/request`).
+   * Pass `"trust"` to grant; `"reject"` to keep the workspace gated.
+   */
+  respondTrustPrompt: (
+    requestId: string,
+    outcome: FolderTrustOutcome,
+  ) => Promise<void>;
+  /** List every recorded entry in `~/.grok/trusted_folders.toml`. */
+  listTrustedFolders: () => Promise<TrustedFolderEntry[]>;
+  /**
+   * Revoke (or explicitly decline) trust for `path`. Mirrors the agent's
+   * `set_untrusted`: refuses non-absolute / `$HOME` / `/` paths and
+   * always persists an explicit `trusted = false` record so future
+   * prompts can tell declined apart from undecided.
+   *
+   * Returns `true` if the entry was actually flipped from trusted to
+   * untrusted; `false` for no-op cases.
+   */
+  revokeTrustedFolder: (path: string) => Promise<boolean>;
+  /**
    * List a directory under the active workspace.
    * `relDir` is workspace-relative ("" = workspace root).
    */
@@ -760,6 +902,42 @@ export interface DesktopApi {
   refreshUsage: () => Promise<UsageInfo | null>;
   /** Open URL in the system browser (billing manage page, etc.). */
   openExternal: (url: string) => Promise<void>;
+  /**
+   * Drive the official `grok` CLI installer from the desktop. Returns the
+   * installer's combined stdout/stderr so the UI can show progress.
+   * After a successful install the next `connect` will pick up the binary
+   * at `~/.grok/bin/grok{,.exe}` automatically.
+   */
+  installAgent: () => Promise<InstallerResult>;
+  /**
+   * Re-resolve the installer state from disk. Cheap; safe to call on a
+   * tight loop when the UI wants to refresh status badges.
+   */
+  getInstallerStatus: () => Promise<InstallerStatus>;
+  /**
+   * Run an update check against the configured channel. Network call;
+   * returns `hasUpdate: false` on failure (so the UI doesn't flash an
+   * error banner every time the user is offline).
+   */
+  checkForUpdate: () => Promise<{
+    hasUpdate: boolean;
+    current: string;
+    latest: string;
+  }>;
+  /**
+   * Backup the current binary, run the installer, and remember that we
+   * just upgraded so the next `connect` can verify health and roll back
+   * if needed.
+   */
+  upgradeAgent: () => Promise<InstallerResult>;
+  /** Read the configured channel from `~/.grok/config.toml`. */
+  getInstallerChannel: () => Promise<InstallerChannel>;
+  /**
+   * Persist the channel. Does NOT trigger an upgrade — the user must
+   * explicitly click Upgrade for that. This keeps "I switched to alpha"
+   * from silently pulling a different release stream on the next boot.
+   */
+  setInstallerChannel: (channel: InstallerChannel) => Promise<InstallerChannel>;
   onEvent: (cb: (event: AgentUiEvent) => void) => () => void;
   onAccountEvent: (cb: (event: AccountUiEvent) => void) => () => void;
 }

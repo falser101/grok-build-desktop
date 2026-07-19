@@ -131,7 +131,25 @@ function FileViewerInner({ path, m, onClose, onInsertMention }: Props) {
         {error ? (
           <div className="file-viewer-empty error">{error}</div>
         ) : null}
-        {data?.binary ? (
+        {data?.binary && data.imageMime && data.imageBase64 ? (
+          <div className="file-viewer-image-wrap">
+            <img
+              className="file-viewer-image"
+              src={`data:${data.imageMime};base64,${data.imageBase64}`}
+              alt={data.name}
+              title={data.path}
+            />
+            {data.truncated ? (
+              <div className="file-viewer-truncated">
+                {m.filesImageTruncated.replace(
+                  "{size}",
+                  formatSize(data.size),
+                )}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {data?.binary && !(data.imageMime && data.imageBase64) ? (
           <div className="file-viewer-empty">
             {m.filesBinary}
             <div className="file-viewer-sub">

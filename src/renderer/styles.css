@@ -1654,6 +1654,38 @@ body.is-resizing-panels .file-tree {
   color: var(--warn);
 }
 
+.error-card-body {
+  margin: 0 0 4px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: inherit;
+  opacity: 0.92;
+}
+
+.error-card-output {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--bg-soft, rgba(0, 0, 0, 0.18));
+  border-radius: 6px;
+  max-height: 220px;
+  overflow: auto;
+  opacity: 1;
+}
+
+.error-card-output-ok {
+  border-left: 3px solid var(--ok, #3fb950);
+}
+
+.error-card-output-fail {
+  border-left: 3px solid var(--danger, #f85149);
+}
+
 .error-card .actions {
   display: flex;
   gap: 8px;
@@ -3195,6 +3227,67 @@ html[data-theme="light"] .workspace-bar {
   cursor: not-allowed;
 }
 
+/* ── Folder-trust prompt (TrustPromptDialog) ──────────── */
+
+.trust-prompt-panel {
+  /* Use the trust hue (cyan/teal) to distinguish from the warn-coloured
+     permission panel; trust isn't a "danger" prompt, it's a gate. */
+  border-color: rgba(120, 188, 214, 0.4);
+}
+
+.trust-prompt-panel .permission-kicker {
+  color: var(--accent);
+}
+
+.trust-prompt-panel .permission-kind-badge {
+  color: var(--accent);
+  border-color: rgba(120, 188, 214, 0.45);
+}
+
+.trust-prompt-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.trust-prompt-line {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.trust-prompt-line + .trust-prompt-line {
+  margin-top: -2px;
+}
+
+.trust-prompt-kinds {
+  margin: 4px 0 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  background: var(--bg-code);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  word-break: break-word;
+}
+
+.trust-prompt-warn {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+/* Sidebar status dot: trust variant (cyan, matches trust panel) */
+.session-status-dot.trust {
+  background: rgba(120, 188, 214, 0.85);
+  box-shadow: 0 0 0 3px rgba(120, 188, 214, 0.18);
+}
+
 .composer-toolbar {
   display: flex;
   align-items: center;
@@ -4134,6 +4227,68 @@ html[data-theme="light"] .icon-btn.send {
 
 .settings-info-row:hover {
   background: var(--bg-hover);
+}
+
+/* ── Agent installer card ─────────────────────────── */
+
+.settings-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.installer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 560;
+}
+.installer-status::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.installer-status-ok::before {
+  background: var(--ok, #3fb950);
+}
+.installer-status-warn::before {
+  background: var(--warn, #d29922);
+}
+.installer-status-danger::before {
+  background: var(--danger, #f85149);
+}
+
+.installer-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg-soft, rgba(255, 255, 255, 0.04));
+  padding: 2px 6px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.settings-output {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: var(--bg-soft, rgba(0, 0, 0, 0.18));
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
+.settings-output-ok {
+  border-left: 3px solid var(--ok, #3fb950);
+}
+.settings-output-fail {
+  border-left: 3px solid var(--danger, #f85149);
 }
 
 .settings-info-label {
@@ -5492,6 +5647,33 @@ html[data-theme="light"] .icon-btn.send {
 .file-viewer-md {
   padding: 16px 18px 28px;
   max-width: 860px;
+}
+
+.file-viewer-image-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--bg, transparent);
+  overflow: auto;
+  gap: 10px;
+}
+
+.file-viewer-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+  background:
+    repeating-conic-gradient(
+      var(--bg-soft, rgba(255, 255, 255, 0.04)) 0% 25%,
+      var(--bg, rgba(0, 0, 0, 0.04)) 0% 50%
+    )
+    50% / 16px 16px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
 }
 
 .file-viewer-code-wrap {
@@ -7481,4 +7663,94 @@ html[data-theme="light"] {
 .askq-hint {
   font-size: 11.5px;
   color: var(--text-dim);
+}
+
+/* ── Trusted folders panel (Extensions → Trusted folders) ──────────── */
+
+.trust-panel {
+  margin-top: 12px;
+}
+
+.trust-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trust-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.trust-row-trusted {
+  border-left: 3px solid rgba(125, 206, 160, 0.55);
+}
+
+.trust-row-declined {
+  border-left: 3px solid rgba(224, 112, 112, 0.55);
+  opacity: 0.85;
+}
+
+.trust-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trust-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trust-status {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.trust-status.ok {
+  background: var(--ok-glow);
+  color: var(--ok);
+  border-color: rgba(125, 206, 160, 0.45);
+}
+
+.trust-status.warn {
+  background: rgba(224, 112, 112, 0.1);
+  color: var(--warn-text, var(--warn));
+  border-color: rgba(224, 112, 112, 0.45);
+}
+
+.trust-row-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.trust-row-path code,
+.trust-row-decided time {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.trust-row-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }

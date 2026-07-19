@@ -33,7 +33,25 @@ const HIDDEN_DIR_NAMES = new Set([
 
 const MAX_LIST_ENTRIES = 800;
 const MAX_READ_BYTES = 512 * 1024; // 512 KiB preview cap
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MiB cap for inline image previews
 const BINARY_SAMPLE = 8192;
+
+/** Extension → image MIME mapping (covers the formats the preview can render). */
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
+  ".svg": "image/svg+xml",
+  ".avif": "image/avif",
+  ".ico": "image/x-icon",
+};
+
+export function imageMimeFor(ext: string): string | undefined {
+  return IMAGE_MIME_BY_EXT[ext.toLowerCase()];
+}
 
 /**
  * Resolve `relPath` under `workspaceRoot`. Rejects path traversal.
@@ -134,6 +152,7 @@ export async function readWorkspaceFile(
   const name = basename(abs);
   const ext = extname(name).toLowerCase();
   const size = st.size;
+  const imageMime = imageMimeFor(ext);
 
   if (size === 0) {
     return {
@@ -141,11 +160,37 @@ export async function readWorkspaceFile(
       name,
       ext,
       size,
-      encoding: "utf8",
+      encoding: imageMime ? "binary" : "utf8",
       content: "",
       truncated: false,
-      binary: false,
-      language: languageFromExt(ext, name),
+      binary: !!imageMime,
+      language: "plaintext",
+      imageMime,
+    };
+  }
+
+  // Image: read up to MAX_IMAGE_BYTES for inline preview; never as text.
+  if (imageMime) {
+    const toRead = Math.min(size, MAX_IMAGE_BYTES);
+    const buf = Buffer.alloc(toRead);
+    const fh = await open(abs, "r");
+    try {
+      await fh.read(buf, 0, toRead, 0);
+    } finally {
+      await fh.close();
+    }
+    return {
+      path: posix,
+      name,
+      ext,
+      size,
+      encoding: "binary",
+      content: "",
+      truncated: size > MAX_IMAGE_BYTES,
+      binary: true,
+      language: "plaintext",
+      imageMime,
+      imageBase64: buf.toString("base64"),
     };
   }
 
