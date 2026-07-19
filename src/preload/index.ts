@@ -13,8 +13,11 @@ import type {
   FetchedModelInfo,
   FileEntry,
   FileReadResult,
+  FolderTrustOutcome,
   ForkSessionResult,
   HookEntry,
+  InstallerChannel,
+  InstallerStatus,
   McpServerEntry,
   McpServerScope,
   ModelConfigKeyIndex,
@@ -111,6 +114,22 @@ const api: DesktopApi = {
       requestId,
       response,
     ) as Promise<void>,
+  respondTrustPrompt: (requestId: string, outcome: FolderTrustOutcome) =>
+    ipcRenderer.invoke(
+      "agent:respondTrustPrompt",
+      requestId,
+      outcome,
+    ) as Promise<void>,
+  listTrustedFolders: () =>
+    ipcRenderer.invoke("trust:list") as Promise<
+      {
+        path: string;
+        trusted: boolean;
+        decidedAt?: string;
+      }[]
+    >,
+  revokeTrustedFolder: (path: string) =>
+    ipcRenderer.invoke("trust:revoke", path) as Promise<boolean>,
   respondPlanApproval: (
     requestId: string,
     outcome: PlanApprovalOutcome,
@@ -126,6 +145,11 @@ const api: DesktopApi = {
     ipcRenderer.invoke("agent:refreshPlanContent") as Promise<string | null>,
   setAlwaysApprove: (enabled: boolean) =>
     ipcRenderer.invoke("agent:setAlwaysApprove", enabled) as Promise<void>,
+  setAutoTrustNewSessions: (enabled: boolean) =>
+    ipcRenderer.invoke(
+      "agent:setAutoTrustNewSessions",
+      enabled,
+    ) as Promise<void>,
   listDir: (relDir?: string) =>
     ipcRenderer.invoke("fs:listDir", relDir) as Promise<FileEntry[]>,
   readFile: (relPath: string) =>
@@ -220,6 +244,41 @@ const api: DesktopApi = {
     ipcRenderer.invoke("account:refreshUsage") as Promise<UsageInfo | null>,
   openExternal: (url: string) =>
     ipcRenderer.invoke("account:openExternal", url) as Promise<void>,
+  /**
+   * Drive the official grok CLI installer from the desktop. Returns the
+   * installer's stdout/stderr so the UI can show progress. After a
+   * successful install the next `agent:connect` will pick up the binary
+   * at `~/.grok/bin/grok{,.exe}` automatically.
+   */
+  installAgent: () => ipcRenderer.invoke("agent:install") as Promise<{
+    ok: boolean;
+    path?: string;
+    output: string;
+    code: number | null;
+    durationMs: number;
+    error?: string;
+  }>,
+  getInstallerStatus: () =>
+    ipcRenderer.invoke("agent:installerStatus") as Promise<InstallerStatus>,
+  checkForUpdate: () =>
+    ipcRenderer.invoke("agent:checkForUpdate") as Promise<{
+      hasUpdate: boolean;
+      current: string;
+      latest: string;
+    }>,
+  upgradeAgent: () =>
+    ipcRenderer.invoke("agent:upgrade") as Promise<{
+      ok: boolean;
+      path?: string;
+      output: string;
+      code: number | null;
+      durationMs: number;
+      error?: string;
+    }>,
+  getInstallerChannel: () =>
+    ipcRenderer.invoke("agent:getChannel") as Promise<InstallerChannel>,
+  setInstallerChannel: (channel: InstallerChannel) =>
+    ipcRenderer.invoke("agent:setChannel", channel) as Promise<InstallerChannel>,
   onEvent: (cb) => {
     const listener = (_event: IpcRendererEvent, payload: AgentUiEvent) => {
       cb(payload);

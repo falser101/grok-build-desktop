@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AccountStatus, UsageInfo } from "@shared/types";
+import type {
+  AccountStatus,
+  InstallerChannel,
+  InstallerStatus,
+  UsageInfo,
+} from "@shared/types";
 import { usePrefs } from "./PrefsContext";
 import type { LocalePref, ThemePref } from "./prefs";
+import { AgentSettingsView } from "./AgentSettingsView";
 
 interface OptionCardProps<T extends string> {
   value: T;
@@ -11,7 +17,7 @@ interface OptionCardProps<T extends string> {
   onSelect: (value: T) => void;
 }
 
-function OptionCard<T extends string>({
+export function OptionCard<T extends string>({
   value,
   selected,
   title,
@@ -57,16 +63,26 @@ export function SettingsView({
   connectionLabel,
   alwaysApprove,
   onSetAlwaysApprove,
+  autoTrustNewSessions,
+  onSetAutoTrustNewSessions,
   usage,
   onRefreshUsage,
+  installerStatus,
+  installerChannel,
+  lastUpdateCheckAt,
 }: {
   onBack: () => void;
   accountEmail?: string | null;
   connectionLabel: string;
   alwaysApprove: boolean;
   onSetAlwaysApprove: (enabled: boolean) => void;
+  autoTrustNewSessions: boolean;
+  onSetAutoTrustNewSessions: (enabled: boolean) => void;
   usage?: UsageInfo | null;
   onRefreshUsage?: () => Promise<void>;
+  installerStatus: InstallerStatus;
+  installerChannel: InstallerChannel;
+  lastUpdateCheckAt?: string;
 }) {
   const {
     prefs,
@@ -561,6 +577,13 @@ export function SettingsView({
           </div>
         </section>
 
+        <AgentSettingsView
+          status={installerStatus}
+          channel={installerChannel}
+          lastCheck={lastUpdateCheckAt}
+          m={m}
+        />
+
         <section className="settings-card">
           <div className="settings-card-head">
             <h2>{m.languageSection}</h2>
@@ -640,6 +663,29 @@ export function SettingsView({
               selected={alwaysApprove}
               title={m.alwaysApproveEnabled}
               onSelect={() => onSetAlwaysApprove(true)}
+            />
+          </div>
+
+          <div className="settings-card-head" style={{ marginBottom: 8, marginTop: 16 }}>
+            <h3 className="settings-subhead">{m.autoTrustSetting}</h3>
+            <p>{m.autoTrustSettingDesc}</p>
+          </div>
+          <div
+            className="settings-options"
+            role="radiogroup"
+            aria-label={m.autoTrustSetting}
+          >
+            <OptionCard
+              value="off"
+              selected={!autoTrustNewSessions}
+              title={m.autoTrustDisabled}
+              onSelect={() => onSetAutoTrustNewSessions(false)}
+            />
+            <OptionCard
+              value="on"
+              selected={autoTrustNewSessions}
+              title={m.autoTrustEnabled}
+              onSelect={() => onSetAutoTrustNewSessions(true)}
             />
           </div>
         </section>

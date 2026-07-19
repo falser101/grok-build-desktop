@@ -291,6 +291,9 @@ Split into `packages/*` when a second consumer appears.
 - [x] MCP / settings UI
 - [x] Skills / plugins / hooks management UI
 - [x] Embedded terminal (right panel, xterm + PTY)
+- [x] Folder trust gate (`x.ai/folder_trust/request` + interactive prompt + 30 min fail-closed + YOLO auto-grant)
+- [x] Trusted folders panel (Settings → 扩展 → Trusted folders; list + revoke; 直接读写 `~/.grok/trusted_folders.toml`，与 agent 共享单一权威文件)
+- [x] Auto-trust new sessions (Settings → Permissions；持久化 `[ui].auto_trust_new_sessions`)
 - [ ] Optional leader-socket multi-client mode
 - [ ] Auto-update of app + binary
 - [x] Message queue while busy (Enter queue / Ctrl+Enter send-now / auto-drain)

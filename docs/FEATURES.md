@@ -101,6 +101,20 @@
 | 细粒度 allow_always（按工具/路径会话级）UI | 🟡 | 协议选项可点，无独立策略管理页 |
 | 沙箱 / 能力边界设置 UI | ⬜ | 依赖 agent/CLI |
 
+### 6.1 Folder Trust（仓库本地代码执行信任门）
+
+| 能力 | 状态 | 备注 |
+|------|------|------|
+| `x.ai/folderTrust.interactive` capability 上报 | ✅ | `initialize` 时声明，触发 agent 的交互式 prompt（而非 headless auto-deny） |
+| `x.ai/folder_trust/request` reverse-request 处理 | ✅ | `cwd` / `workspace` / `configKinds` 解析；同时识别 ext_method / `_x.ai/...` 包装；30 min 客户端决策超时 → fail-closed `reject` |
+| 信任弹窗 UI（TrustPromptDialog） | ✅ | 同时显示 cwd 与 git-root workspace；`mcp` / `plugins` / `lsp` / `envrc` / `claude` / `hooks` / `agents` 标签；T/Enter trust · R/Esc reject |
+| Composer 在 trust pending 时禁用 | ✅ | 与 permission / question 同样的 gating；侧栏 `needs_trust` 状态点 |
+| YOLO 时自动 grant | ✅ | `alwaysApprove=true` 时直接返回 `{ outcome: "trust" }`，不弹窗 |
+| Trusted folders 列表（Settings → 扩展 → Trusted folders） | ✅ | 直接读写 `~/.grok/trusted_folders.toml`，与 agent 共享同一权威文件；列表含 path / trusted / declined / decidedAt |
+| 撤销信任 | ✅ | `trusted = false` 写盘；`is_unsafe_trust_root` 守卫（拒绝 `$HOME` / `/` / 非绝对路径） |
+| 「启动 agent 时默认 --trust <cwd>」设置 | ✅ | Settings → Permissions → "Auto-trust new sessions"；持久化 `~/.grok/config.toml [ui].auto_trust_new_sessions`；开关时 `newSession` 前自动 `grantTrustedFolder(workspace)` |
+| `x.ai/hooks/action { action: "Untrust" }` 链路 | ⬜ | 暂未用 — desktop 直接写 TOML 已覆盖撤销需求；agent 端 `Untrust` 需要 session 上下文 |
+
 ---
 
 ## 7. 斜杠命令与 Skills
@@ -184,6 +198,9 @@
 | 安装包 + 内置 binary | ⬜ |
 | MCP / Skills 设置 UI | ✅ |
 | 自定义模型 / 多提供商配置 UI | ✅ |
+| Folder Trust（仓库本地 MCP / hooks / plugins / LSP 信任门） | ✅ |
+| Trusted folders 设置页（list + revoke） | ✅ |
+| Auto-trust 新 session（Settings 开关 + config.toml 持久化） | ✅ |
 | 自动更新 / multi-client attach | ⬜ |
 
 ---
