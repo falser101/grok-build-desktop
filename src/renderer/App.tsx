@@ -4520,17 +4520,15 @@ export function App() {
                   onResolve={(outcome) => void onTrustPrompt(outcome)}
                 />
               ) : null}
-              {/* Other-session attention banner — surfaces any session
-                  that is currently waiting on the user (running /
-                  needs-permission / needs-answer / needs-trust) while
-                  they're focused on a different session. Top-most so
-                  nothing can hide it. */}
+              {/* Other-session attention banner — only surface sessions
+                  that are blocked on user input. A background session that
+                  is merely running stays visible in the sidebar instead of
+                  distracting from the conversation currently in focus. */}
               <WaitingSessionsBanner
                 sessions={snap.sessions}
                 focusedSessionId={snap.sessionId}
                 m={m}
                 onJumpToSession={(s) => void onLoadSession(s)}
-                onCancelSession={(sid) => void window.desktop.cancelSession(sid)}
               />
               {/* Plan approval card — surfaces right above the composer
                   so the user can approve / request changes / abandon in

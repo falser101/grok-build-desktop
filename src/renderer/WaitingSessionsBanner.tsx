@@ -8,14 +8,13 @@ type Props = {
   focusedSessionId?: string | null;
   m: Messages;
   onJumpToSession: (session: SessionSummary) => void;
-  onCancelSession: (sessionId: string) => void;
 };
 
 /**
- * Banner that surfaces background sessions that need user attention
- * while the user is reading another session. Click a row to jump to
- * that session (loads it), or hit the inline stop button to cancel the
- * session's in-flight turn without leaving the current focus.
+ * Banner that surfaces background sessions that need user input while the
+ * user is reading another session. Merely running/loading sessions stay in
+ * the sidebar and are intentionally not promoted above the composer.
+ * Click a row to jump to that session.
  *
  * Hides automatically when the focused session is itself waiting on
  * something — the focused-session banner / modal already covers that.
@@ -25,14 +24,15 @@ export function WaitingSessionsBanner({
   focusedSessionId,
   m,
   onJumpToSession,
-  onCancelSession,
 }: Props) {
   const waiting = sessions.filter(
-    (s) =>
+    (
+      s,
+    ): s is SessionSummary & { status: Exclude<SessionRunStatus, "idle" | "running" | "loading"> } =>
       s.sessionId !== focusedSessionId &&
-      s.status &&
-      s.status !== "idle" &&
-      s.status !== "loading",
+      (s.status === "needs_question" ||
+        s.status === "needs_permission" ||
+        s.status === "needs_trust"),
   );
   if (waiting.length === 0) return null;
 
@@ -62,17 +62,6 @@ export function WaitingSessionsBanner({
                 {labelForStatus(s.status, m)}
               </span>
             </button>
-            {s.status === "running" || s.status === "loading" ? (
-              <button
-                type="button"
-                className="waiting-session-cancel"
-                onClick={() => onCancelSession(s.sessionId)}
-                title={m.cancelSessionTooltip}
-                aria-label={m.cancelSessionTooltip}
-              >
-                ■
-              </button>
-            ) : null}
           </li>
         ))}
       </ul>

@@ -857,12 +857,11 @@ export class AgentBackend {
 
   snapshot(): AppSnapshot {
     this.syncActiveIntoRuntimes();
-    const activePerm = this.permissionQueue.find(
-      (e) =>
-        !e.sessionId ||
-        !this.sessionId ||
-        e.sessionId === this.sessionId,
-    );
+    const activePerm = this.sessionId
+      ? this.permissionQueue.find(
+          (e) => !e.sessionId || e.sessionId === this.sessionId,
+        )
+      : undefined;
     return {
       connection: this.connection,
       error: this.error,
@@ -950,22 +949,18 @@ export class AgentBackend {
 
   /** Front-of-queue plan approval for the focused session (if any). */
   private activePlanApproval(): PlanApprovalUi | undefined {
+    if (!this.sessionId) return undefined;
     const entry = this.planApprovalQueue.find(
-      (e) =>
-        !e.ui.sessionId ||
-        !this.sessionId ||
-        e.ui.sessionId === this.sessionId,
+      (e) => !e.ui.sessionId || e.ui.sessionId === this.sessionId,
     );
     return entry?.ui;
   }
 
   /** Front-of-queue questionnaire for the focused session (if any). */
   private activeQuestion(): AskUserQuestionUi | undefined {
+    if (!this.sessionId) return undefined;
     const entry = this.questionQueue.find(
-      (e) =>
-        !e.ui.sessionId ||
-        !this.sessionId ||
-        e.ui.sessionId === this.sessionId,
+      (e) => !e.ui.sessionId || e.ui.sessionId === this.sessionId,
     );
     return entry?.ui;
   }
@@ -1172,12 +1167,12 @@ export class AgentBackend {
         this.thinkHold = "";
         this.tokensUsed = undefined;
       }
-      // Flush any deferred snapshot now that focus is restored. The
-      // snapshot will reflect the user's focused session's sessionId and
-      // timeline, with `sessions[].status` still correct (per-session).
-      if (this.parkedDepth === 0 && this.parkedEmitPending) {
+      // Background timeline mutations are kept in the parked runtime only.
+      // Do not flush a full snapshot here: that would make the renderer clone
+      // and reconcile the focused conversation for every background token.
+      // Sidebar status is emitted explicitly by the caller when it changes.
+      if (this.parkedDepth === 0) {
         this.parkedEmitPending = false;
-        this.emitSnapshot();
       }
     }
   }
@@ -1539,11 +1534,9 @@ export class AgentBackend {
 
   /** Front-of-queue trust prompt scoped to the focused session. */
   private activeTrustPrompt(): FolderTrustPromptUi | undefined {
+    if (!this.sessionId) return undefined;
     const front = this.trustPromptQueue.find(
-      (e) =>
-        !e.sessionId ||
-        !this.sessionId ||
-        e.sessionId === this.sessionId,
+      (e) => !e.sessionId || e.sessionId === this.sessionId,
     );
     return front?.ui;
   }
@@ -2755,7 +2748,9 @@ export class AgentBackend {
       await this.connect();
       const client = this.requireClient();
 
-      // Already focused — nothing to do.
+      // A queued switch can become stale while another cold load is running.
+      // Re-check after acquiring the session-op lock so an old click cannot
+      // switch the renderer back and make two conversations appear to flash.
       if (this.sessionId === sessionId) {
         return;
       }
@@ -3111,8 +3106,6 @@ export class AgentBackend {
       this.withParkedRuntime(bag, () => {
         this.handleSessionUpdateOnActive(params);
       });
-      // Sidebar status (running spinner) must refresh even if UI is elsewhere.
-      this.emitSnapshotThrottled();
       return;
     }
 
@@ -3126,7 +3119,6 @@ export class AgentBackend {
       this.withParkedRuntime(bag, () => {
         this.handleSessionUpdateOnActive(params);
       });
-      this.emitSnapshotThrottled();
       return;
     }
 
@@ -4163,8 +4155,12 @@ export class AgentBackend {
           this.finishCompact(isManualCompact ? "cancelled" : "completed");
         }
       });
-      // Always refresh list status (running → idle) even if focus moved.
-      this.emitSnapshot();
+      // Only the focused session needs a full conversation snapshot. A parked
+      // session has already updated its runtime bag; publishing here would
+      // needlessly re-render the conversation the user is currently reading.
+      if (stillThisSession()) {
+        this.emitSnapshot();
+      }
       void this.refreshHistory();
       if (stillThisSession()) {
         void this.refreshContextUsage();
@@ -4364,10 +4360,8 @@ export class AgentBackend {
         this.thinkHold = "";
         this.tokensUsed = undefined;
       }
-      if (this.parkedDepth === 0 && this.parkedEmitPending) {
-        this.parkedEmitPending = false;
-        this.emitSnapshot();
-      }
+      this.parkedEmitPending = false;
+      this.emitSnapshot();
     }
   }
 
