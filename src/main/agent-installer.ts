@@ -119,8 +119,44 @@ async function pathExists(p: string): Promise<boolean> {
     await stat(p);
     return true;
   } catch {
+    // On Windows, an unqualified `grok` or `agent` resolves to `grok.exe` /
+    // `agent.exe`. Try both before giving up so the well-known list above
+    // can stay extension-less without false negatives.
+    if (process.platform === "win32") {
+      try {
+        await stat(p + ".exe");
+        return true;
+      } catch {
+        /* fall through */
+      }
+      try {
+        await stat(p + ".cmd");
+        return true;
+      } catch {
+        /* fall through */
+      }
+    }
     return false;
   }
+}
+
+/** On Windows, given a path without extension that exists, return the
+ *  exact file on disk (e.g. add `.exe` if that's what was installed).
+ *  Prefers `.exe` over `.cmd` since the official installer writes a
+ *  real binary. Falls back to the input path when the extension is
+ *  already present or nothing matches. */
+async function resolveWindowsExtension(p: string): Promise<string> {
+  if (process.platform !== "win32") return p;
+  if (/\.(exe|cmd|bat)$/i.test(p)) return p;
+  for (const ext of [".exe", ".cmd"]) {
+    try {
+      await stat(p + ext);
+      return p + ext;
+    } catch {
+      /* try next */
+    }
+  }
+  return p;
 }
 
 export function grokHome(): string {
@@ -202,7 +238,13 @@ export async function resolveGrokBinaryDetailed(): Promise<ResolveGrokResult> {
     if (!c) continue;
     searched.push(c);
     if (await pathExists(c)) {
-      return { kind: "found", path: c, source: "well-known" };
+      // On Windows, prefer the .exe variant if both exist — `spawn` needs
+      // an extension to be safe and to match what the installer wrote.
+      const resolved =
+        process.platform === "win32" && !/\.(exe|cmd|bat)$/i.test(c)
+          ? await resolveWindowsExtension(c)
+          : c;
+      return { kind: "found", path: resolved, source: "well-known" };
     }
   }
 
@@ -234,7 +276,11 @@ export async function resolveGrokBinaryDetailed(): Promise<ResolveGrokResult> {
       .map((s) => s.trim())
       .find(Boolean);
     if (first && (await pathExists(first))) {
-      return { kind: "found", path: first, source: "$PATH" };
+      const resolved =
+        process.platform === "win32"
+          ? await resolveWindowsExtension(first)
+          : first;
+      return { kind: "found", path: resolved, source: "$PATH" };
     }
   } catch {
     /* `which`/`where` failed or `grok` not on PATH — fall through */
