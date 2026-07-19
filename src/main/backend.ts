@@ -8,7 +8,9 @@ import { homedir } from "node:os";
 import { AcpClient, type JsonValue } from "../shared/acp-client";
 import {
   readAlwaysApproveFromConfig,
+  readAutoTrustNewSessionsFromConfig,
   writeAlwaysApproveToConfig,
+  writeAutoTrustNewSessionsToConfig,
 } from "./config-permission";
 import type {
   AgentUiEvent,
@@ -20,7 +22,12 @@ import type {
   AskUserQuestionUi,
   AvailableCommand,
   ConnectionState,
+  FolderTrustConfigKind,
+  FolderTrustOutcome,
+  FolderTrustPromptUi,
   ForkSessionResult,
+  InstallerChannel,
+  InstallerStatus,
   ModelInfo,
   PathSuggestion,
   PermissionOptionUi,
@@ -67,6 +74,15 @@ interface PendingPlanApprovalEntry {
 interface PendingQuestionEntry {
   ui: AskUserQuestionUi;
   resolve: (result: JsonValue) => void;
+}
+
+interface PendingTrustPromptEntry {
+  ui: FolderTrustPromptUi;
+  /** Session this prompt belongs to (matches `request.sessionId`). */
+  sessionId?: string;
+  resolve: (result: JsonValue) => void;
+  /** Timer for the 30 min client-decision timeout (mirrors agent side). */
+  timer: ReturnType<typeof setTimeout> | null;
 }
 
 /**
@@ -403,28 +419,35 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-export async function resolveGrokBinary(): Promise<string> {
-  const envPath = process.env.GROK_BINARY;
-  if (envPath && (await pathExists(envPath))) {
-    return envPath;
-  }
-
-  const candidates = [
-    join(homedir(), ".grok", "bin", "grok"),
-    "/usr/local/bin/grok",
-    "/usr/bin/grok",
-  ];
-
-  if (process.resourcesPath) {
-    candidates.unshift(join(process.resourcesPath, "bin", "grok"));
-  }
-
-  for (const c of candidates) {
-    if (await pathExists(c)) return c;
-  }
-
-  return "grok";
-}
+// Installer-related helpers live in `./agent-installer.ts` so this file can
+// stay focused on the agent process lifecycle (spawn / connect / teardown).
+import {
+  resolveGrokBinary,
+  resolveGrokBinaryDetailed,
+  runGrokInstaller as runGrokInstallerImpl,
+  upgrade as upgradeInstallerImpl,
+  checkForUpdate as checkForUpdateImpl,
+  getInstallerStatus as getInstallerStatusImpl,
+  getChannel as getChannelImpl,
+  setChannel as setChannelImpl,
+  rollbackBinary,
+  ensureBackupExists,
+  grokInstallCommand,
+  GROK_INSTALL_URL_SH,
+  GROK_INSTALL_URL_PS1,
+} from "./agent-installer";
+export { resolveGrokBinary, resolveGrokBinaryDetailed, grokInstallCommand };
+// Back-compat: keep old names so existing imports (notably index.ts and
+// account-manager.ts) keep working without churn.
+export { runGrokInstallerImpl as runGrokInstaller };
+export const GROK_INSTALL_URL_SH_EXPORTED = GROK_INSTALL_URL_SH;
+export const GROK_INSTALL_URL_PS1_EXPORTED = GROK_INSTALL_URL_PS1;
+export type { ResolveGrokResult } from "./agent-installer";
+// Back-compat alias: old code referenced `GrogInstallerResult` (typo); the
+// canonical name in the new module is `InstallerResult`. Re-export under
+// both names so older imports keep working.
+export type InstallerResult = import("./agent-installer").InstallerResult;
+export type GrogInstallerResult = InstallerResult;
 
 function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -756,8 +779,40 @@ export class AgentBackend {
    * Only the focused-session (or unscoped) entry is exposed in the snapshot.
    */
   private questionQueue: PendingQuestionEntry[] = [];
+  /**
+   * Pending folder-trust prompts (`x.ai/folder_trust/request`).
+   * Mirrors the agent-side `interactive_trust_prompted` set; only the front
+   * of the queue is surfaced via the snapshot.
+   */
+  private trustPromptQueue: PendingTrustPromptEntry[] = [];
   /** Always-approve (YOLO) — skip permission UI and auto-allow tools. */
   private alwaysApprove = false;
+  /**
+   * Auto-grant folder trust before opening a new session (the desktop
+   * equivalent of `grok --trust <cwd>`). Read from / written to
+   * `~/.grok/config.toml [ui].auto_trust_new_sessions`. Default false:
+   * the agent's gate stays interactive by default, matching CLI behaviour.
+   */
+  private autoTrustNewSessions = false;
+  /**
+   * Snapshot of the grok CLI installer. Refreshed:
+   *   - on app start (background, non-blocking)
+   *   - after every install / upgrade IPC round-trip
+   *   - after each successful `connect` (resyncs against what's on disk)
+   * Renderer reads this from `AppSnapshot.installerStatus`.
+   */
+  private installerStatus: InstallerStatus = { kind: "absent" };
+  /** Channel the user picked in Settings → Agent. */
+  private installerChannel: InstallerChannel = "stable";
+  /** ISO timestamp of the last background update probe. */
+  private lastUpdateCheckAt?: string;
+  /**
+   * True between `upgradeAgent()` returning success and the next
+   * `connectInner()` confirming the new agent is healthy. Used to gate
+   * the rollback hook so we only fire on upgrade-induced crashes, not
+   * on normal in-session agent crashes.
+   */
+  private upgradePending = false;
   private listeners = new Set<(event: AgentUiEvent) => void>();
   private connecting: Promise<void> | null = null;
   private authenticated = false;
@@ -826,6 +881,7 @@ export class AgentBackend {
       busy: this.busy,
       compacting: this.compacting,
       binaryPath: this.binaryPath || undefined,
+      agentInstallUrl: GROK_INSTALL_URL_SH_EXPORTED,
       replaying: this.replaying,
       tokensUsed: this.tokensUsed,
       contextWindow: this.contextWindow,
@@ -838,7 +894,17 @@ export class AgentBackend {
       pendingQuestion: this.activeQuestion()
         ? this.cloneQuestionUi(this.activeQuestion()!)
         : undefined,
+      pendingTrustPrompt: this.activeTrustPrompt()
+        ? { ...this.activeTrustPrompt()! }
+        : undefined,
       alwaysApprove: this.alwaysApprove,
+    /**
+     * Settings → Permissions: when true, the desktop grants trust for the
+     * workspace cwd before each `session/new`. Equivalent to `grok --trust
+     * <cwd>` for the CLI. Persisted in `~/.grok/config.toml [ui].
+     * auto_trust_new_sessions` so the setting survives restarts.
+     */
+    autoTrustNewSessions: this.autoTrustNewSessions,
       // Todos / planContent are turn-scoped UI artifacts: only expose them
       // while the agent is running the current turn. Once `busy` flips to
       // false, the previous turn's checklist must not linger in the UI
@@ -849,6 +915,9 @@ export class AgentBackend {
       pendingPlanApproval: this.activePlanApproval()
         ? { ...this.activePlanApproval()! }
         : undefined,
+      installerStatus: this.installerStatus,
+      installerChannel: this.installerChannel,
+      lastUpdateCheckAt: this.lastUpdateCheckAt,
     };
   }
 
@@ -924,6 +993,13 @@ export class AgentBackend {
   }
 
   private sessionRunStatus(sessionId: string): SessionRunStatus {
+    if (
+      this.trustPromptQueue.some(
+        (e) => e.sessionId === sessionId,
+      )
+    ) {
+      return "needs_trust";
+    }
     if (
       this.questionQueue.some(
         (e) => e.ui.sessionId === sessionId,
@@ -1255,6 +1331,35 @@ export class AgentBackend {
     this.emitSnapshot();
   }
 
+  /**
+   * Resolve a pending `x.ai/folder_trust/request` prompt.
+   * `outcome === "trust"` grants the workspace; `"reject"` keeps it gated.
+   * Auto-rejected on cancel/timeout, never auto-answered by YOLO unless
+   * `alwaysApprove` was on at receive time (handled inside the handler).
+   */
+  respondTrustPrompt(requestId: string, outcome: FolderTrustOutcome): void {
+    const idx = this.trustPromptQueue.findIndex(
+      (e) => e.ui.requestId === requestId,
+    );
+    if (idx < 0) {
+      this.log(
+        "warn",
+        `Trust-prompt response for unknown id=${requestId} outcome=${outcome}`,
+      );
+      return;
+    }
+    const [entry] = this.trustPromptQueue.splice(idx, 1);
+    if (!entry) return;
+    if (entry.timer) clearTimeout(entry.timer);
+    this.log(
+      "info",
+      `Trust prompt ${outcome} requestId=${requestId} workspace=${entry.ui.workspace}` +
+        (entry.ui.sessionId ? ` session=${entry.ui.sessionId}` : ""),
+    );
+    entry.resolve({ outcome });
+    this.emitSnapshot();
+  }
+
   /** Map UI response → ACP wire JSON (AskUserQuestionExtResponse). */
   private toAskUserQuestionWire(response: AskUserQuestionResponse): JsonValue {
     if (response.outcome === "accepted") {
@@ -1373,6 +1478,80 @@ export class AgentBackend {
       );
     }
     this.emitSnapshot();
+  }
+
+  /**
+   * Toggle "auto-trust workspace before new session". When enabled, the
+   * desktop grants `~/.grok/trusted_folders.toml` trust for the new
+   * session's cwd right before sending `session/new`, mirroring CLI's
+   * `grok --trust <cwd>` opt-in.
+   *
+   * Persisted in `~/.grok/config.toml [ui].auto_trust_new_sessions` so the
+   * choice survives restarts and matches what the agent would do if it
+   * read the same flag (forward-compat if the agent grows one).
+   */
+  async setAutoTrustNewSessions(enabled: boolean): Promise<void> {
+    const next = Boolean(enabled);
+    if (this.autoTrustNewSessions === next) {
+      this.emitSnapshot();
+      return;
+    }
+    this.autoTrustNewSessions = next;
+    this.log(
+      "info",
+      `Auto-trust new sessions ${next ? "enabled" : "disabled"}`,
+    );
+    try {
+      await writeAutoTrustNewSessionsToConfig(next);
+    } catch (err) {
+      this.log(
+        "warn",
+        `Failed to persist auto_trust_new_sessions: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    this.emitSnapshot();
+  }
+
+  /** Front-of-queue trust prompt scoped to the focused session. */
+  private activeTrustPrompt(): FolderTrustPromptUi | undefined {
+    const front = this.trustPromptQueue.find(
+      (e) =>
+        !e.sessionId ||
+        !this.sessionId ||
+        e.sessionId === this.sessionId,
+    );
+    return front?.ui;
+  }
+
+  /**
+   * Cancel trust prompts belonging to `sessionId` (or all when `null`).
+   * Same scope rules as `cancelPermissionsForSession`: only entries whose
+   * `sessionId` matches are auto-rejected with `outcome: "reject"`, mirroring
+   * the agent's fail-closed behavior when the client never answers.
+   */
+  private cancelTrustPromptsForSession(
+    sessionId: string | null,
+    reason: string,
+  ): void {
+    const kept: PendingTrustPromptEntry[] = [];
+    for (const entry of this.trustPromptQueue) {
+      const belongsToSession =
+        sessionId === null
+          ? true
+          : entry.sessionId === sessionId ||
+            (!entry.sessionId && this.sessionId === sessionId);
+      if (sessionId !== null && !belongsToSession) {
+        kept.push(entry);
+        continue;
+      }
+      if (entry.timer) clearTimeout(entry.timer);
+      this.log(
+        "info",
+        `Trust prompt auto-rejected (${reason}) requestId=${entry.ui.requestId}`,
+      );
+      entry.resolve({ outcome: "reject" });
+    }
+    this.trustPromptQueue = kept;
   }
 
   private notifyYoloMode(enabled: boolean): void {
@@ -1615,6 +1794,7 @@ export class AgentBackend {
     if (this.sessionId) {
       this.cancelPermissionsForSession(this.sessionId, "timeline clear");
       this.cancelQuestionsForSession(this.sessionId, "timeline clear");
+      this.cancelTrustPromptsForSession(this.sessionId, "timeline clear");
     }
   }
 
@@ -1838,6 +2018,11 @@ export class AgentBackend {
     } catch {
       this.alwaysApprove = false;
     }
+    try {
+      this.autoTrustNewSessions = await readAutoTrustNewSessionsFromConfig();
+    } catch {
+      this.autoTrustNewSessions = false;
+    }
     this.setState({ connection: "starting", busy: false });
 
     this.binaryPath = await resolveGrokBinary();
@@ -1846,6 +2031,24 @@ export class AgentBackend {
 
     this.log("info", `Using binary: ${this.binaryPath}`);
     this.log("info", `Starting agent serve on 127.0.0.1:${this.port}`);
+
+    // Upgrade-flow safety net: if the previous upgradeAgent() left a
+    // .bak behind, confirm it's still on disk (the user might have
+    // manually wiped it; that's fine, we just won't be able to roll
+    // back later). Then record the version we're upgrading from so
+    // waitForHealthyAgent() can confirm the new agent reports higher.
+    let upgradeFromVersion: string | undefined;
+    if (this.upgradePending) {
+      const ok = await ensureBackupExists(this.binaryPath).catch(() => false);
+      if (!ok) {
+        this.log(
+          "warn",
+          "Upgrade pending but no .bak found — rollback will be a no-op.",
+        );
+      }
+      const cur = this.installerStatus;
+      if (cur.kind === "upgrading") upgradeFromVersion = cur.from;
+    }
 
     const args = [
       "agent",
@@ -1864,11 +2067,48 @@ export class AgentBackend {
     } catch {
       accountEnv = {};
     }
-    const child = spawn(this.binaryPath, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...accountEnv },
-    });
+    let child: ChildProcess;
+    try {
+      child = spawn(this.binaryPath, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, ...accountEnv },
+      });
+    } catch (err) {
+      throw new Error(
+        `Failed to launch ${this.binaryPath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     this.child = child;
+
+    // If the binary is missing, spawn emits 'error' asynchronously with
+    // ENOENT. Translate it into a user-friendly diagnostic before the
+    // generic "agent serve exited" message.
+    const missingBinaryError = await new Promise<NodeJS.ErrnoException | null>(
+      (resolveMissing) => {
+        const timer = setTimeout(() => resolveMissing(null), 1500);
+        child.once("error", (err: NodeJS.ErrnoException) => {
+          clearTimeout(timer);
+          resolveMissing(err);
+        });
+      },
+    );
+    if (missingBinaryError) {
+      const detailed = await resolveGrokBinaryDetailed();
+      const searchedHint =
+        detailed.kind === "missing"
+          ? `\n\nSearched:\n  ${detailed.searched.map((p) => `• ${p}`).join("\n  ")}`
+          : "";
+      const envHint = process.env.GROK_BINARY
+        ? `\n\nGROK_BINARY is set to ${process.env.GROK_BINARY} but no file exists there.`
+        : "";
+      const cmd = grokInstallCommand(process.platform);
+      throw new Error(
+        `The 'grok' CLI was not found on this machine.${searchedHint}${envHint}\n\n` +
+          `Install it with the official one-liner:\n\n  ${cmd}\n\n` +
+          `Both installers place the binary at ~/.grok/bin/grok, which the desktop already searches.\n` +
+          `Or set the GROK_BINARY environment variable to the absolute path of an existing grok binary.`,
+      );
+    }
 
     let stderrBuf = "";
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -1883,6 +2123,14 @@ export class AgentBackend {
         `agent serve exited code=${code ?? "null"} signal=${signal ?? "null"}`,
       );
       this.authenticated = false;
+      // Upgrade safety net: if the freshly-installed agent dies within
+      // its first 30s, treat that as a failed upgrade and roll back to
+      // the .bak copy.
+      if (this.upgradePending && code !== 0) {
+        void this.rollbackAfterFailedUpgrade(
+          `New agent crashed during startup (exit code ${code})`,
+        );
+      }
       if (this.connection !== "stopped" && this.connection !== "idle") {
         this.setState({
           connection: "error",
@@ -1905,6 +2153,7 @@ export class AgentBackend {
         this.authenticated = false;
         this.cancelAllPermissions("ws close");
         this.cancelAllQuestions("ws close");
+        this.cancelTrustPromptsForSession(null, "ws close");
         if (this.connection === "ready") {
           this.setState({
             connection: "error",
@@ -1923,6 +2172,12 @@ export class AgentBackend {
         clientCapabilities: {
           fs: { readTextFile: false, writeTextFile: false },
           terminal: false,
+          // Advertise interactive folder-trust support so the agent prompts
+          // the desktop (rather than auto-granting or going headless) when a
+          // workspace has repo-local hooks/MCP/plugins/LSP/etc.
+          meta: {
+            "x.ai/folderTrust": { interactive: true },
+          },
         },
         clientInfo: {
           name: "grok-build-desktop",
@@ -1933,6 +2188,7 @@ export class AgentBackend {
     if (!initResult) throw new Error("initialize returned empty result");
 
     const meta = asRecord(initResult._meta);
+    const previousAgentVersion = this.agentVersion;
     this.agentVersion = asString(meta?.agentVersion);
     const bootstrapCmds = parseAvailableCommands(
       meta?.availableCommands as JsonValue | undefined,
@@ -1963,6 +2219,37 @@ export class AgentBackend {
     // Re-apply YOLO so agent serve matches desktop / config preference.
     if (this.alwaysApprove) {
       this.notifyYoloMode(true);
+    }
+    // Upgrade-flow health check: if we just upgraded, confirm the new
+    // agent reports a higher version than the one we replaced. If not,
+    // roll back. `previousAgentVersion` is the version the OLD agent
+    // reported before the upgrade (or undefined on a fresh install —
+    // in which case the new version is necessarily higher).
+    if (this.upgradePending) {
+      const expected = upgradeFromVersion ?? previousAgentVersion ?? "0.0.0";
+      const currentVer = this.agentVersion ?? "";
+      if (!currentVer) {
+        await this.rollbackAfterFailedUpgrade(
+          "New agent reported no agentVersion in initialize response",
+        );
+        return;
+      }
+      const healthy = await this.waitForHealthyAgent(30_000, expected);
+      if (!healthy) {
+        // rollbackAfterFailedUpgrade already ran inside waitForHealthyAgent.
+        // We still let this connection finish so the (rolled-back) agent
+        // is usable; the snapshot reflects the rollback.
+        this.log(
+          "warn",
+          "Upgrade rolled back; continuing with the restored binary.",
+        );
+      } else {
+        await this.refreshInstallerStatus();
+        this.log(
+          "info",
+          `Upgrade verified: agent now reports ${this.agentVersion}`,
+        );
+      }
     }
     this.setState({ connection: "ready", error: undefined });
     await this.refreshHistory();
@@ -2148,6 +2435,7 @@ export class AgentBackend {
     // Drop permission prompts / questionnaires belonging to this session only.
     this.cancelPermissionsForSession(sessionId, reason);
     this.cancelQuestionsForSession(sessionId, reason);
+    this.cancelTrustPromptsForSession(sessionId, reason);
 
     if (isActive) {
       this.resetTurnFlags();
@@ -2310,6 +2598,31 @@ export class AgentBackend {
     return this.withSessionOp(async () => {
       await this.connect();
       const client = this.requireClient();
+
+      // Auto-trust: when the user opted in via Settings, grant trust for
+      // this workspace BEFORE sending `session/new` so the agent's
+      // `prompt_warranted` gate never fires. Symmetric with `grok --trust
+      // <cwd>` from the CLI. Failures here are non-fatal — falling through
+      // to the interactive prompt is the agent's default behaviour.
+      if (this.autoTrustNewSessions && workspace) {
+        try {
+          const { grantTrustedFolder } = await import(
+            "./trusted-folders-store"
+          );
+          await grantTrustedFolder(workspace);
+          this.log(
+            "info",
+            `Auto-trust granted for workspace=${workspace}`,
+          );
+        } catch (err) {
+          this.log(
+            "warn",
+            `Auto-trust failed (will fall back to prompt): ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
 
       // Park previous session — do not cancel its turn (concurrent sessions).
       this.parkActiveSession();
@@ -3132,6 +3445,19 @@ export class AgentBackend {
       if (handled !== undefined) return handled;
     }
 
+    // Folder-trust prompt: top-level `x.ai/folder_trust/request` or nested
+    // under `ext_method` / `_x.ai/folder_trust/request`. The agent only sends
+    // this when we advertised `x.ai/folderTrust.interactive = true`.
+    if (
+      method === "ext_method" ||
+      method === "x.ai/folder_trust/request" ||
+      method === "_x.ai/folder_trust/request" ||
+      method.endsWith("folder_trust/request")
+    ) {
+      const handled = await this.handleFolderTrustRequest(method, params);
+      if (handled !== undefined) return handled;
+    }
+
     // Plan approval: JSON-RPC method may be top-level `x.ai/exit_plan_mode`
     // or nested under ACP `ext_method` with method field.
     if (
@@ -3323,6 +3649,144 @@ export class AgentBackend {
       });
     }
     return out;
+  }
+
+  /**
+   * Handle `x.ai/folder_trust/request` reverse request.
+   * Returns the ExtResponse body, or `undefined` if params don't describe
+   * a folder-trust prompt (so `ext_method` can fall through to other
+   * extensions like `x.ai/exit_plan_mode`).
+   *
+   * Mirrors the agent-side `maybe_spawn_interactive_trust_prompt`:
+   *   - accepts `cwd`, `workspace` (canonicalized git-root or cwd),
+   *     `sessionId`, `configKinds` (`mcp`/`plugins`/`lsp`/`envrc`/…)
+   *   - surfaces a single in-flight prompt at a time per session
+   *   - applies a 30 min client-side decision timeout (matches agent);
+   *     on timeout we fail closed with `outcome: "reject"`
+   */
+  private async handleFolderTrustRequest(
+    method: string,
+    params: JsonValue | undefined,
+  ): Promise<JsonValue | undefined> {
+    let body = asRecord(params);
+
+    // Wrapped shapes:
+    //   ext_method / _x.ai/folder_trust/request:
+    //     { method: "x.ai/folder_trust/request", params: { sessionId, cwd, … } }
+    if (body) {
+      const nestedMethod =
+        asString(body.method) ?? asString(body.extMethod);
+      const looksWrapped =
+        nestedMethod === "x.ai/folder_trust/request" ||
+        (typeof nestedMethod === "string" &&
+          nestedMethod.endsWith("folder_trust/request"));
+
+      if (method === "ext_method" || method === "_x.ai/folder_trust/request") {
+        if (
+          nestedMethod &&
+          nestedMethod !== "x.ai/folder_trust/request" &&
+          !nestedMethod.endsWith("folder_trust/request")
+        ) {
+          return undefined;
+        }
+        if (looksWrapped) {
+          const nested =
+            asRecord(body.params as JsonValue) ??
+            asRecord(body.arguments as JsonValue);
+          if (nested) body = nested;
+          else if (
+            typeof body.params === "string" &&
+            body.params.trim().startsWith("{")
+          ) {
+            try {
+              body = asRecord(JSON.parse(body.params) as JsonValue);
+            } catch {
+              /* keep body */
+            }
+          }
+        }
+      } else if (looksWrapped) {
+        const nested =
+          asRecord(body.params as JsonValue) ??
+          asRecord(body.arguments as JsonValue);
+        if (nested) body = nested;
+      }
+    }
+
+    if (!body) {
+      if (method === "ext_method") return undefined;
+      this.log("warn", "folder_trust/request with empty params; rejecting");
+      return { outcome: "reject" };
+    }
+
+    const cwd = asString(body.cwd) ?? asString(body.workspace);
+    const workspace = asString(body.workspace) ?? cwd;
+    const sessionId =
+      asString(body.sessionId) ?? asString(body.session_id) ?? this.sessionId;
+    const configKindsRaw =
+      (body.configKinds as JsonValue | undefined) ??
+      (body.config_kinds as JsonValue | undefined);
+    const configKinds: FolderTrustConfigKind[] = Array.isArray(configKindsRaw)
+      ? (configKindsRaw.filter(
+          (k): k is string => typeof k === "string",
+        ) as FolderTrustConfigKind[])
+      : [];
+
+    if (!cwd || !workspace) {
+      if (method === "ext_method") return undefined;
+      this.log(
+        "warn",
+        `folder_trust/request missing cwd/workspace (cwd=${cwd} workspace=${workspace}); rejecting`,
+      );
+      return { outcome: "reject" };
+    }
+
+    const requestId = newId("trust");
+    const ui: FolderTrustPromptUi = {
+      requestId,
+      sessionId,
+      cwd,
+      workspace,
+      configKinds,
+    };
+    this.log(
+      "info",
+      `Folder-trust prompt: cwd=${cwd} workspace=${workspace}` +
+        (sessionId ? ` session=${sessionId}` : "") +
+        (configKinds.length ? ` kinds=${configKinds.join(",")}` : ""),
+    );
+
+    // Queue the prompt. If YOLO is on, auto-grant without showing UI.
+    if (this.alwaysApprove) {
+      this.log(
+        "info",
+        `Folder-trust auto-granted (always-approve) workspace=${workspace}`,
+      );
+      this.emitSnapshot();
+      return { outcome: "trust" };
+    }
+
+    return await new Promise<JsonValue>((resolve) => {
+      const entry: PendingTrustPromptEntry = {
+        ui,
+        sessionId,
+        resolve,
+        timer: null,
+      };
+      entry.timer = setTimeout(() => {
+        // Fail-closed: 30 min without a decision ⇒ reject.
+        const idx = this.trustPromptQueue.indexOf(entry);
+        if (idx >= 0) this.trustPromptQueue.splice(idx, 1);
+        this.log(
+          "warn",
+          `Folder-trust prompt timed out (30min) workspace=${workspace} requestId=${requestId}; rejecting`,
+        );
+        resolve({ outcome: "reject" });
+        this.emitSnapshot();
+      }, 30 * 60 * 1000);
+      this.trustPromptQueue.push(entry);
+      this.emitSnapshot();
+    });
   }
 
   /**
@@ -3694,6 +4158,7 @@ export class AgentBackend {
     const sid = this.sessionId;
     this.cancelPermissionsForSession(sid, "session cancel");
     this.cancelQuestionsForSession(sid, "session cancel");
+    this.cancelTrustPromptsForSession(sid, "session cancel");
     this.emitSnapshot();
     try {
       await this.client.request("session/cancel", {
@@ -3757,7 +4222,236 @@ export class AgentBackend {
     this.runtimes.clear();
     this.cancelAllPermissions("stop");
     this.cancelAllQuestions("stop");
+    this.cancelTrustPromptsForSession(null, "stop");
     await this.stopProcessOnly();
     this.emitSnapshot();
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // Installer lifecycle — desktop-driven install / upgrade / channel /
+  // background update checks. Everything here is fire-and-forget from the
+  // renderer's perspective; status flows back through `installerStatus`.
+  // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * First call from the renderer. Resolves the channel from disk, snapshots
+   * the installer state, then kicks off a single background update probe
+   * so the next connect can show "update available" without blocking.
+   */
+  async initInstaller(): Promise<void> {
+    try {
+      this.installerChannel = await getChannelImpl();
+    } catch {
+      this.installerChannel = "stable";
+    }
+    await this.refreshInstallerStatus();
+    // Background update probe — never throws; failures are silent so we
+    // don't pop a banner every time the user is offline.
+    void this.probeUpdateChannel();
+  }
+
+  /** Re-read the installer status from disk and push it to the snapshot. */
+  async refreshInstallerStatus(): Promise<InstallerStatus> {
+    try {
+      const status = await getInstallerStatusImpl();
+      this.installerStatus = status;
+      this.emitSnapshot();
+      return status;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.installerStatus = { kind: "error", message };
+      this.emitSnapshot();
+      return this.installerStatus;
+    }
+  }
+
+  /**
+   * Background update probe. Runs once on init. We don't poll: each
+   * desktop session already gets a fresh probe, and we don't want to
+   * spam the channel-pointer endpoint from every open window.
+   */
+  private async probeUpdateChannel(): Promise<void> {
+    try {
+      const check = await checkForUpdateImpl();
+      this.lastUpdateCheckAt = new Date().toISOString();
+      const current = await getInstallerStatusImpl();
+      if (current.kind === "ready" && check.hasUpdate && check.latest) {
+        this.installerStatus = {
+          kind: "update-available",
+          current: current.version,
+          latest: check.latest,
+          path: current.path,
+        };
+      } else {
+        this.installerStatus = current;
+      }
+      this.emitSnapshot();
+    } catch {
+      /* network failure — leave the previous status in place */
+    }
+  }
+
+  /**
+   * Triggered from Settings → Agent → "Install" button. Used for both
+   * first-time installs and explicit channel-driven installs. Marks the
+   * status as `installing` while the script runs.
+   */
+  async installAgent(): Promise<import("./agent-installer").InstallerResult> {
+    this.installerStatus = { kind: "installing", startedAt: Date.now() };
+    this.emitSnapshot();
+    const result = await runGrokInstallerImpl();
+    if (result.ok) {
+      await this.refreshInstallerStatus();
+    } else {
+      this.installerStatus = {
+        kind: "error",
+        message: result.error ?? `Installer exited with code ${result.code}`,
+      };
+      this.emitSnapshot();
+    }
+    return result;
+  }
+
+  /**
+   * Triggered from Settings → Agent → "Upgrade" button. Backs up the
+   * current binary first, then runs the installer. On success we mark
+   * `upgradePending = true` so the next `connectInner()` will verify
+   * the new agent is healthy within 30s — and roll back if it isn't.
+   */
+  async upgradeAgent(): Promise<import("./agent-installer").InstallerResult> {
+    const before = await getInstallerStatusImpl();
+    if (before.kind !== "ready") {
+      const err: import("./agent-installer").InstallerResult = {
+        ok: false,
+        output: "",
+        code: null,
+        durationMs: 0,
+        error: `Cannot upgrade: grok is not currently installed (status: ${before.kind}).`,
+      };
+      this.installerStatus = { kind: "error", message: err.error! };
+      this.emitSnapshot();
+      return err;
+    }
+    this.installerStatus = {
+      kind: "upgrading",
+      from: before.version,
+      to: "(checking)",
+      startedAt: Date.now(),
+    };
+    this.emitSnapshot();
+    // Tear down any in-flight process so the upgrade can replace the
+    // binary file. We preserve `connection = idle` so the renderer
+    // knows to auto-reconnect after the upgrade completes.
+    await this.stopProcessOnly();
+    const result = await upgradeInstallerImpl();
+    if (!result.ok) {
+      this.installerStatus = {
+        kind: "error",
+        message: result.error ?? `Installer exited with code ${result.code}`,
+      };
+      this.emitSnapshot();
+      return result;
+    }
+    // Find out what version we just landed on so the UI shows the right
+    // "from → to" delta while the next connect runs.
+    const after = await getInstallerStatusImpl();
+    const newVersion =
+      after.kind === "ready" ? after.version : "(unknown)";
+    this.upgradePending = true;
+    this.installerStatus = {
+      kind: "upgrading",
+      from: before.version,
+      to: newVersion,
+      startedAt: Date.now(),
+    };
+    this.emitSnapshot();
+    // Kick a fresh connect so the new binary is exercised. The hook
+    // installed by `connectInner` will clear `upgradePending` once the
+    // new agent answers or roll back if it can't.
+    void this.connect().catch((err) => {
+      this.log("warn", `Post-upgrade connect failed: ${String(err)}`);
+    });
+    return result;
+  }
+
+  /**
+   * Persist the chosen channel and refresh the update probe so the UI
+   * updates immediately (a user who just switched to alpha probably
+   * wants to see "alpha is newer than your install").
+   */
+  async setInstallerChannel(
+    channel: InstallerChannel,
+  ): Promise<InstallerChannel> {
+    await setChannelImpl(channel);
+    this.installerChannel = channel;
+    this.emitSnapshot();
+    void this.probeUpdateChannel();
+    return channel;
+  }
+
+  /**
+   * If the freshly-installed agent crashes within the health-check window
+   * (30s), swap the binary back to its .bak and surface the rollback in
+   * the snapshot. Only fires when `upgradePending === true` so we don't
+   * punish a normal session crash by reverting the version.
+   */
+  private async rollbackAfterFailedUpgrade(
+    reason: string,
+  ): Promise<void> {
+    if (!this.upgradePending) return;
+    this.upgradePending = false;
+    const resolved = await resolveGrokBinaryDetailed();
+    const binPath = resolved.kind === "found" ? resolved.path : undefined;
+    if (!binPath) {
+      this.installerStatus = {
+        kind: "rollback",
+        fromVersion: "(unknown)",
+        reason,
+      };
+      this.emitSnapshot();
+      return;
+    }
+    const ok = await rollbackBinary(binPath);
+    await this.refreshInstallerStatus();
+    if (this.installerStatus.kind === "ready") {
+      this.installerStatus = {
+        kind: "rollback",
+        fromVersion: this.installerStatus.version,
+        reason: ok
+          ? `${reason}. Restored the previous version.`
+          : `${reason}. Could not restore the backup — please reinstall manually.`,
+      };
+      this.emitSnapshot();
+    }
+  }
+
+  /**
+   * Upgrade-flow health check. Runs after spawn; resolves once the
+   * agent answers `initialize` and reports an `agentVersion` higher
+   * than the pre-upgrade version. Bails out at 30s and triggers a
+   * rollback.
+   */
+  private async waitForHealthyAgent(
+    timeoutMs: number,
+    expectedNewerThan: string,
+  ): Promise<boolean> {
+    // The new connectInner() will overwrite agentVersion when the
+    // initialize response arrives. We watch that field for up to
+    // `timeoutMs`.
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!this.upgradePending) return true;
+      if (this.agentVersion && this.agentVersion !== expectedNewerThan) {
+        this.upgradePending = false;
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    await this.rollbackAfterFailedUpgrade(
+      `New agent did not respond with a higher version within ${Math.round(
+        timeoutMs / 1000,
+      )}s`,
+    );
+    return false;
   }
 }

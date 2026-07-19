@@ -4,10 +4,11 @@ import type {
   McpServerEntry,
   PluginEntry,
   SkillEntry,
+  TrustedFolderEntry,
 } from "@shared/types";
 import type { Messages } from "./i18n";
 
-export type ExtTab = "mcp" | "skills" | "plugins" | "hooks";
+export type ExtTab = "mcp" | "skills" | "plugins" | "hooks" | "trust";
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -66,6 +67,9 @@ export function ExtensionsView({
     path: string;
     text: string;
   } | null>(null);
+  // Trusted folders panel: list + per-row revoke (see trusted-folders-store.ts).
+  const [trusted, setTrusted] = useState<TrustedFolderEntry[]>([]);
+  const [revoking, setRevoking] = useState<string | null>(null);
 
   // MCP form
   const [showAddMcp, setShowAddMcp] = useState(false);
@@ -97,6 +101,8 @@ export function ExtensionsView({
         setSkills(await window.desktop.listSkills());
       } else if (which === "plugins") {
         setPlugins(await window.desktop.listPlugins(marketplace));
+      } else if (which === "trust") {
+        setTrusted(await window.desktop.listTrustedFolders());
       } else {
         setHooks(await window.desktop.listHooks());
       }
@@ -110,6 +116,32 @@ export function ExtensionsView({
   useEffect(() => {
     void load(tab, showMarketplace && tab === "plugins");
   }, [tab, load, showMarketplace]);
+
+  const revokeTrust = useCallback(
+    async (path: string) => {
+      if (typeof window === "undefined" || !window.confirm) return;
+      if (!window.confirm(m.trustEntryRevokeConfirm)) return;
+      setRevoking(path);
+      setError(null);
+      setInfo(null);
+      try {
+        const flipped = await window.desktop.revokeTrustedFolder(path);
+        // Reload from disk so the panel reflects the canonical store
+        // (also picks up any concurrent agent-side writes — e.g. a
+        // `HooksAction::Untrust` fired from another session).
+        const next = await window.desktop.listTrustedFolders();
+        setTrusted(next);
+        setInfo(
+          flipped ? m.trustEntryRevoked : m.trustEntryRevokeFailed,
+        );
+      } catch (err) {
+        setError(`${m.trustEntryRevokeFailed}: ${errMsg(err)}`);
+      } finally {
+        setRevoking(null);
+      }
+    },
+    [m.trustEntryRevokeConfirm, m.trustEntryRevoked, m.trustEntryRevokeFailed],
+  );
 
   const q = filter.trim().toLowerCase();
 
@@ -202,6 +234,7 @@ export function ExtensionsView({
     { id: "skills", label: m.extTabSkills },
     { id: "plugins", label: m.extTabPlugins },
     { id: "hooks", label: m.extTabHooks },
+    { id: "trust", label: m.extTabTrust },
   ];
 
   return (
@@ -234,14 +267,16 @@ export function ExtensionsView({
       </div>
 
       <div className="ext-toolbar">
-        <input
-          className="ext-filter"
-          type="search"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder={m.extFilter}
-          aria-label={m.extFilter}
-        />
+        {tab === "trust" ? null : (
+          <input
+            className="ext-filter"
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder={m.extFilter}
+            aria-label={m.extFilter}
+          />
+        )}
         <button
           type="button"
           className="ext-btn"
@@ -614,6 +649,70 @@ export function ExtensionsView({
               </div>
             ))
           ))}
+
+        {tab === "trust" ? (
+          <section className="settings-card trust-panel">
+            <div className="settings-card-head">
+              <h2>{m.trustPanelTitle}</h2>
+              <p>{m.trustPanelSubtitle}</p>
+            </div>
+            {trusted.length === 0 && !busy ? (
+              <div className="ext-empty">{m.trustPanelEmpty}</div>
+            ) : (
+              <ul className="trust-list" role="list">
+                {trusted.map((entry) => (
+                  <li
+                    key={entry.path}
+                    className={`trust-row trust-row-${entry.trusted ? "trusted" : "declined"}`}
+                  >
+                    <div className="trust-row-main">
+                      <div className="trust-row-head">
+                        <span
+                          className={`ext-badge trust-status ${entry.trusted ? "ok" : "warn"}`}
+                        >
+                          {entry.trusted
+                            ? m.trustEntryTrusted
+                            : m.trustEntryDeclined}
+                        </span>
+                      </div>
+                      <div
+                        className="trust-row-path"
+                        title={entry.path}
+                      >
+                        <span className="trust-row-label">
+                          {m.trustEntryPathLabel}
+                        </span>{" "}
+                        <code>{entry.path}</code>
+                      </div>
+                      {entry.decidedAt ? (
+                        <div className="trust-row-decided">
+                          <span className="trust-row-label">
+                            {m.trustEntryDecidedAtLabel}
+                          </span>{" "}
+                          <time dateTime={entry.decidedAt}>
+                            {entry.decidedAt}
+                          </time>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="trust-row-actions">
+                      {entry.trusted ? (
+                        <button
+                          type="button"
+                          className="ext-btn"
+                          disabled={busy || revoking === entry.path}
+                          onClick={() => void revokeTrust(entry.path)}
+                        >
+                          {m.trustEntryRevoke}
+                        </button>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ) : null}
       </div>
 
       {hookPreview ? (

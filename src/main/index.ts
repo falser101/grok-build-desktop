@@ -2,6 +2,15 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import { join } from "node:path";
 import { AgentBackend } from "./backend";
 import {
+  runGrokInstaller,
+  getInstallerStatus,
+  checkForUpdate,
+  upgrade as upgradeInstaller,
+  getChannel,
+  setChannel,
+  type InstallerChannel,
+} from "./agent-installer";
+import {
   cancelLogin,
   getAccountStatus,
   logout as accountLogout,
@@ -35,10 +44,15 @@ import {
 } from "./model-providers";
 import { listWorkspaceDir, readWorkspaceFile } from "./workspace-fs";
 import { TerminalHost } from "./terminal-host";
+import {
+  listTrustedFolders,
+  revokeTrustedFolder,
+} from "./trusted-folders-store";
 import type {
   AccountLoginMethod,
   AskUserQuestionResponse,
   FetchModelsInput,
+  FolderTrustOutcome,
   McpServerScope,
   PlanApprovalOutcome,
   PromptPayload,
@@ -456,6 +470,19 @@ function registerIpc(): void {
   );
 
   ipcMain.handle(
+    "agent:respondTrustPrompt",
+    async (_e, requestId: string, outcome: FolderTrustOutcome) => {
+      if (typeof requestId !== "string" || !requestId.trim()) {
+        throw new Error("requestId is required");
+      }
+      if (outcome !== "trust" && outcome !== "reject") {
+        throw new Error("outcome must be 'trust' | 'reject'");
+      }
+      backend.respondTrustPrompt(requestId, outcome);
+    },
+  );
+
+  ipcMain.handle(
     "agent:respondPlanApproval",
     async (
       _e,
@@ -492,6 +519,16 @@ function registerIpc(): void {
         throw new Error("enabled must be a boolean");
       }
       await backend.setAlwaysApprove(enabled);
+    },
+  );
+
+  ipcMain.handle(
+    "agent:setAutoTrustNewSessions",
+    async (_e, enabled: boolean) => {
+      if (typeof enabled !== "boolean") {
+        throw new Error("enabled must be a boolean");
+      }
+      await backend.setAutoTrustNewSessions(enabled);
     },
   );
 
@@ -653,6 +690,21 @@ function registerIpc(): void {
     return getConfigPaths(workspaceCwd());
   });
 
+  // ── Folder trust store (~/.grok/trusted_folders.toml) ──────────
+
+  ipcMain.handle("trust:list", async () => {
+    return listTrustedFolders();
+  });
+  ipcMain.handle(
+    "trust:revoke",
+    async (_e, path: string) => {
+      if (typeof path !== "string" || !path.trim()) {
+        throw new Error("path is required");
+      }
+      return revokeTrustedFolder(path.trim());
+    },
+  );
+
   // ── Custom model providers ──────────────────────────────────────
 
   ipcMain.handle("models:listPresets", () => listPresets());
@@ -789,12 +841,53 @@ function registerIpc(): void {
     }
     await shell.openExternal(u);
   });
+
+  /**
+   * Drive the official `grok` CLI installer from inside the desktop app.
+   * Called by the renderer when the connection-error card's "Install" button
+   * is pressed. Returns the installer's combined stdout/stderr so the UI can
+   * show progress / final status without spawning a terminal.
+   */
+  ipcMain.handle("agent:install", async () => {
+    return runGrokInstaller();
+  });
+
+  ipcMain.handle("agent:installerStatus", async () => {
+    return getInstallerStatus();
+  });
+
+  ipcMain.handle("agent:checkForUpdate", async () => {
+    return checkForUpdate();
+  });
+
+  ipcMain.handle("agent:upgrade", async () => {
+    return upgradeInstaller();
+  });
+
+  ipcMain.handle("agent:getChannel", async () => {
+    return getChannel();
+  });
+
+  ipcMain.handle(
+    "agent:setChannel",
+    async (_e, channel: InstallerChannel) => {
+      if (channel !== "stable" && channel !== "alpha" && channel !== "enterprise") {
+        throw new Error(`Invalid channel: ${channel}`);
+      }
+      await setChannel(channel);
+      return getChannel();
+    },
+  );
 }
 
 app.whenReady().then(() => {
   setupApplicationMenu();
   registerIpc();
   createWindow();
+  // Installer lifecycle — runs once on boot. Refreshes channel,
+  // snapshots installer status, and kicks off a background update probe
+  // so the next render has fresh "update available" data.
+  void backend.initInstaller();
   void backend.connect().catch((err) => {
     console.error("auto-connect failed:", err);
   });

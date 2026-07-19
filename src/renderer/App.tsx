@@ -33,6 +33,7 @@ import type {
 import type { Messages } from "./i18n";
 import { localizeEffort } from "./i18n";
 import { AskUserQuestionModal } from "./AskUserQuestionModal";
+import { TrustPromptDialog } from "./TrustPromptDialog";
 import { MarkdownBody } from "./MarkdownBody";
 import { AccountMenu } from "./AccountMenu";
 import { ExtensionsView, type ExtTab } from "./ExtensionsView";
@@ -66,11 +67,14 @@ const initial: AppSnapshot = {
   timeline: [],
   sessions: [],
   availableModels: [],
+  installerStatus: { kind: "absent" },
+  installerChannel: "stable",
   availableCommands: [],
   sessionMode: "default",
   acceptsImages: true,
   busy: false,
   alwaysApprove: false,
+  autoTrustNewSessions: false,
   todos: [],
 };
 
@@ -1018,6 +1022,7 @@ function sessionStatusLabel(
   if (status === "loading") return m.sessionStatusLoading;
   if (status === "needs_question") return m.sessionStatusNeedsQuestion;
   if (status === "needs_permission") return m.sessionStatusNeedsPermission;
+  if (status === "needs_trust") return m.sessionStatusNeedsTrust;
   return undefined;
 }
 
@@ -1029,12 +1034,20 @@ function SessionStatusIcon({
   label?: string;
 }) {
   if (!status || status === "idle") return null;
-  if (status === "needs_permission" || status === "needs_question") {
+  if (
+    status === "needs_permission" ||
+    status === "needs_question" ||
+    status === "needs_trust"
+  ) {
+    const variant =
+      status === "needs_question"
+        ? "question"
+        : status === "needs_trust"
+          ? "trust"
+          : "";
     return (
       <span
-        className={`session-status-dot${
-          status === "needs_question" ? " question" : ""
-        }`}
+        className={`session-status-dot${variant ? ` ${variant}` : ""}`}
         title={label}
         aria-label={label}
         role="status"
@@ -2125,7 +2138,10 @@ export function App() {
   const workspaceName = snap.workspace
     ? projectFromCwd(snap.workspace)
     : null;
-  const canCompose = connectionReady && hasWorkspace;
+  const canCompose =
+    connectionReady &&
+    hasWorkspace &&
+    !snap.pendingTrustPrompt;
   const errorText = localError ?? snap.error;
   const loading =
     snap.connection === "starting" ||
@@ -2944,12 +2960,95 @@ export function App() {
     [snap.pendingQuestion],
   );
 
+  const onTrustPrompt = useCallback(
+    async (outcome: "trust" | "reject") => {
+      const req = snap.pendingTrustPrompt;
+      if (!req) return;
+      try {
+        await window.desktop.respondTrustPrompt(req.requestId, outcome);
+      } catch (err) {
+        setLocalError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [snap.pendingTrustPrompt],
+  );
+
   const onRetryConnect = useCallback(async () => {
     setLocalError(null);
     try {
       await window.desktop.connect();
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  // Installer state for the "Install automatically" button in the
+  // connection-error card. Survives only for the lifetime of the error
+  // card; a retry/successful install clears it.
+  const [installRunning, setInstallRunning] = useState(false);
+  const [installResult, setInstallResult] =
+    useState<Awaited<ReturnType<typeof window.desktop.installAgent>> | null>(
+      null,
+    );
+  const runInstaller = useCallback(async () => {
+    setInstallRunning(true);
+    setInstallResult(null);
+    try {
+      const result = await window.desktop.installAgent();
+      setInstallResult(result);
+      // On success, immediately retry connecting so the user doesn't have
+      // to click again — installer puts the binary in ~/.grok/bin which
+      // the next resolveGrokBinaryDetailed() will pick up.
+      if (result.ok) {
+        setLocalError(null);
+        try {
+          await window.desktop.connect();
+        } catch (err) {
+          setLocalError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    } catch (err) {
+      setInstallResult({
+        ok: false,
+        output: "",
+        code: null,
+        durationMs: 0,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setInstallRunning(false);
+    }
+  }, []);
+
+  /**
+   * "Upgrade" button inside the connection-error card. Same shape as
+   * runInstaller() but routes through `upgradeAgent()` so we get the
+   * rollback safety net. Reused by Settings → Agent → Upgrade.
+   */
+  const runUpgradeFromCard = useCallback(async () => {
+    setInstallRunning(true);
+    setInstallResult(null);
+    try {
+      const result = await window.desktop.upgradeAgent();
+      setInstallResult(result);
+      if (result.ok) {
+        setLocalError(null);
+        try {
+          await window.desktop.connect();
+        } catch (err) {
+          setLocalError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    } catch (err) {
+      setInstallResult({
+        ok: false,
+        output: "",
+        code: null,
+        durationMs: 0,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setInstallRunning(false);
     }
   }, []);
 
@@ -4005,10 +4104,17 @@ export function App() {
               connectionLabel={connectionLabel}
               alwaysApprove={snap.alwaysApprove}
               onSetAlwaysApprove={(on) => void onSetAlwaysApprove(on)}
+              autoTrustNewSessions={snap.autoTrustNewSessions}
+              onSetAutoTrustNewSessions={(on) =>
+                void window.desktop.setAutoTrustNewSessions(on)
+              }
               usage={snap.usage}
               onRefreshUsage={async () => {
                 await window.desktop.refreshUsage();
               }}
+              installerStatus={snap.installerStatus}
+              installerChannel={snap.installerChannel}
+              lastUpdateCheckAt={snap.lastUpdateCheckAt}
             />
           </div>
         ) : view === "extensions" ? (
@@ -4240,21 +4346,91 @@ export function App() {
                     <p className="hint">{m.homeHint}</p>
                     {errorText ? (
                       <div className="error-card">
-                        <strong>{m.cantReachAgent}</strong>
-                        {errorText}
+                        <strong>
+                          {/grok CLI was not found|grok.*not.*found|no such file/i.test(
+                            errorText,
+                          )
+                            ? m.agentMissingTitle
+                            : m.cantReachAgent}
+                        </strong>
+                        <pre className="error-card-body">{errorText}</pre>
+                        {installResult ? (
+                          <pre
+                            className={
+                              "error-card-body error-card-output" +
+                              (installResult.ok
+                                ? " error-card-output-ok"
+                                : " error-card-output-fail")
+                            }
+                          >
+                            {installResult.ok
+                              ? m.agentInstallDone +
+                                (installResult.path
+                                  ? ` (${installResult.path})`
+                                  : "")
+                              : `${m.agentInstallFailed}\n${installResult.error ?? ""}\n\n${installResult.output}`}
+                          </pre>
+                        ) : null}
                         <div className="actions">
                           <button
                             className="btn"
                             onClick={() => void onRetryConnect()}
+                            disabled={installRunning}
                           >
                             {m.retryConnect}
                           </button>
                           <button
                             className="btn primary"
                             onClick={() => void onNewSession()}
+                            disabled={installRunning}
                           >
                             {m.newSession}
                           </button>
+                          {snap.agentInstallUrl &&
+                          /grok CLI was not found|grok.*not.*found|no such file/i.test(
+                            errorText,
+                          ) &&
+                          // Hide install buttons once the binary is
+                          // already on disk in a working state — show
+                          // only when the user genuinely needs to (re-)
+                          // install. "update-available" is handled by
+                          // the dedicated Upgrade button below; the
+                          // transition states are self-explanatory.
+                          (snap.installerStatus.kind === "absent" ||
+                            snap.installerStatus.kind === "error") ? (
+                            <>
+                              <button
+                                className="btn primary"
+                                disabled={installRunning}
+                                onClick={() => void runInstaller()}
+                              >
+                                {installRunning
+                                  ? m.agentInstallRunning
+                                  : m.agentInstallAutoButton}
+                              </button>
+                              <button
+                                className="btn"
+                                onClick={() =>
+                                  void window.desktop
+                                    .openExternal(snap.agentInstallUrl!)
+                                    .catch(() => {
+                                      /* best-effort */
+                                    })
+                                }
+                              >
+                                {m.agentInstallButton}
+                              </button>
+                            </>
+                          ) : null}
+                          {snap.installerStatus.kind === "update-available" &&
+                          !installRunning ? (
+                            <button
+                              className="btn primary"
+                              onClick={() => void runUpgradeFromCard()}
+                            >
+                              {`${m.agentUpgrade} → v${snap.installerStatus.latest}`}
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     ) : null}
@@ -4317,6 +4493,16 @@ export function App() {
                   onConfirm={(optionId) => void onPermissionConfirm(optionId)}
                   onCancel={() => void onPermissionCancel()}
                   m={m}
+                />
+              ) : null}
+              {/* Folder-trust gate: surfaces above permission/question
+                  because the agent blocks turn start until the user grants
+                  trust — composer is also disabled below. */}
+              {snap.pendingTrustPrompt ? (
+                <TrustPromptDialog
+                  request={snap.pendingTrustPrompt}
+                  m={m}
+                  onResolve={(outcome) => void onTrustPrompt(outcome)}
                 />
               ) : null}
 
@@ -4546,7 +4732,9 @@ export function App() {
 
                 <div
                   className={`composer ${
-                    snap.pendingPermission ? "composer-dimmed" : ""
+                    snap.pendingPermission || snap.pendingTrustPrompt
+                      ? "composer-dimmed"
+                      : ""
                   } ${dragOver ? "composer-drag-over" : ""}`}
                   onDragEnter={(e) => {
                     e.preventDefault();
