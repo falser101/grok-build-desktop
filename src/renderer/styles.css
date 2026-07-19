@@ -199,7 +199,6 @@ body.is-resizing-panels .xterm {
   visibility: hidden;
 }
 
-body.is-resizing-panels .timeline,
 body.is-resizing-panels .file-viewer,
 body.is-resizing-panels .file-tree {
   content-visibility: hidden;

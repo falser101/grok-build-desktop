@@ -371,15 +371,9 @@ export interface Messages {
   sidePanelToggleHide: string;
   sidePanelFiles: string;
   sidePanelTerminal: string;
-  sidePanelReview: string;
-  sidePanelBrowser: string;
   sidePanelPlan: string;
-  sidePanelReviewHint: string;
-  sidePanelBrowserHint: string;
   sidePanelFilesShortcut: string;
   sidePanelTerminalShortcut: string;
-  sidePanelReviewShortcut: string;
-  sidePanelBrowserShortcut: string;
   sidePanelPlanShortcut: string;
   openFileTitle: string;
   openFileEmpty: string;
@@ -914,15 +908,9 @@ const en: Messages = {
   sidePanelToggleHide: "Close side panel",
   sidePanelFiles: "Files",
   sidePanelTerminal: "Terminal",
-  sidePanelReview: "Review",
-  sidePanelBrowser: "Browser",
   sidePanelPlan: "Plan / TODO",
-  sidePanelReviewHint: "Review is not available yet.",
-  sidePanelBrowserHint: "Browser is not available yet.",
   sidePanelFilesShortcut: "Ctrl+P",
   sidePanelTerminalShortcut: "Ctrl+`",
-  sidePanelReviewShortcut: "Ctrl+Shift+C",
-  sidePanelBrowserShortcut: "Ctrl+T",
   sidePanelPlanShortcut: "Ctrl+Shift+P",
   openFileTitle: "Open file",
   openFileEmpty: "Open a file",
@@ -1461,15 +1449,9 @@ const zh: Messages = {
   sidePanelToggleHide: "关闭右侧面板",
   sidePanelFiles: "文件",
   sidePanelTerminal: "终端",
-  sidePanelReview: "审阅",
-  sidePanelBrowser: "浏览器",
   sidePanelPlan: "计划 / TODO",
-  sidePanelReviewHint: "审阅功能暂未开放。",
-  sidePanelBrowserHint: "浏览器功能暂未开放。",
   sidePanelFilesShortcut: "Ctrl+P",
   sidePanelTerminalShortcut: "Ctrl+`",
-  sidePanelReviewShortcut: "Ctrl+Shift+C",
-  sidePanelBrowserShortcut: "Ctrl+T",
   sidePanelPlanShortcut: "Ctrl+Shift+P",
   openFileTitle: "打开文件",
   openFileEmpty: "打开文件",

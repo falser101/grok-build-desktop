@@ -33,6 +33,7 @@ import type {
 import type { Messages } from "./i18n";
 import { localizeEffort } from "./i18n";
 import { AskUserQuestionModal } from "./AskUserQuestionModal";
+
 import { TrustPromptDialog } from "./TrustPromptDialog";
 import { MarkdownBody } from "./MarkdownBody";
 import { AccountMenu } from "./AccountMenu";
@@ -1136,11 +1137,11 @@ export function App() {
   const [permIndex, setPermIndex] = useState(0);
   /**
    * Right side panel (Codex): top-right button toggles the whole region.
-   * Inside: tool menu → pick files / terminal / plan / review / browser.
+   * Inside: tool menu → pick files / terminal / plan.
    */
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<
-    "menu" | "files" | "terminal" | "plan" | "review" | "browser"
+    "menu" | "files" | "terminal" | "plan"
   >("menu");
   /**
    * True after the user manually closes the right panel during the current
@@ -3672,7 +3673,7 @@ export function App() {
   }, []);
 
   const openRightTool = useCallback(
-    (tab: "files" | "terminal" | "plan" | "review" | "browser") => {
+    (tab: "files" | "terminal" | "plan") => {
       if (tab === "terminal") setTermKeepAlive(true);
       setRightPanelTab(tab);
       setRightPanelOpen(true);
@@ -3733,17 +3734,6 @@ export function App() {
         e.stopPropagation();
         openRightTool("terminal");
         return;
-      }
-      if ((e.key === "c" || e.key === "C") && e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        openRightTool("review");
-        return;
-      }
-      if ((e.key === "t" || e.key === "T") && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        openRightTool("browser");
       }
     };
     document.addEventListener("keydown", onKey, true);
@@ -5540,37 +5530,6 @@ export function App() {
                 <button
                   type="button"
                   className="right-tools-item"
-                  onClick={() => setRightPanelTab("review")}
-                >
-                  <span className="right-tools-icon" aria-hidden>
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <path
-                        d="M3.5 2.5h6.2L12.5 5.3V13a.5.5 0 0 1-.5.5H3.5A.5.5 0 0 1 3 13V3a.5.5 0 0 1 .5-.5Z"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                      />
-                      <path
-                        d="M9.5 2.5V5h2.8"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                      />
-                      <path
-                        d="M5.2 8.6 6.8 10l3-3.2"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <span className="right-tools-label">{m.sidePanelReview}</span>
-                  <span className="right-tools-kbd">
-                    {m.sidePanelReviewShortcut}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="right-tools-item"
                   onClick={() => {
                     setTermKeepAlive(true);
                     setRightPanelTab("terminal");
@@ -5601,34 +5560,6 @@ export function App() {
                   </span>
                   <span className="right-tools-kbd">
                     {m.sidePanelTerminalShortcut}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="right-tools-item"
-                  onClick={() => setRightPanelTab("browser")}
-                >
-                  <span className="right-tools-icon" aria-hidden>
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <circle
-                        cx="8"
-                        cy="8"
-                        r="5.5"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                      />
-                      <path
-                        d="M2.5 8h11M8 2.5c1.6 1.7 2.4 3.5 2.4 5.5S9.6 11.8 8 13.5C6.4 11.8 5.6 10 5.6 8S6.4 4.2 8 2.5Z"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                      />
-                    </svg>
-                  </span>
-                  <span className="right-tools-label">
-                    {m.sidePanelBrowser}
-                  </span>
-                  <span className="right-tools-kbd">
-                    {m.sidePanelBrowserShortcut}
                   </span>
                 </button>
                 <button
@@ -5673,19 +5604,6 @@ export function App() {
                 onRespondApproval={respondPlanApproval}
                 onRefreshPlan={refreshPlanContent}
               />
-            ) : rightPanelTab === "review" || rightPanelTab === "browser" ? (
-              <div className="right-panel-placeholder">
-                <div className="right-panel-placeholder-title">
-                  {rightPanelTab === "review"
-                    ? m.sidePanelReview
-                    : m.sidePanelBrowser}
-                </div>
-                <div className="right-panel-placeholder-hint">
-                  {rightPanelTab === "review"
-                    ? m.sidePanelReviewHint
-                    : m.sidePanelBrowserHint}
-                </div>
-              </div>
             ) : null}
             {/* Terminal stays mounted after first open so the PTY session survives tab switches. */}
             {(rightPanelTab === "terminal" || termKeepAlive) && (
