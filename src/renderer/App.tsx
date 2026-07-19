@@ -4054,7 +4054,24 @@ export function App() {
                   className="history-timeline-track"
                   style={{ height: `${historyTrackHeightValue}px` }}
                 >
-                  <div className="history-timeline-track-line" />
+                  {(() => {
+                    // Constrain the connecting line to the vertical range
+                    // between the first and last tick. Without this it
+                    // spans the full track height and shows as a stray
+                    // vertical bar when there are only a few ticks.
+                    const ys = userTimelineItems
+                      .map((it) => historyTickY[it.id])
+                      .filter((v): v is number => typeof v === "number");
+                    if (ys.length < 2) return null;
+                    const top = Math.min(...ys);
+                    const bottom = Math.max(...ys);
+                    return (
+                      <div
+                        className="history-timeline-track-line"
+                        style={{ top: `${top}px`, bottom: `${historyTrackHeightValue - bottom}px` }}
+                      />
+                    );
+                  })()}
                   {userTimelineItems.map((item, idx) => {
                     const y = historyTickY[item.id];
                     if (typeof y !== "number") return null;

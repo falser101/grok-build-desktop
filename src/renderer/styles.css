@@ -1327,15 +1327,17 @@ body.is-resizing-panels .file-tree {
 }
 
 .history-timeline-track-line {
+  /* Spans only the range between the first and last tick (set inline),
+     so it doesn't show as a stray vertical line when there are few
+     ticks. Falls back to the full track when only one tick exists. */
   position: absolute;
-  top: 0;
-  bottom: 0;
   left: 50%;
   width: 1px;
   transform: translateX(-50%);
   background: color-mix(in srgb, var(--border) 80%, transparent);
   opacity: 0.7;
   border-radius: 1px;
+  pointer-events: none;
 }
 
 .history-timeline-tick {
