@@ -1326,19 +1326,9 @@ body.is-resizing-panels .file-tree {
   margin: auto 0;
 }
 
-.history-timeline-track-line {
-  /* Spans only the range between the first and last tick (set inline),
-     so it doesn't show as a stray vertical line when there are few
-     ticks. Falls back to the full track when only one tick exists. */
-  position: absolute;
-  left: 50%;
-  width: 1px;
-  transform: translateX(-50%);
-  background: color-mix(in srgb, var(--border) 80%, transparent);
-  opacity: 0.7;
-  border-radius: 1px;
-  pointer-events: none;
-}
+/* (Removed .history-timeline-track-line — the connecting vertical line
+   was distracting, especially when there were only a few ticks. Ticks
+   now stand on their own.) */
 
 .history-timeline-tick {
   position: absolute;
