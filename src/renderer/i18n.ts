@@ -51,6 +51,15 @@ export interface Messages {
   historyTimelineJump: string;
   /** Floating button above the composer that returns to the latest message. */
   jumpToBottom: string;
+  /** Per-turn collapsible group header (one per assistant response). */
+  turnGroupToggle: string;
+  /** Short label inside a turn group for the bundled thought + tool list. */
+  turnGroupInner: string;
+  /** Short label shown when a turn has no intermediate thought/tool calls. */
+  turnGroupEmpty: string;
+  /** Status text shown after a user message while the agent is preparing
+   *  its first response (no timeline output yet, but the agent is busy). */
+  turnPending: string;
   loadingConversation: string;
   compactRunning: string;
   compactRunningAuto: string;
@@ -519,6 +528,10 @@ const en: Messages = {
   historyTimelineTooltip: "Message history",
   historyTimelineJump: "Jump to this message",
   jumpToBottom: "Jump to latest message",
+  turnGroupToggle: "Thinking & tool calls",
+  turnGroupInner: "Show thinking and tool calls",
+  turnGroupEmpty: "No intermediate steps",
+  turnPending: "Thinking…",
   loadingConversation: "Loading conversation…",
   compactRunning: "Compacting conversation…",
   compactRunningAuto: "Auto-compacting conversation…",
@@ -992,6 +1005,10 @@ const zh: Messages = {
   historyTimelineTooltip: "消息时间轴",
   historyTimelineJump: "定位到这条消息",
   jumpToBottom: "回到最新消息",
+  turnGroupToggle: "思考与工具调用",
+  turnGroupInner: "查看思考与工具调用",
+  turnGroupEmpty: "没有中间步骤",
+  turnPending: "正在思考…",
   loadingConversation: "正在加载对话…",
   compactRunning: "正在压缩对话…",
   compactRunningAuto: "正在自动压缩对话…",

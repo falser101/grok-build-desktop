@@ -427,28 +427,6 @@ function previewText(text: string, max = 140): string {
   return `${one.slice(0, max - 1)}…`;
 }
 
-/** Pad a number to two digits. */
-function pad2(n: number): string {
-  return n < 10 ? `0${n}` : `${n}`;
-}
-
-/**
- * Format a wall-clock timestamp for the message hover tooltip.
- * Today: `HH:MM`; older: `YYYY-MM-DD HH:MM`.
- */
-function formatMessageTime(ts: number): string {
-  const d = new Date(ts);
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  const hh = pad2(d.getHours());
-  const mm = pad2(d.getMinutes());
-  if (sameDay) return `${hh}:${mm}`;
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${hh}:${mm}`;
-}
-
 type UserTimelineItem = Extract<TimelineItem, { kind: "user" }>;
 
 /**
@@ -571,7 +549,6 @@ const TimelineRow = memo(function TimelineRow({
     return <div className="system-line">{item.text}</div>;
   }
   if (item.kind === "user") {
-    const time = item.createdAt ? formatMessageTime(item.createdAt) : null;
     return (
       <div
         className={`msg msg-user${highlight ? " msg-flash" : ""}`}
@@ -585,16 +562,10 @@ const TimelineRow = memo(function TimelineRow({
             <MsgCopyButton item={item} m={m} />
           </div>
         </div>
-        {time ? (
-          <div className="msg-time" title={time}>
-            {time}
-          </div>
-        ) : null}
       </div>
     );
   }
   if (item.kind === "assistant") {
-    const time = item.createdAt ? formatMessageTime(item.createdAt) : null;
     return (
       <div className="msg msg-assistant">
         <div className="msg-bubble">
@@ -608,17 +579,14 @@ const TimelineRow = memo(function TimelineRow({
             streaming={item.streaming}
           />
         </div>
-        {time ? (
-          <div className="msg-time" title={time}>
-            {time}
-          </div>
-        ) : null}
       </div>
     );
   }
   if (item.kind === "thought") {
+    // Default-open when nested inside a turn-group so the user sees the
+    // thought text immediately after expanding the per-turn toggle.
     return (
-      <details className="thought msg-assistant">
+      <details className="thought msg-assistant" open>
         <summary className="thought-summary">
           <span className="thought-summary-label">
             {item.streaming ? m.thoughtStreaming : m.thought}
@@ -669,17 +637,221 @@ const TimelineRow = memo(function TimelineRow({
   return null;
 });
 
+/** A single assistant "turn" — one assistant text plus all of its
+ *  intermediate thoughts / tool calls / compact events. */
+type TurnGroup = {
+  /** Stable id for React key + scroll-jump anchor. */
+  id: string;
+  /** Final assistant text for this turn (may be null if only tool calls). */
+  assistant: Extract<TimelineItem, { kind: "assistant" }> | null;
+  /** Everything between this assistant text and the next one. */
+  extras: TimelineItem[];
+};
+
+/** Flatten timeline → user/system rows + per-turn groups.
+ *  Rule: an assistant text starts a new turn; everything between it and the
+ *  next assistant text belongs to this turn. user/system rows are emitted
+ *  inline so they retain their original ordering. */
+function groupTimelineForTurns(timeline: TimelineItem[]): Array<
+  | { kind: "row"; item: TimelineItem }
+  | { kind: "turn"; turn: TurnGroup }
+> {
+  const out: Array<
+    | { kind: "row"; item: TimelineItem }
+    | { kind: "turn"; turn: TurnGroup }
+  > = [];
+  let current: TurnGroup | null = null;
+
+  const flush = () => {
+    if (current && (current.assistant || current.extras.length > 0)) {
+      out.push({ kind: "turn", turn: current });
+    }
+    current = null;
+  };
+
+  for (const item of timeline) {
+    if (item.kind === "assistant") {
+      // New turn — close the previous one and start a fresh group whose
+      // anchor is this assistant text.
+      flush();
+      current = {
+        id: item.id,
+        assistant: item,
+        extras: [],
+      };
+      continue;
+    }
+    if (item.kind === "user" || item.kind === "system") {
+      // user/system always render standalone (turns collapse around them).
+      flush();
+      out.push({ kind: "row", item });
+      continue;
+    }
+    // thought / tool / compact: attach to the current turn if any, otherwise
+    // start an orphan turn so the items aren't lost.
+    if (!current) {
+      current = {
+        id: `orphan-${item.id}`,
+        assistant: null,
+        extras: [],
+      };
+    }
+    current.extras.push(item);
+  }
+  flush();
+  return out;
+}
+
+/** One assistant turn — collapses the intermediate thought/tool chain by
+ *  default. While the turn is still streaming it stays expanded so the user
+ *  can watch it type. Once the turn ends, default is collapsed.
+ *
+ *  Layout: the toggle (when there are extras) sits *inside* the assistant
+ *  message, right under the "Grok" role head. That way it visually belongs
+ *  to the same turn instead of floating as a separate row above it. */
+const TurnGroupView = memo(function TurnGroupView({
+  turn,
+  m,
+  highlight,
+}: {
+  turn: TurnGroup;
+  m: Messages;
+  highlight: boolean;
+}) {
+  const isStreaming = Boolean(turn.assistant?.streaming);
+  // Default: collapsed once the turn has settled. While streaming we keep
+  // it open so the user can follow the live output (and so newly arriving
+  // intermediate steps are visible).
+  const [open, setOpen] = useState<boolean>(isStreaming);
+
+  // Auto-expand on stream start, auto-collapse when stream ends AND the
+  // user hasn't manually toggled yet. We track that with a ref so we don't
+  // override an explicit click.
+  const userToggledRef = useRef(false);
+  useEffect(() => {
+    if (isStreaming) {
+      if (!userToggledRef.current) setOpen(true);
+    } else {
+      if (!userToggledRef.current) setOpen(false);
+    }
+  }, [isStreaming]);
+
+  const onToggle = (e: ReactMouseEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    userToggledRef.current = true;
+    setOpen((v) => !v);
+  };
+
+  const hasExtras = turn.extras.length > 0;
+  const assistantText = turn.assistant?.text ?? "";
+  const assistantStreaming = Boolean(turn.assistant?.streaming);
+
+  // If there's no assistant text, fall back to the original layout:
+  // extras first, then nothing. (Orphan turns with only tool calls.)
+  if (!turn.assistant) {
+    return (
+      <div
+        className={`turn-group${open ? " is-open" : ""}`}
+        id={msgDomId(turn.id)}
+      >
+        {hasExtras ? (
+          <div className="turn-group-extras">
+            <button
+              type="button"
+              className="turn-group-toggle"
+              aria-expanded={open}
+              onClick={onToggle}
+              title={m.turnGroupToggle}
+            >
+              <span className={`turn-chev ${open ? "open" : ""}`} aria-hidden>
+                ▸
+              </span>
+              <span className="turn-group-label">
+                {`${m.turnGroupToggle} · ${turn.extras.length}`}
+              </span>
+            </button>
+            {open ? (
+              <div className="turn-group-extras-list">
+                {turn.extras.map((it) => (
+                  <TimelineRow
+                    key={it.id}
+                    item={it}
+                    m={m}
+                    highlight={false}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`msg msg-assistant turn-group${open ? " is-open" : ""}${
+        isStreaming ? " is-streaming" : ""
+      }${highlight ? " msg-flash" : ""}`}
+      id={msgDomId(turn.id)}
+    >
+      <div className="msg-bubble">
+        <div className="msg-head">
+          <div className="msg-role assistant">{m.grok}</div>
+          <MsgCopyButton item={turn.assistant} m={m} />
+        </div>
+
+        {/* Extras toggle lives *inside* the bubble, right under the head,
+            so it's visually part of the same turn. */}
+        {hasExtras ? (
+          <button
+            type="button"
+            className="turn-group-toggle"
+            aria-expanded={open}
+            onClick={onToggle}
+            title={open ? m.turnGroupToggle : m.turnGroupInner}
+          >
+            <span className={`turn-chev ${open ? "open" : ""}`} aria-hidden>
+              ▸
+            </span>
+            <span className="turn-group-label">
+              {`${m.turnGroupToggle} · ${turn.extras.length}`}
+            </span>
+          </button>
+        ) : null}
+
+        {hasExtras && open ? (
+          <div className="turn-group-extras-list">
+            {turn.extras.map((it) => (
+              <TimelineRow key={it.id} item={it} m={m} highlight={false} />
+            ))}
+          </div>
+        ) : null}
+
+        <MarkdownBody
+          className="msg-body"
+          text={assistantText}
+          streaming={assistantStreaming}
+        />
+      </div>
+    </div>
+  );
+});
+
 /** Isolated so composer keystrokes don't re-render the whole timeline tree. */
 const ChatTimeline = memo(function ChatTimeline({
   timeline,
   replaying,
   flashMsgId,
+  busy,
   m,
   bottomRef,
 }: {
   timeline: TimelineItem[];
   replaying: boolean;
   flashMsgId: string | null;
+  busy: boolean;
   m: Messages;
   bottomRef: RefObject<HTMLDivElement | null>;
 }) {
@@ -695,16 +867,41 @@ const ChatTimeline = memo(function ChatTimeline({
       </div>
     );
   }
+  const segments = useMemo(() => groupTimelineForTurns(timeline), [timeline]);
+  // Show the "thinking" indicator right after the user message when the
+  // agent is busy but no assistant text / thought has landed yet.
+  const lastItem = timeline[timeline.length - 1];
+  const lastIsUser = lastItem?.kind === "user";
+  const showPending = busy && lastIsUser;
   return (
     <div className="timeline">
-      {timeline.map((item) => (
-        <TimelineRow
-          key={item.id}
-          item={item}
-          m={m}
-          highlight={flashMsgId === item.id}
-        />
-      ))}
+      {segments.map((seg) =>
+        seg.kind === "row" ? (
+          <TimelineRow
+            key={seg.item.id}
+            item={seg.item}
+            m={m}
+            highlight={flashMsgId === seg.item.id}
+          />
+        ) : (
+          <TurnGroupView
+            key={seg.turn.id}
+            turn={seg.turn}
+            m={m}
+            highlight={flashMsgId === seg.turn.id}
+          />
+        ),
+      )}
+      {showPending ? (
+        <div className="turn-pending" role="status" aria-live="polite">
+          <span className="turn-pending-dots" aria-hidden>
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className="turn-pending-label">{m.turnPending}</span>
+        </div>
+      ) : null}
       <div ref={bottomRef} />
     </div>
   );
@@ -4072,6 +4269,7 @@ export function App() {
                     timeline={snap.timeline}
                     replaying={Boolean(snap.replaying)}
                     flashMsgId={flashMsgId}
+                    busy={Boolean(snap.busy)}
                     m={m}
                     bottomRef={bottomRef}
                   />

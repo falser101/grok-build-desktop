@@ -1690,6 +1690,120 @@ body.is-resizing-panels .file-tree {
   max-width: none;
 }
 
+/* ── Per-turn collapsible group ─────────────────────
+   Minimal: just a small clickable text row, no background, no border.
+   Intermediate thoughts / tool calls live *before* the final assistant
+   text — "think / act, then respond". */
+.turn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Match .msg scroll-margin so timeline jumps land cleanly. */
+  scroll-margin-top: 52px;
+}
+
+.turn-group-extras {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.turn-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  align-self: flex-start;
+  user-select: none;
+}
+
+.turn-group-toggle:hover {
+  color: var(--text-muted);
+}
+
+.turn-group-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Live streaming: small accent tint on the toggle label. */
+.turn-group.is-streaming .turn-group-toggle {
+  color: var(--text-muted);
+}
+.turn-group.is-streaming .turn-group-toggle .turn-chev {
+  animation: turn-pulse 1.4s ease-in-out infinite;
+}
+
+.turn-chev {
+  display: inline-block;
+  font-size: 9px;
+  line-height: 1;
+  transition: transform 0.14s ease;
+}
+
+.turn-chev.open {
+  transform: rotate(90deg);
+}
+
+.turn-group-label {
+  white-space: nowrap;
+}
+
+.turn-group-extras-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+@keyframes turn-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+
+/* ── Pending turn indicator ─────────────────────────
+   Shown immediately after the user sends a message, while the agent is
+   busy but hasn't yet produced any timeline output. Minimal text + dots. */
+.turn-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.turn-pending-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.turn-pending-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+  animation: turn-pending-dot 1.2s ease-in-out infinite;
+}
+
+.turn-pending-dots span:nth-child(2) { animation-delay: 0.15s; }
+.turn-pending-dots span:nth-child(3) { animation-delay: 0.3s;  }
+
+@keyframes turn-pending-dot {
+  0%, 80%, 100% { opacity: 0.3; }
+  40%           { opacity: 0.9; }
+}
+
 .msg {
   display: flex;
   flex-direction: column;
@@ -1741,32 +1855,7 @@ body.is-resizing-panels .file-tree {
   right: 4px;
 }
 
-/* Hover-revealed timestamp rendered below the bubble. Subtle by default
-   so it doesn't clutter the conversation; brightens on hover for clarity. */
-.msg-time {
-  flex: 0 0 auto;
-  font-size: 11px;
-  color: var(--text-dim);
-  letter-spacing: 0.01em;
-  padding: 0 4px;
-  opacity: 0.45;
-  transition: opacity 0.14s ease, color 0.14s ease;
-}
-
-/* User messages right-align their time to mirror the bubble's edge. */
-.msg.msg-user .msg-time {
-  align-self: flex-end;
-}
-
-/* Assistant messages left-align their time under the bubble. */
-.msg.msg-assistant .msg-time {
-  align-self: flex-start;
-}
-
-.msg:hover .msg-time {
-  opacity: 1;
-  color: var(--text-muted);
-}
+/* Per-message timestamps removed — no .msg-time rules needed. */
 
 .msg.msg-assistant .msg-bubble {
   max-width: min(100%, 46rem);
@@ -1783,6 +1872,13 @@ body.is-resizing-panels .file-tree {
   align-self: flex-start;
   max-width: min(100%, 46rem);
   width: 100%;
+}
+
+/* Inside a turn-group extras list, don't force full-width — let the inner
+   content size naturally and align to the assistant edge. */
+.turn-group-extras-list .thought.msg-assistant {
+  max-width: 100%;
+  width: auto;
 }
 
 .system-line.loading-conversation {
@@ -2137,6 +2233,17 @@ body.is-resizing-panels .file-tree {
   overflow: hidden;
   content-visibility: auto;
   contain-intrinsic-size: auto 48px;
+}
+
+/* When a thought is nested inside a turn-group extras list, soften its
+   chrome so it doesn't compete with the outer assistant bubble. */
+.turn-group-extras-list .thought {
+  border-color: transparent;
+  background: transparent;
+}
+.turn-group-extras-list .thought[open] > .thought-summary {
+  /* Keep the summary subtle when expanded. */
+  color: var(--text-dim);
 }
 
 .thought summary,
