@@ -260,6 +260,18 @@ export interface Messages {
   accountLoginHelp: string;
   accountSignedIn: string;
   accountSignedInAs: string;
+  /**
+   * Tooltip on the account menu trigger when the desktop is connected
+   * to agent serve but no Grok credentials exist (no `grok login`, no
+   * `XAI_API_KEY`, no desktop-stored key). Custom providers can still
+   * be used.
+   */
+  accountAvailableFalseHint: string;
+  /**
+   * Banner on the chat composer when Grok official models are
+   * unavailable due to no login. Allows continuing (custom providers work).
+   */
+  accountRequiredForGrokHint: string;
   accountSessionActive: string;
   accountReconnect: string;
   accountReconnected: string;
@@ -871,6 +883,10 @@ const en: Messages = {
   connectionStatus: "Connection",
   signedInAs: "Signed in as",
   notSignedIn: "Not signed in",
+  accountAvailableFalseHint:
+    "Not logged in — Grok official models are unavailable. Configure a custom provider in Settings → Models, or sign in.",
+  accountRequiredForGrokHint:
+    "Grok official models require sign-in (Settings → Account) or XAI_API_KEY. Custom providers still work.",
   aboutSection: "About",
   aboutSectionDesc: "Application information.",
   appName: "Grok Build Desktop",
@@ -1414,6 +1430,10 @@ const zh: Messages = {
   connectionStatus: "连接状态",
   signedInAs: "当前账号",
   notSignedIn: "未登录",
+  accountAvailableFalseHint:
+    "未登录 —— Grok 官方模型不可用。可以前往 设置 → 模型 配置自定义提供商，或登录后再用。",
+  accountRequiredForGrokHint:
+    "Grok 官方模型需要登录（设置 → 账号）或配置 XAI_API_KEY；自定义提供商仍可使用。",
   aboutSection: "关于",
   aboutSectionDesc: "应用信息。",
   appName: "Grok Build 桌面端",

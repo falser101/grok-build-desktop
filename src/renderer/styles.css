@@ -831,6 +831,24 @@ body.is-resizing-panels .file-tree {
   color: var(--text-dim);
 }
 
+/* "未登录" pill on the AccountMenu trigger. Red dot accents the
+   account name so users see at a glance that official Grok models
+   are unavailable, without hiding the rest of the UI. */
+.account-trigger-unauth {
+  flex: 0 0 auto;
+  margin: 0 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-bright, #fff);
+  background: rgba(220, 38, 38, 0.85);
+  border: 1px solid rgba(220, 38, 38, 0.4);
+  cursor: help;
+  user-select: none;
+}
+
 .account-popover {
   position: fixed;
   min-width: 220px;
@@ -3494,6 +3512,24 @@ html[data-theme="light"] .workspace-bar {
   padding: 10px 12px;
   font-size: 12px;
   color: var(--text-dim);
+}
+
+/* In-dropdown informational banner. `.warn` variant highlights that a
+   selection (official Grok model) won't work until you sign in or add
+   an API key — but doesn't block sending to any provider. */
+.dropdown-notice {
+  padding: 8px 12px;
+  margin: 4px 6px 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 8px;
+  background: rgba(250, 204, 21, 0.08);
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  color: var(--text-bright, #fff);
+}
+.dropdown-notice.warn {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.45);
 }
 
 /* ── Prompt history (↑ browse / /history search) ─── */

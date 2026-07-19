@@ -113,6 +113,26 @@ export async function accountEnvOverlay(): Promise<Record<string, string>> {
 
 // ── Status ──────────────────────────────────────────────────────────
 
+/**
+ * True iff SOME credential source is configured — either a previously
+ * completed `grok login` (auth.json), a desktop-stored API key, or an
+ * inline env var. Used by `connectInner` to decide whether to call the
+ * agent's `authenticate` step. When this returns `false`, the desktop
+ * stays connected but `authenticated = false`; users can still chat via
+ * custom providers.
+ */
+export async function hasAnyAuth(): Promise<boolean> {
+  if (process.env.XAI_API_KEY?.trim() || process.env.GROK_CODE_XAI_API_KEY?.trim()) {
+    return true;
+  }
+  const desktop = await readDesktopApiKey();
+  if (desktop) return true;
+  const entries = await readAuthEntries();
+  return entries.some(
+    (e) => !!(e.email || e.key || e.refresh_token),
+  );
+}
+
 export async function getAccountStatus(): Promise<AccountStatus> {
   const entries = await readAuthEntries();
   const primary = pickPrimaryEntry(entries);

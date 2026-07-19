@@ -738,6 +738,15 @@ export class AgentBackend {
   private acceptsImages = true;
   private agentVersion?: string;
   private accountEmail?: string;
+  /**
+   * True iff SOMETHING lets the agent authenticate to the official Grok
+   * account — `grok login` cached token, desktop-stored API key, or
+   * inline env var. When false, the desktop stays connected but skips
+   * the agent's `authenticate` step, and the renderer shows "未登录" so
+   * users know Grok official models won't work but custom providers can
+   * still be used.
+   */
+  private accountAvailable = false;
   private usage?: UsageInfo;
   private timeline: TimelineItem[] = [];
   private sessions: SessionSummary[] = [];
@@ -871,6 +880,13 @@ export class AgentBackend {
       acceptsImages: this.acceptsImages,
       agentVersion: this.agentVersion,
       accountEmail: this.accountEmail,
+      /**
+       * True iff the desktop thinks the agent can reach an account.
+       * When false the renderer shows "未登录" and warns that official
+       * Grok models need a login (or XAI_API_KEY); custom providers
+       * configured with their own keys still work.
+       */
+      accountAvailable: this.accountAvailable,
       usage: this.usage ? { ...this.usage, summaryLines: [...this.usage.summaryLines] } : undefined,
       // slice is enough — Electron IPC structured-clones; avoid per-item spreads.
       timeline: this.timeline.slice(),
@@ -2198,24 +2214,41 @@ export class AgentBackend {
     }
     const defaultAuth = asString(meta?.defaultAuthMethodId) ?? "cached_token";
 
-    try {
-      const authResult = asRecord(
-        await this.client.request("authenticate", { methodId: defaultAuth }),
-      );
-      const authMeta = asRecord(authResult?._meta);
-      this.accountEmail = asString(authMeta?.email);
+    // Soft auth: only require a Grok credential when one is actually
+    // configured. If the user hasn't logged in AND there's no API key
+    // anywhere (env / desktop-store / auth.json), we leave the connection
+    // alive, skip `authenticate`, and surface "未登录" to the UI. Custom
+    // providers configured in Settings → Models can still be used; only
+    // official Grok models will be unusable.
+    const { hasAnyAuth } = await import("./account-manager");
+    this.accountAvailable = await hasAnyAuth();
+    if (this.accountAvailable) {
+      try {
+        const authResult = asRecord(
+          await this.client.request("authenticate", { methodId: defaultAuth }),
+        );
+        const authMeta = asRecord(authResult?._meta);
+        this.accountEmail = asString(authMeta?.email);
+        this.log(
+          "info",
+          `Authenticated as ${this.accountEmail ?? "(unknown)"} via ${defaultAuth}`,
+        );
+        this.authenticated = true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `Authentication failed (${defaultAuth}): ${message}. Sign in from Settings → Account, or run \`grok login\`.`,
+        );
+      }
+    } else {
+      this.authenticated = false;
+      this.accountEmail = undefined;
       this.log(
-        "info",
-        `Authenticated as ${this.accountEmail ?? "(unknown)"} via ${defaultAuth}`,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        `Authentication failed (${defaultAuth}): ${message}. Sign in from Settings → Account, or run \`grok login\`.`,
+        "warn",
+        "No Grok credentials configured — skipping agent authenticate. " +
+          "Custom providers still work; official Grok models will be unavailable until you log in or set XAI_API_KEY.",
       );
     }
-
-    this.authenticated = true;
     // Re-apply YOLO so agent serve matches desktop / config preference.
     if (this.alwaysApprove) {
       this.notifyYoloMode(true);

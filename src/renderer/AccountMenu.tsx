@@ -13,6 +13,17 @@ interface AccountMenuProps {
   agentVersion?: string | null;
   usage?: UsageInfo | null;
   signedIn?: boolean;
+  /**
+   * True iff ANY Grok credential is available (login / env var /
+   * desktop-stored key). When false, the trigger shows a small
+   * "未登录" badge so users know official models are off, but they can
+   * still use custom providers.
+   */
+  accountAvailable?: boolean;
+  /**
+   * Tooltip for the "未登录" badge.
+   */
+  accountAvailableFalseHint?: string;
   loginBusy?: boolean;
   onOpenSettings: () => void;
   onLoginBrowser?: () => void;
@@ -35,6 +46,8 @@ export function AccountMenu({
   agentVersion,
   usage,
   signedIn,
+  accountAvailable,
+  accountAvailableFalseHint,
   loginBusy,
   onOpenSettings,
   onLoginBrowser,
@@ -453,6 +466,15 @@ export function AccountMenu({
               : displaySub}
           </span>
         </span>
+        {accountAvailable === false ? (
+          <span
+            className="account-trigger-unauth"
+            title={accountAvailableFalseHint}
+            aria-label={accountAvailableFalseHint}
+          >
+            {m.notSignedIn}
+          </span>
+        ) : null}
         <span className="account-trigger-chev" aria-hidden>
           {open ? "▾" : "▴"}
         </span>

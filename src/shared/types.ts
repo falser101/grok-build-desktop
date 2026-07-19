@@ -377,6 +377,12 @@ export interface AppSnapshot {
   acceptsImages: boolean;
   agentVersion?: string;
   accountEmail?: string;
+  /**
+   * False when no Grok credentials are configured anywhere. Connection
+   * stays ready; users can still use custom model providers. Renderer
+   * surfaces "未登录" hint in this state.
+   */
+  accountAvailable?: boolean;
   /** Coding credit / subscription usage (from `x.ai/billing`). */
   usage?: UsageInfo;
   timeline: TimelineItem[];
