@@ -2013,7 +2013,11 @@ export class AgentBackend {
       await this.connecting;
       return;
     }
-    if (this.authenticated && this.client?.connected && this.connection === "ready") {
+    // Skip only when the WebSocket is alive AND we're already ready.
+    // Soft-auth users (`authenticated=false` because no Grok creds) have
+    // a perfectly usable connection — we just skip the agent's
+    // `authenticate` step, so don't gate on `authenticated` here.
+    if (this.client?.connected && this.connection === "ready") {
       return;
     }
     this.connecting = this.connectInner().finally(() => {
@@ -2388,7 +2392,14 @@ export class AgentBackend {
   }
 
   private requireClient(): AcpClient {
-    if (!this.client || !this.client.connected || !this.authenticated) {
+    // `authenticated` is intentionally NOT part of this check. It tracks
+    // "is the user signed into a Grok account" — unrelated to whether the
+    // WebSocket to agent serve is alive. When the user has no Grok
+    // credential but wants to use custom providers, `authenticated` is
+    // false but the client is connected and usable. Methods that genuinely
+    // need a logged-in account (e.g. usage polling) gate on
+    // `authenticated` separately.
+    if (!this.client || !this.client.connected) {
       throw new Error("Agent is not connected");
     }
     return this.client;
@@ -2597,7 +2608,9 @@ export class AgentBackend {
    * Prefer `_x.ai/commands/list` (agent-serve wire); fall back to unprefixed.
    */
   async refreshCommands(): Promise<void> {
-    if (!this.client || !this.client.connected || !this.authenticated) return;
+    // Skip only when the WebSocket isn't up. Custom-provider users can
+    // legitimately use slash commands without a Grok account.
+    if (!this.client || !this.client.connected) return;
     const client = this.client;
     const params: Record<string, JsonValue> = {};
     if (this.workspace) params.cwd = this.workspace;
@@ -4000,6 +4013,12 @@ export class AgentBackend {
     if (!this.sessionId) {
       throw new Error("No active session — create or open one first");
     }
+
+    // Soft-auth note: when `accountAvailable` is false the agent has no
+    // Grok credential, so any prompt sent against an official Grok model
+    // will be rejected with "auth required" by the agent itself. We let
+    // that error bubble up; the dropdown notice in the renderer already
+    // nudges the user to switch to a custom provider.
     const client = this.requireClient();
     if (this.busy) throw new Error("A prompt is already running in this session");
 
