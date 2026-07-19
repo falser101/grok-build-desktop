@@ -99,6 +99,8 @@ const api: DesktopApi = {
       filterSessionId,
     ) as Promise<string[]>,
   cancel: () => ipcRenderer.invoke("agent:cancel") as Promise<void>,
+  cancelSession: (sessionId: string) =>
+    ipcRenderer.invoke("agent:cancelSession", sessionId) as Promise<void>,
   respondPermission: (requestId: string, optionId: string | null) =>
     ipcRenderer.invoke(
       "agent:respondPermission",

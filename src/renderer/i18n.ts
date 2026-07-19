@@ -33,6 +33,14 @@ export interface Messages {
   sessionStatusNeedsQuestion: string;
   /** Sidebar: session is waiting for a folder-trust grant. */
   sessionStatusNeedsTrust: string;
+  /** Composer-anchored banner: another session needs your attention (singular). */
+  waitingSessionsBannerSingle: string;
+  /** Composer-anchored banner: title when N>1 sessions are waiting. */
+  waitingSessionsBannerMany: string;
+  /** aria-label for the waiting-sessions banner region. */
+  waitingSessionsBannerLabel: string;
+  /** Tooltip on the inline cancel button next to a waiting session row. */
+  cancelSessionTooltip: string;
 
   // Home
   greeting: string;
@@ -430,6 +438,10 @@ export interface Messages {
   planApprovalFeedbackPlaceholder: string;
   planApprovalSendFeedback: string;
   planApprovalCancelFeedback: string;
+  /** "{n}/{total}" for the running-plan pill above the composer. */
+  planProgressStep: string;
+  /** "{n}" pending after the current step in the same pill. */
+  planProgressPending: string;
 
   // Folder-trust prompt (x.ai/folder_trust/request)
   trustKicker: string;
@@ -631,6 +643,10 @@ const en: Messages = {
   sessionStatusNeedsPermission: "Needs approval",
   sessionStatusNeedsQuestion: "Needs answers",
   sessionStatusNeedsTrust: "Needs trust",
+  waitingSessionsBannerSingle: "Another session needs your attention",
+  waitingSessionsBannerMany: "{n} other sessions need your attention",
+  waitingSessionsBannerLabel: "Sessions waiting for your input",
+  cancelSessionTooltip: "Cancel this session's turn",
 
   greeting: "What's up next?",
   homeHint:
@@ -971,6 +987,8 @@ const en: Messages = {
   planApprovalFeedbackPlaceholder: "Describe what to change…",
   planApprovalSendFeedback: "Send feedback",
   planApprovalCancelFeedback: "Back",
+  planProgressStep: "Step {n} / {total}",
+  planProgressPending: "{n} more",
 
   trustKicker: "Trust folder",
   trustTitle: "Trust this workspace?",
@@ -1179,6 +1197,10 @@ const zh: Messages = {
   sessionStatusNeedsPermission: "等待审批",
   sessionStatusNeedsQuestion: "等待回答",
   sessionStatusNeedsTrust: "等待信任",
+  waitingSessionsBannerSingle: "另一个会话正在等你的处理",
+  waitingSessionsBannerMany: "还有 {n} 个会话等你的处理",
+  waitingSessionsBannerLabel: "等待你处理的会话",
+  cancelSessionTooltip: "停止该会话的当前轮次",
 
   greeting: "接下来做什么？",
   homeHint:
@@ -1510,6 +1532,8 @@ const zh: Messages = {
   planApprovalFeedbackPlaceholder: "说明需要如何修改…",
   planApprovalSendFeedback: "发送反馈",
   planApprovalCancelFeedback: "返回",
+  planProgressStep: "第 {n} / {total} 步",
+  planProgressPending: "还有 {n} 步",
 
   trustKicker: "信任文件夹",
   trustTitle: "信任此工作区？",

@@ -433,6 +433,13 @@ function registerIpc(): void {
   });
 
   ipcMain.handle(
+    "agent:cancelSession",
+    async (_e, sessionId: string) => {
+      await backend.cancelSession(sessionId);
+    },
+  );
+
+  ipcMain.handle(
     "agent:respondPermission",
     async (_e, requestId: string, optionId: string | null) => {
       if (typeof requestId !== "string" || !requestId.trim()) {

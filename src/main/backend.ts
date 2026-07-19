@@ -1147,10 +1147,12 @@ export class AgentBackend {
       : null;
 
     this.hydrateFromRuntime(rt);
+    this.parkedDepth++;
     try {
       fn();
       this.syncActiveIntoRuntimes();
     } finally {
+      this.parkedDepth--;
       if (focusSnap) {
         this.hydrateFromRuntime(focusSnap);
       } else {
@@ -1169,6 +1171,13 @@ export class AgentBackend {
         this.inThinkTag = false;
         this.thinkHold = "";
         this.tokensUsed = undefined;
+      }
+      // Flush any deferred snapshot now that focus is restored. The
+      // snapshot will reflect the user's focused session's sessionId and
+      // timeline, with `sessions[].status` still correct (per-session).
+      if (this.parkedDepth === 0 && this.parkedEmitPending) {
+        this.parkedEmitPending = false;
+        this.emitSnapshot();
       }
     }
   }
@@ -1745,6 +1754,17 @@ export class AgentBackend {
     this.emitSnapshot();
   }
 
+  /**
+   * Reentrancy guard for emitSnapshot / emitSnapshotThrottled. While we are
+   * inside a withParkedRuntime block the active fields are temporarily the
+   * parked session's data — emitting a snapshot at that moment would cause
+   * the renderer's focused session to flip to the parked one, "scrambling"
+   * the chat the user is currently reading. We suppress emits while parked
+   * and flush a single emit on the way out (after focus is restored).
+   */
+  private parkedDepth = 0;
+  private parkedEmitPending = false;
+
   private emitSnapshot(): void {
     // Flush any pending throttled stream frame first so order stays consistent.
     if (this.streamSnapTimer) {
@@ -1752,11 +1772,23 @@ export class AgentBackend {
       this.streamSnapTimer = null;
     }
     this.streamSnapPending = false;
+    if (this.parkedDepth > 0) {
+      // Don't emit while focus is hijacked — defer until withParkedRuntime
+      // restores the user's focused session.
+      this.parkedEmitPending = true;
+      return;
+    }
     this.emit({ type: "snapshot", snapshot: this.snapshot() });
   }
 
   /** Throttled emit for token-stream text deltas (agent/thought chunks). */
   private emitSnapshotThrottled(): void {
+    if (this.parkedDepth > 0) {
+      // Same guard as emitSnapshot: avoid emitting a snapshot whose
+      // sessionId/timeline points at the parked session.
+      this.parkedEmitPending = true;
+      return;
+    }
     this.streamSnapPending = true;
     if (this.streamSnapTimer) return;
     this.streamSnapTimer = setTimeout(() => {
@@ -4228,6 +4260,114 @@ export class AgentBackend {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.log("warn", `Cancel failed: ${message}`);
+    }
+  }
+
+  /**
+   * Cancel a background session's turn (one the user is not currently
+   * focused on). The active session is preserved: we temporarily hydrate
+   * the target session's runtime, send `session/cancel`, clear its
+   * pending prompts, then restore the user's focus. No-op if the target
+   * is already idle / unknown.
+   */
+  async cancelSession(targetSessionId: string): Promise<void> {
+    if (!this.client || !this.client.connected || this.connection !== "ready") {
+      return;
+    }
+    if (!targetSessionId) return;
+    // No-op when the target is the focused session — UI should call
+    // `cancel()` directly in that case.
+    if (targetSessionId === this.sessionId) {
+      await this.cancel();
+      return;
+    }
+    const bag = this.runtimes.get(targetSessionId);
+    if (!bag) return;
+    if (!bag.busy && !bag.compacting) return;
+
+    // Park the user's focused session, hydrate the target session, run
+    // the cancel, then restore focus. We do this manually (instead of
+    // withParkedRuntime) because the work is async — the request promise
+    // needs focus kept on the target session until it settles.
+    const focusId = this.sessionId;
+    const focusSnap: SessionRuntime | null = focusId
+      ? {
+          sessionId: focusId,
+          cwd: this.workspace ?? "",
+          title: this.sessionTitle ?? "Session",
+          timeline: this.timeline,
+          busy: this.busy,
+          replaying: this.replaying,
+          compacting: this.compacting,
+          compactTimelineId: this.compactTimelineId,
+          streamingAssistantId: this.streamingAssistantId,
+          streamingThoughtId: this.streamingThoughtId,
+          tokensUsed: this.tokensUsed,
+          contextWindow: this.contextWindow,
+          modelId: this.modelId,
+          sessionMode: this.sessionMode,
+          reasoningEffort: this.reasoningEffort,
+          availableModels: this.availableModels,
+          toolIndex: this.toolIndex,
+          todos: this.todos,
+          planContent: this.planContent,
+          hydrated: true,
+        }
+      : null;
+
+    this.hydrateFromRuntime(bag);
+    this.parkedDepth++;
+    try {
+      this.cancelPermissionsForSession(targetSessionId, "session cancel");
+      this.cancelQuestionsForSession(targetSessionId, "session cancel");
+      this.cancelTrustPromptsForSession(targetSessionId, "session cancel");
+      this.emitSnapshot();
+      try {
+        await this.client.request("session/cancel", {
+          sessionId: targetSessionId,
+        });
+        this.log(
+          "info",
+          `Background cancel sent session=${targetSessionId}`,
+        );
+        if (this.compacting) {
+          this.finishCompact("cancelled");
+        }
+        this.busy = false;
+        this.clearTurnPlanArtifacts();
+        this.emitSnapshot();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.log(
+          "warn",
+          `Background cancel failed session=${targetSessionId}: ${message}`,
+        );
+      }
+    } finally {
+      this.parkedDepth--;
+      if (focusSnap) {
+        this.hydrateFromRuntime(focusSnap);
+      } else {
+        this.sessionId = undefined;
+        this.sessionTitle = undefined;
+        this.timeline = [];
+        this.toolIndex = new Map();
+        this.todos = [];
+        this.planContent = undefined;
+        this.busy = false;
+        this.replaying = false;
+        this.compacting = false;
+        this.compactTimelineId = null;
+        this.streamingAssistantId = null;
+        this.streamingThoughtId = null;
+        this.inThinkTag = false;
+        this.thinkHold = "";
+        this.tokensUsed = undefined;
+      }
+      if (this.parkedDepth === 0 && this.parkedEmitPending) {
+        this.parkedEmitPending = false;
+        this.emitSnapshot();
+      }
     }
   }
 

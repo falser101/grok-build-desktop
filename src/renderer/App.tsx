@@ -42,6 +42,9 @@ import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
 import { ModelsView } from "./ModelsView";
 import { PlanPanel } from "./PlanPanel";
+import { PlanApprovalCard } from "./PlanApprovalCard";
+import { PlanProgressBubble } from "./PlanProgressBubble";
+import { WaitingSessionsBanner } from "./WaitingSessionsBanner";
 import { usePrefs } from "./PrefsContext";
 import { SettingsView } from "./SettingsView";
 import { TerminalPanel } from "./TerminalPanel";
@@ -4004,6 +4007,29 @@ export function App() {
                           <span className="session-title">
                             {s.title || m.untitledSession}
                           </span>
+                          {s.status === "running" || s.status === "loading" ? (
+                            <span
+                              className="session-cancel-btn"
+                              role="button"
+                              tabIndex={0}
+                              title={m.cancelSessionTooltip}
+                              aria-label={m.cancelSessionTooltip}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                void window.desktop.cancelSession(s.sessionId);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  void window.desktop.cancelSession(s.sessionId);
+                                }
+                              }}
+                            >
+                              ■
+                            </span>
+                          ) : null}
                         </button>
                       ),
                     )}
@@ -4492,6 +4518,41 @@ export function App() {
                   request={snap.pendingTrustPrompt}
                   m={m}
                   onResolve={(outcome) => void onTrustPrompt(outcome)}
+                />
+              ) : null}
+              {/* Other-session attention banner — surfaces any session
+                  that is currently waiting on the user (running /
+                  needs-permission / needs-answer / needs-trust) while
+                  they're focused on a different session. Top-most so
+                  nothing can hide it. */}
+              <WaitingSessionsBanner
+                sessions={snap.sessions}
+                focusedSessionId={snap.sessionId}
+                m={m}
+                onJumpToSession={(s) => void onLoadSession(s)}
+                onCancelSession={(sid) => void window.desktop.cancelSession(sid)}
+              />
+              {/* Plan approval card — surfaces right above the composer
+                  so the user can approve / request changes / abandon in
+                  the same place they'll be typing their next message. */}
+              {snap.pendingPlanApproval ? (
+                <PlanApprovalCard
+                  approval={snap.pendingPlanApproval}
+                  m={m}
+                  onRespond={respondPlanApproval}
+                />
+              ) : null}
+              {/* Running-plan step pill — appears once approval has been
+                  granted (or in non-plan sessions) and there is an
+                  in-progress / pending todo. */}
+              {!snap.pendingPlanApproval && snap.todos?.length ? (
+                <PlanProgressBubble
+                  todos={snap.todos}
+                  m={m}
+                  onOpenPanel={() => {
+                    setRightPanelOpen(true);
+                    setRightPanelTab("plan");
+                  }}
                 />
               ) : null}
 

@@ -4895,27 +4895,7 @@ html[data-theme="light"] .icon-btn.send {
   color: var(--text);
 }
 
-.plan-approval-banner {
-  flex: 0 0 auto;
-  margin: 8px 10px 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid color-mix(in srgb, #e5a84b 45%, var(--border));
-  background: color-mix(in srgb, #e5a84b 10%, var(--bg));
-}
 
-.plan-approval-banner-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.plan-approval-banner-hint {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.4;
-}
 
 .plan-approval-actions,
 .plan-approval-feedback-actions {
@@ -4981,6 +4961,258 @@ html[data-theme="light"] .icon-btn.send {
 .plan-approval-feedback-input:focus {
   outline: none;
   border-color: var(--accent, #5b8def);
+}
+
+/* —— Composer-anchored plan approval & step pill —— */
+/* The actual decision UI for plan approval lives in the composer area now.
+   The right-side Plan panel keeps a slim callout pointing to it. */
+.plan-approval-callout {
+  margin: 8px 10px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px dashed color-mix(in srgb, #e5a84b 45%, var(--border));
+  background: color-mix(in srgb, #e5a84b 6%, var(--bg));
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.plan-approval-callout-title {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.plan-approval-card {
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, #e5a84b 45%, var(--border));
+  background: color-mix(in srgb, #e5a84b 8%, var(--bg-elevated));
+  padding: 12px 14px;
+  box-shadow: 0 4px 18px var(--shadow);
+}
+.plan-approval-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.plan-approval-card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.plan-approval-card-collapse {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.plan-approval-card-collapse:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.plan-approval-card-hint {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+/* Compact "Step X / Y" pill that floats above the composer while a plan
+   is running. Matches the chat-jump-to-bottom sizing for visual rhythm. */
+.plan-progress-bubble-wrap {
+  display: flex;
+  justify-content: flex-start;
+  margin: 0;
+}
+.plan-progress-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 8px var(--shadow);
+  transition: background 0.12s, border-color 0.12s;
+}
+.plan-progress-bubble:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+.plan-progress-bubble-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  animation: plan-progress-spin 0.8s linear infinite;
+}
+@keyframes plan-progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.plan-progress-bubble-text {
+  white-space: nowrap;
+}
+.plan-progress-bubble-pending {
+  color: var(--text-muted);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.plan-progress-bubble-detail {
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  max-width: 320px;
+}
+
+/* —— Waiting-sessions banner (anchored above composer) —— */
+.waiting-sessions-banner {
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-elevated));
+  padding: 8px 10px 6px;
+  font-size: 12px;
+}
+.waiting-sessions-banner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.waiting-sessions-banner-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.waiting-sessions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.waiting-session-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+.waiting-session-jump {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: left;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  min-width: 0;
+}
+.waiting-session-jump:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.waiting-session-name {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.waiting-session-status {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-dim, var(--text-muted));
+}
+.waiting-session-glyph {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+}
+.waiting-session-glyph.spin {
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  animation: plan-progress-spin 0.8s linear infinite;
+}
+.waiting-session-glyph.warn {
+  background: color-mix(in srgb, #e5a84b 25%, transparent);
+  color: #e5a84b;
+}
+.waiting-session-cancel {
+  flex: 0 0 auto;
+  width: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.waiting-session-cancel:hover {
+  background: color-mix(in srgb, var(--danger, #c44) 12%, transparent);
+  color: var(--danger, #c44);
+  border-color: color-mix(in srgb, var(--danger, #c44) 35%, var(--border));
+}
+
+/* Sidebar inline cancel button — appears on hover for running / loading
+   sessions. Click stops the background turn without leaving the focus. */
+.session-cancel-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.session-item:hover .session-cancel-btn,
+.session-cancel-btn:focus-visible {
+  opacity: 1;
+}
+.session-cancel-btn:hover {
+  background: color-mix(in srgb, var(--danger, #c44) 12%, transparent);
+  color: var(--danger, #c44);
 }
 
 .plan-panel-body {

@@ -784,6 +784,8 @@ export interface DesktopApi {
     filterSessionId?: string,
   ) => Promise<string[]>;
   cancel: () => Promise<void>;
+  /** Cancel a background session's in-flight turn without switching focus. */
+  cancelSession: (sessionId: string) => Promise<void>;
   /**
    * Resolve a pending permission prompt.
    * Pass optionId to select; pass null to cancel.
