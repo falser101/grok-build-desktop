@@ -1,8 +1,108 @@
-import { memo, useDeferredValue, useMemo } from "react";
+import {
+  Children,
+  isValidElement,
+  memo,
+  useCallback,
+  useDeferredValue,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { usePrefs } from "./PrefsContext";
+import { copyText } from "./timelineMarkdown";
 
 const remarkPlugins = [remarkGfm];
+
+type CopyState = "idle" | "ok" | "err";
+
+/** Walk any React tree and concatenate all string/number leaves. */
+function nodeToText(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeToText).join("");
+  if (isValidElement(node)) {
+    return nodeToText((node.props as { children?: ReactNode }).children);
+  }
+  return "";
+}
+
+/**
+ * Wraps a parsed <pre><code> block with a floating copy button. react-markdown
+ * always passes the rendered <code> element as the only child of <pre>, so we
+ * extract its raw text and forward its className/style verbatim.
+ */
+function CodeBlock({
+  raw,
+  codeClassName,
+  codeStyle,
+  children,
+}: {
+  raw: string;
+  codeClassName?: string;
+  codeStyle?: CSSProperties;
+  children: ReactNode;
+}) {
+  const { messages: m } = usePrefs();
+  const [state, setState] = useState<CopyState>("idle");
+
+  const onCopy = useCallback(async () => {
+    if (!raw) return;
+    try {
+      await copyText(raw);
+      setState("ok");
+    } catch {
+      setState("err");
+    }
+    window.setTimeout(() => setState("idle"), 1600);
+  }, [raw]);
+
+  const label =
+    state === "ok" ? m.copied : state === "err" ? m.copyFailed : m.copyMessage;
+  const disabled = !raw;
+
+  return (
+    <div className="md-pre-wrap">
+      <button
+        type="button"
+        className={`md-pre-copy${state === "ok" ? " is-ok" : ""}${
+          state === "err" ? " is-err" : ""
+        }`}
+        onClick={() => void onCopy()}
+        title={label}
+        aria-label={label}
+        disabled={disabled}
+      >
+        {state === "ok" ? (
+          <span className="md-pre-copy-label">{m.copied}</span>
+        ) : (
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        )}
+      </button>
+      <pre className="md-pre">
+        <code className={codeClassName} style={codeStyle}>
+          {children}
+        </code>
+      </pre>
+    </div>
+  );
+}
 
 const components: Components = {
   a: ({ href, children, ...props }) => (
@@ -10,7 +110,30 @@ const components: Components = {
       {children}
     </a>
   ),
-  pre: ({ children }) => <pre className="md-pre">{children}</pre>,
+  pre: ({ children }) => {
+    // react-markdown always emits a single <code> child here. Extract its
+    // raw text for the copy button and pass through className/style.
+    const arr = Children.toArray(children);
+    const codeEl = arr.find(
+      (c): c is ReactElement<{
+        className?: string;
+        style?: CSSProperties;
+        children?: ReactNode;
+      }> => isValidElement(c) && c.type === "code",
+    );
+    const raw = codeEl
+      ? nodeToText(codeEl.props.children)
+      : nodeToText(children);
+    return (
+      <CodeBlock
+        raw={raw}
+        codeClassName={codeEl?.props.className}
+        codeStyle={codeEl?.props.style}
+      >
+        {codeEl ? codeEl.props.children : children}
+      </CodeBlock>
+    );
+  },
   code: ({ className, children, ...props }) => {
     const isBlock =
       Boolean(className?.includes("language-")) ||

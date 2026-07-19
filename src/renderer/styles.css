@@ -2225,6 +2225,80 @@ body.is-resizing-panels .file-tree {
   color: var(--code-block);
 }
 
+/* —— Code block copy button —— */
+.md-pre-wrap {
+  position: relative;
+  margin: 0.65em 0;
+}
+
+.md-pre-wrap .md-pre {
+  margin: 0;
+}
+
+.md-pre-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  min-width: 24px;
+  padding: 0 6px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s,
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+
+.md-pre-wrap:hover .md-pre-copy,
+.md-pre-copy:focus-visible,
+.md-pre-copy.is-ok,
+.md-pre-copy.is-err {
+  opacity: 1;
+}
+
+.md-pre-copy:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.md-pre-copy:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.md-pre-copy:disabled {
+  cursor: default;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.md-pre-copy.is-ok {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  opacity: 1;
+}
+
+.md-pre-copy.is-err {
+  color: var(--danger, #e06c75);
+  opacity: 1;
+}
+
+.md-pre-copy-label {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+}
+
 .md-table-wrap {
   overflow-x: auto;
   margin: 0.65em 0;
