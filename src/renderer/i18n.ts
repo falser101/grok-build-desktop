@@ -47,6 +47,8 @@ export interface Messages {
   agentInstallAutoButton: string;
   /** Caption shown while the installer is running. */
   agentInstallRunning: string;
+  /** Tooltip explaining why the Install button is currently disabled. */
+  agentInstallHint: string;
   /** Caption shown after the installer finishes successfully. */
   agentInstallDone: string;
   /** Caption shown after the installer fails (the output is shown too). */
@@ -627,6 +629,7 @@ const en: Messages = {
   agentInstallButton: "Open install instructions",
   agentInstallAutoButton: "Install automatically",
   agentInstallRunning: "Running official installer…",
+  agentInstallHint: "Install is only available when grok is missing or in an error state.",
   agentInstallDone: "Installed. Connecting…",
   agentInstallFailed: "Installer failed — see output below.",
 
@@ -1175,6 +1178,7 @@ const zh: Messages = {
   agentInstallButton: "打开安装指引",
   agentInstallAutoButton: "自动安装",
   agentInstallRunning: "正在运行官方安装脚本…",
+  agentInstallHint: "只有在 grok 缺失或处于错误状态时才能安装。",
   agentInstallDone: "安装完成，正在连接…",
   agentInstallFailed: "安装失败，请查看下方输出。",
 

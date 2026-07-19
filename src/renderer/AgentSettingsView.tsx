@@ -148,10 +148,19 @@ export function AgentSettingsView({
     status.kind === "ready" ||
     status.kind === "update-available" ||
     status.kind === "rollback";
+  const canInstall =
+    !isBusy &&
+    (status.kind === "absent" ||
+      status.kind === "error" ||
+      // Allow re-install from "rollback": we already rolled back the
+      // previous try so the user can retry by invoking the official
+      // installer again.
+      status.kind === "rollback");
   const canUpgrade =
     !isBusy &&
     hasBinary &&
     (status.kind === "update-available" || (checkInfo?.hasUpdate ?? false));
+  const canCheck = !isBusy; // Probing works in every state, including absent.
 
   // Reset stale results when the status transitions to something terminal.
   useEffect(() => {
@@ -243,7 +252,7 @@ export function AgentSettingsView({
         <button
           type="button"
           className="settings-btn"
-          disabled={isBusy}
+          disabled={!canCheck}
           onClick={() => void runCheck()}
         >
           {busy === "check" ? m.agentChecking : m.agentCheckUpdate}
@@ -251,8 +260,13 @@ export function AgentSettingsView({
         <button
           type="button"
           className="settings-btn primary"
-          disabled={isBusy || !hasBinary}
+          disabled={!canInstall}
           onClick={() => void runInstall()}
+          title={
+            canInstall
+              ? undefined
+              : m.agentInstallHint ?? undefined
+          }
         >
           {busy === "install" || status.kind === "installing"
             ? m.agentInstallRunning
