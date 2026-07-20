@@ -195,6 +195,101 @@ function normalizeWidthPct(
 }
 
 /**
+ * Render a single right-panel tab chip. Used by the unified tab bar in
+ * App.tsx so every kind (files / plan / terminal) shares one visual.
+ */
+function renderTab(
+  m: Messages,
+  tab: RightTab,
+  label: string,
+  isActive: boolean,
+  onActivate: () => void,
+  onClose: () => void,
+) {
+  const kindClass =
+    tab.kind === "files"
+      ? " kind-files"
+      : tab.kind === "plan"
+        ? " kind-plan"
+        : " kind-terminal";
+  return (
+    <div
+      className={"right-panel-tab" + (isActive ? " active" : "") + kindClass}
+      onClick={onActivate}
+      role="tab"
+      aria-selected={isActive}
+      title={
+        tab.kind === "files"
+          ? tab.path
+          : tab.kind === "plan"
+            ? m.sidePanelPlan
+            : m.sidePanelTerminal
+      }
+    >
+      <span className="right-panel-tab-dot" aria-hidden />
+      <span className="right-panel-tab-icon" aria-hidden>
+        {tab.kind === "files" ? (
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.1 1.3h5.1A1.2 1.2 0 0 1 13.5 5.5v6.3a1.2 1.2 0 0 1-1.2 1.2H3.7a1.2 1.2 0 0 1-1.2-1.2V4.2Z"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ) : tab.kind === "plan" ? (
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M3.5 2.5h9A.5.5 0 0 1 13 3v10a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13V3a.5.5 0 0 1 .5-.5Z"
+              stroke="currentColor"
+              strokeWidth="1.2"
+            />
+            <path
+              d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+            />
+          </svg>
+        ) : (
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <rect
+              x="2.5"
+              y="3"
+              width="11"
+              height="10"
+              rx="1.5"
+              stroke="currentColor"
+              strokeWidth="1.2"
+            />
+            <path
+              d="M5 7.2 6.6 8.5 5 9.8M8.2 10.2h2.6"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        )}
+      </span>
+      <span className="right-panel-tab-label">{label}</span>
+      <button
+        type="button"
+        className="right-panel-tab-close"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        aria-label={m.filesCloseTabTooltip}
+        title={m.filesCloseTabTooltip}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+/**
  * Right-panel `+` button dropdown — opens a Plan, Terminal, or file-
  * tree focus action. File picking is handled by focusing the existing
  * tree filter; new files creation is left for a future patch.
@@ -281,6 +376,22 @@ function RightPanelPlusMenu({
     </div>
   );
 }
+
+/**
+ * Right panel tab discriminator — one union covers every kind of tab
+ * the unified top bar can host.
+ */
+type RightTab =
+  | { id: string; kind: "files"; path: string }
+  | { id: string; kind: "plan" }
+  | { id: string; kind: "terminal" };
+
+/** Per-render helper to mint a fresh tab id (crypto.randomUUID with a
+ *  fallback for older runtimes / test envs). */
+const newRightTabId = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
 function defaultPanelLayout(): PanelLayout {
   return {
@@ -1304,14 +1415,6 @@ export function App() {
    * The user navigates by activating a tab, opening new files via the
    * `+` menu / file-tree, and closing tabs via the `×` chip button.
    */
-  type RightTab =
-    | { id: string; kind: "files"; path: string }
-    | { id: string; kind: "plan" }
-    | { id: string; kind: "terminal" };
-  const newRightTabId = () =>
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `r_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   /** Open tabs in the right panel (any mix of files / plan / terminal). */
   const [rightPanelTabs, setRightPanelTabs] = useState<RightTab[]>([]);
   /** Which tab is currently rendered in the body area. */
@@ -6077,117 +6180,48 @@ export function App() {
               role="tablist"
               aria-label={m.sidePanelToggle}
             >
-              {rightPanelTabs.map((tab) => {
-                const isActive = tab.id === activeTabId;
-                let label = "";
-                if (tab.kind === "files") {
-                  label = tab.path.split(/[/\\]/).pop() || tab.path;
-                } else if (tab.kind === "plan") {
-                  label = m.sidePanelPlan;
-                } else {
-                  label = m.sidePanelTerminal;
-                }
-                return (
-                  <div
-                    key={tab.id}
-                    className={
-                      "right-panel-tab" +
-                      (isActive ? " active" : "") +
-                      (tab.kind === "plan"
-                        ? " kind-plan"
-                        : tab.kind === "terminal"
-                          ? " kind-terminal"
-                          : " kind-files")
-                    }
-                    onClick={() => setActiveTabId(tab.id)}
-                    role="tab"
-                    aria-selected={isActive}
-                    title={
-                      tab.kind === "files"
-                        ? tab.path
-                        : tab.kind === "plan"
-                          ? m.sidePanelPlan
-                          : m.sidePanelTerminal
-                    }
-                  >
-                    <span className="right-panel-tab-icon" aria-hidden>
-                      {tab.kind === "files" ? (
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                          <path
-                            d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.1 1.3h5.1A1.2 1.2 0 0 1 13.5 5.5v6.3a1.2 1.2 0 0 1-1.2 1.2H3.7a1.2 1.2 0 0 1-1.2-1.2V4.2Z"
-                            stroke="currentColor"
-                            strokeWidth="1.2"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      ) : tab.kind === "plan" ? (
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                          <path
-                            d="M3.5 2.5h9A.5.5 0 0 1 13 3v10a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13V3a.5.5 0 0 1 .5-.5Z"
-                            stroke="currentColor"
-                            strokeWidth="1.2"
-                          />
-                          <path
-                            d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"
-                            stroke="currentColor"
-                            strokeWidth="1.2"
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                      ) : (
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                          <rect
-                            x="2.5"
-                            y="3"
-                            width="11"
-                            height="10"
-                            rx="1.5"
-                            stroke="currentColor"
-                            strokeWidth="1.2"
-                          />
-                          <path
-                            d="M5 7.2 6.6 8.5 5 9.8M8.2 10.2h2.6"
-                            stroke="currentColor"
-                            strokeWidth="1.2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      )}
-                    </span>
-                    <span className="right-panel-tab-label">{label}</span>
-                    <button
-                      type="button"
-                      className="right-panel-tab-close"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        closeRightTab(tab.id);
-                      }}
-                      aria-label={m.filesCloseTabTooltip}
-                      title={m.filesCloseTabTooltip}
-                    >
-                      ×
-                    </button>
-                  </div>
-                );
-              })}
+              {/* File tabs first. */}
+              {rightPanelTabs
+                .filter((t) => t.kind === "files")
+                .map((tab) => {
+                  if (tab.kind !== "files") return null;
+                  const isActive = tab.id === activeTabId;
+                  const label = tab.path.split(/[/\\]/).pop() || tab.path;
+                  return renderTab(
+                    m,
+                    tab,
+                    label,
+                    isActive,
+                    () => setActiveTabId(tab.id),
+                    () => closeRightTab(tab.id),
+                  );
+                })}
+
+              {/* Then a separator and the tool tabs (Plan / Terminal). */}
+              {rightPanelTabs.some((t) => t.kind !== "files") ? (
+                <span className="right-panel-tab-sep" aria-hidden />
+              ) : null}
+              {rightPanelTabs
+                .filter((t) => t.kind !== "files")
+                .map((tab) => {
+                  const isActive = tab.id === activeTabId;
+                  const label =
+                    tab.kind === "plan" ? m.sidePanelPlan : m.sidePanelTerminal;
+                  return renderTab(
+                    m,
+                    tab,
+                    label,
+                    isActive,
+                    () => setActiveTabId(tab.id),
+                    () => closeRightTab(tab.id),
+                  );
+                })}
+
               {/* `+` menu opens a fresh tab — file / plan / terminal. */}
               <RightPanelPlusMenu
                 m={m}
                 onPickFiles={() => {
-                  // Open the file-tree filter as the picker UX. We don't
-                  // create a tab here: the user still needs to choose a
-                  // path; once they do, `openFile` creates the tab.
                   setFileTreeCollapsed(false);
-                  // Make sure a tab is active so the editor area shows.
-                  if (
-                    !rightPanelTabs.some((t) => t.kind === "files")
-                  ) {
-                    // Seed a dummy placeholder file tab by reusing an
-                    // existing file id? Simpler: open the most recent
-                    // existing file tab if any, else let the empty state
-                    // show. Focus the tree filter regardless.
-                  }
                   requestAnimationFrame(() => {
                     const input =
                       document.querySelector<HTMLInputElement>(

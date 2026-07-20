@@ -5147,44 +5147,73 @@ html[data-theme="light"] .icon-btn.send {
   background: var(--bg);
 }
 
-/* Unified right-panel tab bar — files, plan, terminal as one row. */
+/* ── Unified right-panel tab bar ─────────────────── */
+/* Mirrors the .term-tab visual: pill-shaped chips that live on the
+ * same dark sidebar surface, with a small dot to denote active and
+ * a × close button. Layout left → right: file tabs → plan/terminal
+ * chips → + menu. The whole row scrolls horizontally when overflow. */
+
 .right-panel-tabs {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 6px 6px 0;
-  border-bottom: 1px solid var(--border);
+  padding: 6px 8px;
   background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border);
   overflow-x: auto;
-  scrollbar-width: none;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
-.right-panel-tabs::-webkit-scrollbar { display: none; }
+.right-panel-tabs::-webkit-scrollbar { height: 4px; }
+.right-panel-tabs::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+.right-panel-tabs::-webkit-scrollbar-track { background: transparent; }
 
 .right-panel-tab {
   flex: 0 0 auto;
-  max-width: 200px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 4px 5px 9px;
-  border-radius: 8px 8px 0 0;
-  font-size: 12.5px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.2;
   color: var(--text-muted);
+  background: transparent;
   border: 1px solid transparent;
-  border-bottom: none;
-  white-space: nowrap;
   cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  max-width: 200px;
+  min-width: 0;
 }
-.right-panel-tab:hover { color: var(--text); background: var(--bg-hover); }
-.right-panel-tab.active {
+.right-panel-tab:hover {
+  background: var(--bg-hover);
   color: var(--text);
+}
+.right-panel-tab.active {
   background: var(--bg);
+  color: var(--text);
   border-color: var(--border);
-  box-shadow: 0 1px 0 var(--bg);
+}
+
+.right-panel-tab-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+.right-panel-tab.active .right-panel-tab-dot {
+  background: var(--accent, #5b8def);
 }
 
 .right-panel-tab-icon {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   color: var(--text-dim);
@@ -5196,26 +5225,40 @@ html[data-theme="light"] .icon-btn.send {
 .right-panel-tab-label {
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 140px;
+  max-width: 150px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .right-panel-tab-close {
   flex: 0 0 auto;
   border: none;
   background: transparent;
-  color: inherit;
+  color: var(--text-dim);
   cursor: pointer;
-  padding: 0 6px 0 2px;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1;
-  border-radius: 3px;
+  padding: 0 6px;
+  border-radius: 4px;
 }
-.right-panel-tab-close:hover { background: var(--bg-hover); }
+.right-panel-tab-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* Vertical separator between file tabs and the tool tabs (Plan / Terminal). */
+.right-panel-tab-sep {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 6px;
+}
 
 .right-panel-plus-wrap {
   position: relative;
   flex: 0 0 auto;
-  margin-left: 2px;
+  margin-left: 4px;
 }
 .right-panel-plus {
   width: 22px;
@@ -5239,6 +5282,7 @@ html[data-theme="light"] .icon-btn.send {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--bg);
 }
 
 .right-panel-empty {
@@ -5263,7 +5307,10 @@ html[data-theme="light"] .icon-btn.send {
   cursor: pointer;
 }
 .right-panel-empty-cta:hover { background: var(--bg); }
-.right-panel-empty-icon { color: var(--accent, #5b8def); display: inline-flex; }
+.right-panel-empty-icon {
+  color: var(--accent, #5b8def);
+  display: inline-flex;
+}
 
 .right-panel-placeholder {
   flex: 1 1 auto;

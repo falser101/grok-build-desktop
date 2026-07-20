@@ -24,16 +24,17 @@ interface FilesTabSectionProps {
 }
 
 /**
- * Right-panel files section body — editor + tree layout.
+ * Right-panel files section body — file-row toolbar + editor + tree.
  *
- * The top tab bar (file tabs + Plan + Terminal + `+`) is owned by the
- * shell because tab state is unified across files/plan/terminal. This
- * component only renders whichever file the active tab points at and
- * the inline collapsible file tree next to it.
+ *   ┌─ file-row toolbar ────────────────────────────────────────┐
+ *   │  ~/tests/compliance.test.mjs   [open ▾]  [tree ▸/◂]      │
+ *   ├─ editor pane ────────────────┬─ tree pane (collapsible) ─┤
+ *   │ <FileViewer>                 │ <FileTree>              │
+ *   └──────────────────────────────┴─────────────────────────┘
  *
- *   ┌─ editor pane ────────────┬─ tree pane (collapsible) ─┐
- *   │ <FileViewer>             │ <FileTree>              │
- *   └──────────────────────────┴─────────────────────────┘
+ * The top tab bar (file/plan/terminal chips + `+` menu) is rendered
+ * separately by App.tsx; this component only owns the file-row toolbar
+ * and the editor/tree split.
  */
 function FilesTabSectionInner({
   workspace,
@@ -134,7 +135,7 @@ function FilesTabSectionInner({
 
   return (
     <div className="files-section-root">
-      {/* Toolbar: breadcrumb · open-in-editor · tree toggle */}
+      {/* File-row toolbar: breadcrumb · open-in-editor · tree toggle */}
       <header className="files-section-toolbar">
         <span className="files-section-breadcrumb" title={activeFilePath}>
           {breadcrumb}
@@ -169,7 +170,7 @@ function FilesTabSectionInner({
                 />
               </svg>
             </span>
-            <span>open</span>
+            <span>{m.filesOpenInEditorTooltip}</span>
           </button>
           {editorMenuOpen ? (
             <div className="dropdown" role="menu">
@@ -271,12 +272,5 @@ function FilesTabSectionInner({
     </div>
   );
 }
-
-/**
- * Visual floor for the tree pane — sized in % of the right-panel inner
- * width so the user can never drag the split handle all the way through
- * the filter input. The JS state still records the actual drag value.
- */
-const FILE_TREE_MIN_VIEW = 22;
 
 export const FilesTabSection = memo(FilesTabSectionInner);
