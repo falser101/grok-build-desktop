@@ -428,7 +428,23 @@ function RightPanelPlusMenu({
 type RightTab =
   | { id: string; kind: "files"; path: string }
   | { id: string; kind: "plan" }
-  | { id: string; kind: "terminal" };
+  | { id: string; kind: "terminal"; /** Absolute cwd for the chip label. */ cwd?: string };
+
+/** Display path like `~/Projects` for terminal tab chips. */
+function formatTildePath(abs: string): string {
+  if (!abs) return "";
+  const norm = abs.replace(/\\/g, "/");
+  // /Users/x/... or /home/x/...
+  const unix = norm.match(/^(\/Users\/[^/]+|\/home\/[^/]+)(\/.*)?$/);
+  if (unix) return "~" + (unix[2] || "");
+  // C:/Users/x/... or C:\Users\x\...
+  const win = abs.match(/^[A-Za-z]:[\\/]Users[\\/][^\\/]+(.*)$/);
+  if (win) {
+    const rest = (win[1] || "").replace(/\\/g, "/");
+    return "~" + rest;
+  }
+  return norm;
+}
 
 /** Per-render helper to mint a fresh tab id (crypto.randomUUID with a
  *  fallback for older runtimes / test envs). */
@@ -1660,14 +1676,29 @@ export function App() {
 
   /** Add a brand-new Terminal tab. The inner TerminalPanel spawns its
    *  own PTY via the standard `termStart` IPC, so we don't track
-   *  backend ids here. */
+   *  backend ids here. Chip label uses cwd (seeded from workspace). */
   const openTerminalTab = useCallback(() => {
     setRightPanelTabs((prev) => {
       const id = newRightTabId();
       setActiveTabId(id);
-      return [...prev, { id, kind: "terminal" }];
+      return [
+        ...prev,
+        {
+          id,
+          kind: "terminal",
+          cwd: snap.workspace,
+        },
+      ];
     });
     setRightPanelOpen(true);
+  }, [snap.workspace]);
+
+  const setTerminalTabCwd = useCallback((tabId: string, cwd: string) => {
+    setRightPanelTabs((prev) =>
+      prev.map((t) =>
+        t.id === tabId && t.kind === "terminal" ? { ...t, cwd } : t,
+      ),
+    );
   }, []);
 
   const closeRightTab = useCallback((id: string) => {
@@ -6344,15 +6375,10 @@ export function App() {
                     } else if (tab.kind === "plan") {
                       label = m.sidePanelPlan;
                     } else {
-                      // Number multiple terminal chips when several are open.
-                      const termTabs = rightPanelTabs.filter(
-                        (t) => t.kind === "terminal",
-                      );
-                      const idx = termTabs.findIndex((t) => t.id === tab.id);
-                      label =
-                        termTabs.length > 1
-                          ? `${m.sidePanelTerminal} ${idx + 1}`
-                          : m.sidePanelTerminal;
+                      // Show shell cwd on the outer tab (e.g. ~/Projects).
+                      label = tab.cwd
+                        ? formatTildePath(tab.cwd)
+                        : m.sidePanelTerminal;
                     }
                     return (
                       <div
@@ -6366,7 +6392,13 @@ export function App() {
                         onClick={() => setActiveTabId(tab.id)}
                         role="tab"
                         aria-selected={isActive}
-                        title={tab.kind === "files" ? tab.path : label}
+                        title={
+                          tab.kind === "files"
+                            ? tab.path
+                            : tab.kind === "terminal"
+                              ? tab.cwd || label
+                              : label
+                        }
                       >
                         <span className="right-panel-tab-icon" aria-hidden>
                           {tab.kind === "files" ? (
@@ -6501,6 +6533,9 @@ export function App() {
                       workspace={snap.workspace}
                       active={rightOpen && activeTab.kind === "terminal"}
                       m={m}
+                      onCwdChange={(cwd) =>
+                        setTerminalTabCwd(activeTab.id, cwd)
+                      }
                     />
                   ) : null}
                 </div>

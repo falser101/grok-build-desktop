@@ -6,37 +6,35 @@ import "@xterm/xterm/css/xterm.css";
 import type { Messages } from "./i18n";
 
 /**
- * Single interactive PTY terminal for one right-panel tab.
- *
- * Multi-terminal UX lives on the host: each right-panel "terminal" chip
- * mounts its own `TerminalPanel`. New shells are opened via the panel's
- * top-level `+` menu — this component no longer has an internal tab bar.
+ * Single interactive PTY for one right-panel tab.
+ * No internal chrome (tabs / clear / restart) — the host tab bar owns
+ * that UX and shows the shell cwd as the chip label.
  */
-
-const shellBasename = (s: string) => s.split(/[/\\]/).pop() || s;
 
 export function TerminalPanel({
   workspace,
   active,
   m,
+  onCwdChange,
 }: {
   workspace: string | undefined;
   /** When false, keep the PTY alive but don't auto-focus / thrash resize. */
   active: boolean;
   m: Messages;
+  /** Report the PTY working directory so the outer tab chip can show e.g. ~/Projects. */
+  onCwdChange?: (cwd: string) => void;
 }) {
   const [termId, setTermId] = useState<string | null>(null);
-  const [shell, setShell] = useState("");
-  const [cwd, setCwd] = useState(workspace || "");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [exited, setExited] = useState(false);
 
   const hostRef = useRef<HTMLDivElement | null>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termIdRef = useRef<string | null>(null);
   termIdRef.current = termId;
+  const onCwdChangeRef = useRef(onCwdChange);
+  onCwdChangeRef.current = onCwdChange;
 
   const dataBufRef = useRef<string>("");
   const dataFlushRafRef = useRef<number | null>(null);
@@ -73,7 +71,6 @@ export function TerminalPanel({
   const startPty = useCallback(async () => {
     setBusy(true);
     setError(null);
-    setExited(false);
     setTermId(null);
     termIdRef.current = null;
     try {
@@ -84,8 +81,8 @@ export function TerminalPanel({
       }
       setTermId(res.id);
       termIdRef.current = res.id;
-      setShell(res.shell);
-      setCwd(res.cwd || workspace || "");
+      const cwd = res.cwd || workspace || "";
+      if (cwd) onCwdChangeRef.current?.(cwd);
       setBusy(false);
     } catch (err) {
       if (disposedRef.current) return;
@@ -94,24 +91,11 @@ export function TerminalPanel({
     }
   }, [workspace]);
 
-  const killPty = useCallback(() => {
-    const id = termIdRef.current;
-    if (id) {
-      void window.desktop.termKill(id).catch(() => undefined);
-    }
-    termIdRef.current = null;
-    setTermId(null);
-  }, []);
-
-  const restart = useCallback(async () => {
-    killPty();
-    xtermRef.current?.reset();
-    await startPty();
-  }, [killPty, startPty]);
-
   // Spawn once on mount; kill on unmount (outer tab closed).
   useEffect(() => {
     disposedRef.current = false;
+    // Seed chip label from workspace before PTY returns.
+    if (workspace) onCwdChangeRef.current?.(workspace);
     void startPty();
     return () => {
       disposedRef.current = true;
@@ -130,8 +114,16 @@ export function TerminalPanel({
     const prev = lastWorkspaceRef.current;
     lastWorkspaceRef.current = workspace;
     if (prev === workspace) return;
-    void restart();
-  }, [workspace, restart]);
+    const id = termIdRef.current;
+    if (id) {
+      void window.desktop.termKill(id).catch(() => undefined);
+    }
+    termIdRef.current = null;
+    setTermId(null);
+    if (workspace) onCwdChangeRef.current?.(workspace);
+    xtermRef.current?.reset();
+    void startPty();
+  }, [workspace, startPty]);
 
   // Build xterm once.
   useEffect(() => {
@@ -242,7 +234,6 @@ export function TerminalPanel({
         );
         termIdRef.current = null;
         setTermId(null);
-        setExited(true);
       }
     });
     return () => {
@@ -302,57 +293,19 @@ export function TerminalPanel({
     };
   }, [active, fitAndResize]);
 
-  const shellLabel = shellBasename(shell || (busy ? "…" : "?"));
-  const title = cwd
-    ? `${shellLabel} · ${cwd}`
-    : shellLabel;
-
   return (
-    <div className="term-panel">
-      <div className="term-toolbar term-toolbar-single">
-        <div className="term-title" title={title}>
-          <span
-            className={"term-status-dot" + (exited ? " exited" : "")}
-            aria-hidden
-          />
-          <span className="term-shell">{shellLabel}</span>
-          {cwd ? <span className="term-cwd">{cwd}</span> : null}
-        </div>
-        <div className="term-toolbar-actions">
-          <button
-            type="button"
-            className="term-action"
-            onClick={() => xtermRef.current?.clear()}
-            title={m.termClear}
-            disabled={busy}
-          >
-            ⌫
-          </button>
-          <button
-            type="button"
-            className="term-action"
-            onClick={() => void restart()}
-            disabled={busy}
-            title={m.termRestart}
-          >
-            ↻
-          </button>
-        </div>
-      </div>
-
-      <div className="term-instance" style={{ display: "flex" }}>
-        {error ? <div className="term-error">{error}</div> : null}
-        {!termId && busy ? (
-          <div className="term-status">{m.termStarting}</div>
-        ) : null}
-        <div
-          className="term-xterm-host"
-          ref={hostRef}
-          onClick={() => xtermRef.current?.focus()}
-          role="application"
-          aria-label={m.termTitle}
-        />
-      </div>
+    <div className="term-panel term-panel-bare">
+      {error ? <div className="term-error">{error}</div> : null}
+      {!termId && busy ? (
+        <div className="term-status">{m.termStarting}</div>
+      ) : null}
+      <div
+        className="term-xterm-host"
+        ref={hostRef}
+        onClick={() => xtermRef.current?.focus()}
+        role="application"
+        aria-label={m.termTitle}
+      />
     </div>
   );
 }
