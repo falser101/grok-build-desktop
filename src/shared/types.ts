@@ -1011,6 +1011,29 @@ export interface DesktopApi {
   setInstallerChannel: (channel: InstallerChannel) => Promise<InstallerChannel>;
   onEvent: (cb: (event: AgentUiEvent) => void) => () => void;
   onAccountEvent: (cb: (event: AccountUiEvent) => void) => () => void;
+  /** Available external editors for "Open in editor…" actions. */
+  listExternalEditors: () => Promise<ExternalEditorDescriptor[]>;
+  /**
+   * Hand a file path off to an external editor. Phase 1 spawns the editor
+   * detached and resolves immediately on `spawn`; errors surface as a
+   * reject so the renderer can show a toast.
+   */
+  openInEditor: (editorId: string, filePath: string) => Promise<void>;
+}
+
+/**
+ * One entry in the "Open in editor…" dropdown. `available` is computed
+ * on the main side via PATH probing (`code --version` etc); Phase 1
+ * leaves every entry available: true and lets the desktop surface
+ * spawn errors directly.
+ */
+export interface ExternalEditorDescriptor {
+  /** Stable id used by `openInEditor`. */
+  id: string;
+  /** Display label (already localised). */
+  label: string;
+  /** True when the launcher was found on PATH. */
+  available: boolean;
 }
 
 declare global {

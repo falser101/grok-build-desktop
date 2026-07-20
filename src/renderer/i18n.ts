@@ -407,6 +407,7 @@ export interface Messages {
   resizeSidebar: string;
   resizeRightPanel: string;
   resizeViewer: string;
+  resizeFilesTree: string;
   sidebarExpand: string;
   sidebarCollapse: string;
   sidebarPin: string;
@@ -429,6 +430,25 @@ export interface Messages {
   termCloseTab: string;
   termAddOpenFile: string;
   termAddNewTerminal: string;
+
+  // Files (right-panel "files" tab) — multi-tab workspace area
+  filesOpenFileTooltip: string;
+  filesCloseTabTooltip: string;
+  filesCollapseTreeTooltip: string;
+  filesExpandTreeTooltip: string;
+  filesFocusModeTooltip: string;
+  filesOpenInEditorTooltip: string;
+  filesEditorVscode: string;
+  filesEditorVscodeInsiders: string;
+  filesEditorCursor: string;
+  filesEditorSublime: string;
+  filesEditorZed: string;
+  filesEditorWebstorm: string;
+  filesEditorSystemDefault: string;
+  filesPickFromWorkspace: string;
+  filesNewFile: string;
+  filesClosePanel: string;
+  filesTabBarLabel: string;
 
   // Plan / TODO panel
   planPanelTitle: string;
@@ -984,6 +1004,7 @@ const en: Messages = {
   resizeSidebar: "Drag to resize sidebar (drag small to collapse). Ctrl+B toggles.",
   resizeRightPanel: "Drag to resize panel (drag small to collapse)",
   resizeViewer: "Drag to resize file preview (drag small to close)",
+  resizeFilesTree: "Drag to resize file list (drag small to collapse)",
   sidebarExpand: "Expand sidebar (Ctrl+B)",
   sidebarCollapse: "Collapse sidebar (Ctrl+B to switch to auto mode)",
   sidebarPin: "Pin sidebar (Ctrl+B to toggle pin/auto)",
@@ -1006,6 +1027,24 @@ const en: Messages = {
   termCloseTab: "Close terminal",
   termAddOpenFile: "Open file",
   termAddNewTerminal: "New terminal",
+
+  filesOpenFileTooltip: "Open file",
+  filesCloseTabTooltip: "Close file",
+  filesCollapseTreeTooltip: "Hide file list",
+  filesExpandTreeTooltip: "Show file list",
+  filesFocusModeTooltip: "Toggle focus mode",
+  filesOpenInEditorTooltip: "Open in editor…",
+  filesEditorVscode: "VS Code",
+  filesEditorVscodeInsiders: "VS Code Insiders",
+  filesEditorCursor: "Cursor",
+  filesEditorSublime: "Sublime Text",
+  filesEditorZed: "Zed",
+  filesEditorWebstorm: "WebStorm",
+  filesEditorSystemDefault: "System default",
+  filesPickFromWorkspace: "Pick from workspace…",
+  filesNewFile: "New file…",
+  filesClosePanel: "Close panel",
+  filesTabBarLabel: "Open files",
 
   planPanelTitle: "Plan / TODO",
   planTabTodos: "Todos",
@@ -1560,6 +1599,7 @@ const zh: Messages = {
   resizeSidebar: "拖动调整左侧宽度（拖到很小可折叠）。Ctrl+B 开关侧栏。",
   resizeRightPanel: "拖动调整右侧宽度（拖到很小可折叠）",
   resizeViewer: "拖动调整文件预览宽度（拖到很小可关闭）",
+  resizeFilesTree: "拖动调整文件列表宽度（拖到很小可折叠）",
   sidebarExpand: "展开左侧栏 (Ctrl+B)",
   sidebarCollapse: "收起左侧栏（Ctrl+B 切换为自动模式）",
   sidebarPin: "固定左侧栏（Ctrl+B 切换固定/自动）",
@@ -1582,6 +1622,24 @@ const zh: Messages = {
   termCloseTab: "关闭终端",
   termAddOpenFile: "打开文件",
   termAddNewTerminal: "新建终端",
+
+  filesOpenFileTooltip: "打开文件",
+  filesCloseTabTooltip: "关闭文件",
+  filesCollapseTreeTooltip: "隐藏文件列表",
+  filesExpandTreeTooltip: "显示文件列表",
+  filesFocusModeTooltip: "切换专注模式",
+  filesOpenInEditorTooltip: "在编辑器中打开…",
+  filesEditorVscode: "VS Code",
+  filesEditorVscodeInsiders: "VS Code Insiders",
+  filesEditorCursor: "Cursor",
+  filesEditorSublime: "Sublime Text",
+  filesEditorZed: "Zed",
+  filesEditorWebstorm: "WebStorm",
+  filesEditorSystemDefault: "系统默认",
+  filesPickFromWorkspace: "从工作区选择文件…",
+  filesNewFile: "新建文件…",
+  filesClosePanel: "关闭面板",
+  filesTabBarLabel: "已打开文件",
 
   planPanelTitle: "计划 / TODO",
   planTabTodos: "任务",

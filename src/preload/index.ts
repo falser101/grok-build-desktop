@@ -8,6 +8,7 @@ import type {
   AppSnapshot,
   AskUserQuestionResponse,
   DesktopApi,
+  ExternalEditorDescriptor,
   ExtensionsConfigPaths,
   FetchModelsInput,
   FetchedModelInfo,
@@ -307,6 +308,12 @@ const api: DesktopApi = {
       ipcRenderer.removeListener("account:event", listener);
     };
   },
+  listExternalEditors: () =>
+    ipcRenderer.invoke("files:listExternalEditors") as Promise<
+      ExternalEditorDescriptor[]
+    >,
+  openInEditor: (editorId: string, filePath: string) =>
+    ipcRenderer.invoke("files:openInEditor", editorId, filePath) as Promise<void>,
 };
 
 contextBridge.exposeInMainWorld("desktop", api);

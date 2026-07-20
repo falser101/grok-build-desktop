@@ -40,6 +40,7 @@ import { AccountMenu } from "./AccountMenu";
 import { ExtensionsView, type ExtTab } from "./ExtensionsView";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
+import { FilesTabSection } from "./FilesTabSection";
 
 import { PlanPanel } from "./PlanPanel";
 import { PlanApprovalCard } from "./PlanApprovalCard";
@@ -96,10 +97,12 @@ const RIGHT_DEFAULT = 20;
 const RIGHT_MIN = 14;
 const RIGHT_MAX = 38;
 const RIGHT_COLLAPSE = 7;
-const VIEWER_DEFAULT = 22;
-const VIEWER_MIN = 16;
-const VIEWER_MAX = 42;
-const VIEWER_COLLAPSE = 10;
+/** File-tree pane width inside the right panel's `files` tab, % of the
+ *  right panel's inner width (not of the shell). */
+const FILE_TREE_DEFAULT = 38;
+const FILE_TREE_MIN = 18;
+const FILE_TREE_MAX = 62;
+const FILE_TREE_COLLAPSE = 12;
 const LAYOUT_STORAGE_KEY = "grok-desktop-layout-v2";
 /** Legacy px-based key — migrate once then drop. */
 const LAYOUT_STORAGE_KEY_LEGACY = "grok-desktop-layout";
@@ -151,11 +154,15 @@ type PanelLayout = {
   sidebarPinned: boolean;
   /** Right panel width as % of shell. */
   rightPanelWidth: number;
-  /** File preview column width as % of shell. */
-  viewerWidth: number;
+  /**
+   * Width of the inline file-tree pane inside the right panel's `files`
+   * tab (between the editor area and the tree). % of the right panel's
+   * inner width — pure visual, not a shell column.
+   */
+  fileTreeWidth: number;
 };
 
-type ResizeSide = "left" | "right" | "viewer";
+type ResizeSide = "left" | "right" | "filesTree";
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
@@ -193,7 +200,7 @@ function defaultPanelLayout(): PanelLayout {
     sidebarCollapsed: false,
     sidebarPinned: true,
     rightPanelWidth: RIGHT_DEFAULT,
-    viewerWidth: VIEWER_DEFAULT,
+    fileTreeWidth: FILE_TREE_DEFAULT,
   };
 }
 
@@ -219,11 +226,11 @@ function loadPanelLayout(): PanelLayout {
         RIGHT_MIN,
         RIGHT_MAX,
       ),
-      viewerWidth: normalizeWidthPct(
-        p.viewerWidth,
-        VIEWER_DEFAULT,
-        VIEWER_MIN,
-        VIEWER_MAX,
+      fileTreeWidth: normalizeWidthPct(
+        p.fileTreeWidth,
+        FILE_TREE_DEFAULT,
+        FILE_TREE_MIN,
+        FILE_TREE_MAX,
       ),
     };
   } catch {
@@ -1224,8 +1231,27 @@ export function App() {
     null,
   );
   const [accountBusy, setAccountBusy] = useState(false);
-  /** Currently previewed workspace-relative file path. */
-  const [openFilePath, setOpenFilePath] = useState<string | null>(null);
+  /**
+   * Open file tabs inside the right panel's `files` tab. Each tab maps a
+   * stable React key (`id`) to an absolute path. The active id drives which
+   * file `<FileViewer>` renders.
+   *
+   * We keep this as an array (not a single path) so the user can keep
+   * multiple files open while switching between them — same UX as the
+   * terminal tabs already in this panel.
+   */
+  interface OpenFileTab {
+    id: string;
+    path: string;
+  }
+  const newFileId = () =>
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `f_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const [openFiles, setOpenFiles] = useState<OpenFileTab[]>([]);
+  const [activeFileId, setActiveFileId] = useState<string | null>(null);
+  /** True iff the inline file-tree pane is collapsed to a thin rail. */
+  const [fileTreeCollapsed, setFileTreeCollapsed] = useState(false);
   /** Timeline message id briefly highlighted after pin click. */
   const [flashMsgId, setFlashMsgId] = useState<string | null>(null);
   /** Brief status after export / download. */
@@ -1290,7 +1316,6 @@ export function App() {
     /** Live width applied to DOM during drag (no React re-render). */
     liveW: number;
     rightOpen: boolean;
-    viewerOpen: boolean;
   } | null>(null);
   /** True while a panel edge is being dragged — skip React layout sync / persist. */
   const isResizingRef = useRef(false);
@@ -1300,10 +1325,57 @@ export function App() {
   rightPanelOpenRef.current = rightPanelOpen;
   const rightPanelTabRef = useRef(rightPanelTab);
   rightPanelTabRef.current = rightPanelTab;
-  const openFilePathRef = useRef(openFilePath);
-  openFilePathRef.current = openFilePath;
   const viewRef = useRef(view);
   viewRef.current = view;
+
+  // ── File tab actions ──────────────────────────────────────────────────
+  // The right panel uses an array of tabs instead of a single open file
+  // path. `openFile` is reused by `<FileTree>` and the "+" picker menu.
+  const openFilesRef = useRef(openFiles);
+  openFilesRef.current = openFiles;
+  const activeFileIdRef = useRef(activeFileId);
+  activeFileIdRef.current = activeFileId;
+
+  /** Derived from `openFiles + activeFileId` so legacy refs/derivations
+   *  that gated on a single path keep working unchanged. */
+  const openFilePath = useMemo(
+    () => openFiles.find((f) => f.id === activeFileId)?.path ?? null,
+    [openFiles, activeFileId],
+  );
+  const openFilePathRef = useRef(openFilePath);
+  openFilePathRef.current = openFilePath;
+
+  const openFile = useCallback((path: string) => {
+    setOpenFiles((prev) => {
+      const existing = prev.find((f) => f.path === path);
+      if (existing) {
+        setActiveFileId(existing.id);
+        return prev;
+      }
+      const id = newFileId();
+      setActiveFileId(id);
+      return [...prev, { id, path }];
+    });
+    // Reveal the file tree when the user opens a file from elsewhere
+    // (e.g. chat @-mention). It's collapsed by default in this layout,
+    // so an open file shouldn't strand.
+    setFileTreeCollapsed(false);
+  }, []);
+
+  const closeFile = useCallback((id: string) => {
+    setOpenFiles((prev) => {
+      const idx = prev.findIndex((f) => f.id === id);
+      if (idx < 0) return prev;
+      const next = prev.filter((f) => f.id !== id);
+      setActiveFileId((curr) => {
+        if (curr !== id) return curr;
+        if (next.length === 0) return null;
+        const fallback = next[Math.min(idx, next.length - 1)];
+        return fallback.id;
+      });
+      return next;
+    });
+  }, []);
 
   // Persist panel widths / collapse (skip while actively dragging).
   useEffect(() => {
@@ -1320,17 +1392,11 @@ export function App() {
     (
       leftPct: number,
       rightPct: number | null,
-      viewerPct: number | null = null,
     ) => {
       const el = shellRef.current;
       if (!el) return;
       const fmt = (pct: number) => `${pct.toFixed(2)}%`;
       el.style.setProperty("--sidebar-w", fmt(leftPct));
-      if (viewerPct != null && viewerPct > 0) {
-        el.style.setProperty("--viewer-w", fmt(viewerPct));
-      } else {
-        el.style.setProperty("--viewer-w", "0%");
-      }
       if (rightPct != null && rightPct > 0) {
         el.style.setProperty("--right-panel-w", fmt(rightPct));
       } else {
@@ -1355,24 +1421,16 @@ export function App() {
         ? SIDEBAR_RAIL
         : panelLayout.sidebarWidth
       : 0;
-    const viewerOpen =
-      view === "chat" &&
-      (Boolean(openFilePath) ||
-        (rightPanelOpen && rightPanelTab === "files"));
-    const viewerPct = viewerOpen ? panelLayout.viewerWidth : null;
     const rightPct =
       rightPanelOpen && view === "chat" ? panelLayout.rightPanelWidth : null;
-    applyShellColumns(leftPct, rightPct, viewerPct);
+    applyShellColumns(leftPct, rightPct);
   }, [
     applyShellColumns,
     panelLayout.sidebarCollapsed,
     panelLayout.sidebarPinned,
     panelLayout.sidebarWidth,
     panelLayout.rightPanelWidth,
-    panelLayout.viewerWidth,
     rightPanelOpen,
-    rightPanelTab,
-    openFilePath,
     view,
   ]);
 
@@ -1386,17 +1444,8 @@ export function App() {
           ? SIDEBAR_RAIL
           : layout.sidebarWidth
         : 0;
-      const viewerOpen =
-        viewRef.current === "chat" &&
-        (Boolean(openFilePathRef.current) ||
-          (rightPanelOpenRef.current && rightPanelTabRef.current === "files"));
-      const rightOpen =
-        rightPanelOpenRef.current && viewRef.current === "chat";
-      applyShellColumns(
-        leftPct,
-        rightOpen ? layout.rightPanelWidth : null,
-        viewerOpen ? layout.viewerWidth : null,
-      );
+      const rightOpen = rightPanelOpenRef.current && viewRef.current === "chat";
+      applyShellColumns(leftPct, rightOpen ? layout.rightPanelWidth : null);
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
@@ -1410,16 +1459,12 @@ export function App() {
       const layout = panelLayoutRef.current;
       const rightOpenNow =
         rightPanelOpenRef.current && viewRef.current === "chat";
-      const viewerOpenNow =
-        viewRef.current === "chat" &&
-        (Boolean(openFilePathRef.current) ||
-          (rightPanelOpenRef.current && rightPanelTabRef.current === "files"));
       const startW =
         side === "left"
           ? layout.sidebarWidth
           : side === "right"
             ? layout.rightPanelWidth
-            : layout.viewerWidth;
+            : layout.fileTreeWidth;
       // Set drag ref BEFORE any state so layout effects skip overwriting.
       resizeDragRef.current = {
         side,
@@ -1427,7 +1472,6 @@ export function App() {
         startW,
         liveW: startW,
         rightOpen: rightOpenNow,
-        viewerOpen: viewerOpenNow,
       };
       isResizingRef.current = true;
       // DOM-only chrome — avoid a full React re-render at drag start.
@@ -1446,7 +1490,6 @@ export function App() {
           : layout.sidebarWidth
         : 0;
       const rightFixed = layout.rightPanelWidth;
-      const viewerFixed = layout.viewerWidth;
       const shellW = Math.max(
         1,
         shellRef.current?.clientWidth ?? shellWidthPx(),
@@ -1460,31 +1503,27 @@ export function App() {
           const raw = drag.startW + deltaPct;
           const next = clamp(raw, SIDEBAR_COLLAPSE * 0.45, SIDEBAR_MAX);
           drag.liveW = next;
-          applyShellColumns(
-            next,
-            drag.rightOpen ? rightFixed : null,
-            drag.viewerOpen ? viewerFixed : null,
-          );
+          applyShellColumns(next, drag.rightOpen ? rightFixed : null);
         } else if (drag.side === "right") {
           // Drag left edge: move left = wider right panel.
           const raw = drag.startW - deltaPct;
           const next = clamp(raw, RIGHT_COLLAPSE * 0.45, RIGHT_MAX);
           drag.liveW = next;
-          applyShellColumns(
-            leftFixed,
-            next,
-            drag.viewerOpen ? viewerFixed : null,
-          );
+          applyShellColumns(leftFixed, next);
         } else {
-          // Viewer: drag left edge — move left = wider.
+          // File-tree (inside right panel): drag left edge — move left = wider tree.
           const raw = drag.startW - deltaPct;
-          const next = clamp(raw, VIEWER_COLLAPSE * 0.45, VIEWER_MAX);
+          const next = clamp(raw, FILE_TREE_COLLAPSE * 0.45, FILE_TREE_MAX);
           drag.liveW = next;
-          applyShellColumns(
-            leftFixed,
-            drag.rightOpen ? rightFixed : null,
-            next,
-          );
+          // Right panel width is fixed; we only update a CSS var on the
+          // right panel node, not the shell grid.
+          const rightEl = document.querySelector(".right-panel");
+          if (rightEl) {
+            (rightEl as HTMLElement).style.setProperty(
+              "--files-tree-w",
+              `${next.toFixed(2)}%`,
+            );
+          }
         }
       };
 
@@ -1506,7 +1545,7 @@ export function App() {
           "shell-resizing",
           "shell-resizing-left",
           "shell-resizing-right",
-          "shell-resizing-viewer",
+          "shell-resizing-filesTree",
         );
         document.body.classList.remove("is-resizing-panels");
         // Let terminal / file viewers fit once after the final column widths settle.
@@ -1584,20 +1623,21 @@ export function App() {
               rightPanelWidth: clamp(live, RIGHT_MIN, RIGHT_MAX),
             }));
           }
-        } else if (live < VIEWER_COLLAPSE) {
-          setOpenFilePath(null);
+        } else if (live < FILE_TREE_COLLAPSE) {
+          // Dragged past the collapse threshold — fold the tree to a rail.
+          setFileTreeCollapsed(true);
           setPanelLayout((prev) => ({
             ...prev,
-            viewerWidth: clamp(
-              drag.startW >= VIEWER_MIN ? drag.startW : VIEWER_DEFAULT,
-              VIEWER_MIN,
-              VIEWER_MAX,
+            fileTreeWidth: clamp(
+              drag.startW >= FILE_TREE_MIN ? drag.startW : FILE_TREE_DEFAULT,
+              FILE_TREE_MIN,
+              FILE_TREE_MAX,
             ),
           }));
         } else {
           setPanelLayout((prev) => ({
             ...prev,
-            viewerWidth: clamp(live, VIEWER_MIN, VIEWER_MAX),
+            fileTreeWidth: clamp(live, FILE_TREE_MIN, FILE_TREE_MAX),
           }));
         }
       };
@@ -1611,7 +1651,8 @@ export function App() {
 
   // Close file preview when workspace changes.
   useEffect(() => {
-    setOpenFilePath(null);
+    setOpenFiles([]);
+    setActiveFileId(null);
   }, [snap.workspace]);
 
   // Reset permission cursor when a new prompt becomes front-of-queue.
@@ -2243,7 +2284,8 @@ export function App() {
     setLocalError(null);
     setView("chat");
     setWsMenuOpen(false);
-    setOpenFilePath(null);
+    setOpenFiles([]);
+    setActiveFileId(null);
     try {
       await window.desktop.prepareNewChat();
       textareaRef.current?.focus();
@@ -3782,9 +3824,6 @@ export function App() {
   );
 
   const rightOpen = rightPanelOpen && view === "chat";
-  const filesPanelActive = rightOpen && rightPanelTab === "files";
-  const showViewerColumn =
-    view === "chat" && (Boolean(openFilePath) || filesPanelActive);
 
   /**
    * Height of the History Timeline's inner track. Drives both the inline
@@ -4309,7 +4348,7 @@ export function App() {
       ref={shellRef}
       className={`shell ${rightOpen ? "shell-right-open" : ""} ${
         panelLayout.sidebarCollapsed ? "shell-sidebar-collapsed" : ""
-      } ${showViewerColumn ? "shell-viewer-open" : ""} ${
+      } ${
         view === "settings" ? "shell-view-settings" : ""
       }`}
     >
@@ -5798,51 +5837,6 @@ export function App() {
         )}
       </section>
 
-      {showViewerColumn ? (
-        <section
-          className="viewer-column"
-          aria-label={m.filesPreview}
-        >
-          <div
-            className="resize-handle resize-handle-viewer"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={m.resizeViewer}
-            title={m.resizeViewer}
-            onPointerDown={onResizePointerDown("viewer")}
-            onDoubleClick={() => {
-              if (openFilePath) setOpenFilePath(null);
-              else if (filesPanelActive) setRightPanelOpen(false);
-            }}
-          />
-          {openFilePath ? (
-            <FileViewer
-              path={openFilePath}
-              m={m}
-              onClose={() => setOpenFilePath(null)}
-              onInsertMention={insertFileMention}
-            />
-          ) : (
-            <div className="file-viewer-empty-state">
-              <div className="file-viewer-empty-icon" aria-hidden>
-                <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-                  <path
-                    d="M8 12.5A3 3 0 0 1 11 9.5h6l2.5 3H29a3 3 0 0 1 3 3V28a3 3 0 0 1-3 3H11a3 3 0 0 1-3-3V12.5Z"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <div className="file-viewer-empty-title">{m.openFileEmpty}</div>
-              <div className="file-viewer-empty-hint">
-                {m.openFileEmptyHint}
-              </div>
-            </div>
-          )}
-        </section>
-      ) : null}
-
       {view === "chat" ? (
         <button
           type="button"
@@ -5987,14 +5981,20 @@ export function App() {
                 </button>
               </nav>
             ) : rightPanelTab === "files" ? (
-              <FileTree
+              <FilesTabSection
                 workspace={snap.workspace}
-                selectedPath={openFilePath}
-                onSelectFile={(p) => {
-                  setOpenFilePath(p);
-                }}
-                onClose={() => setRightPanelTab("menu")}
                 m={m}
+                openFiles={openFiles}
+                activeFileId={activeFileId}
+                activeFilePath={openFilePath}
+                treeCollapsed={fileTreeCollapsed}
+                fileTreeWidth={panelLayout.fileTreeWidth}
+                onActivate={(id) => setActiveFileId(id)}
+                onClose={closeFile}
+                onNewFile={openFile}
+                onSetFileTreeCollapsed={setFileTreeCollapsed}
+                onResizePointerDown={onResizePointerDown("filesTree")}
+                onInsertMention={insertFileMention}
               />
             ) : rightPanelTab === "plan" ? (
               <PlanPanel

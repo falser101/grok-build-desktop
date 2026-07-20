@@ -38,7 +38,6 @@ html[data-theme="dark"] {
   --sidebar-w: 18%;
   --files-w: 18%;
   --right-panel-w: 20%;
-  --viewer-w: 22%;
   --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   --mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   /* Syntax highlight tokens (dark) */
@@ -151,17 +150,8 @@ button {
 }
 
 /* Shell columns are also written inline by applyShellColumns during resize. */
-.shell.shell-right-open:not(.shell-viewer-open) {
+.shell.shell-right-open {
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--right-panel-w);
-}
-
-.shell.shell-viewer-open:not(.shell-right-open) {
-  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--viewer-w);
-}
-
-.shell.shell-viewer-open.shell-right-open {
-  grid-template-columns:
-    var(--sidebar-w) minmax(0, 1fr) var(--viewer-w) var(--right-panel-w);
 }
 
 /* Settings is a fullscreen route — it owns the whole shell area, no
@@ -176,8 +166,7 @@ button {
 .shell.shell-view-settings > .sidebar,
 .shell.shell-view-settings > .sidebar-rail,
 .shell.shell-view-settings > .sidebar-hover-overlay,
-.shell.shell-view-settings > .right-panel,
-.shell.shell-view-settings > .viewer-column {
+.shell.shell-view-settings > .right-panel {
   display: none !important;
 }
 
@@ -200,7 +189,6 @@ body.is-resizing-panels * {
 
 .shell.shell-resizing .sidebar,
 .shell.shell-resizing .right-panel,
-.shell.shell-resizing .viewer-column,
 .shell.shell-resizing .main {
   pointer-events: none;
   transition: none !important;
@@ -299,30 +287,8 @@ body.is-resizing-panels .file-tree {
   right: -3px;
 }
 
-.resize-handle-right,
-.resize-handle-viewer {
+.resize-handle-right {
   left: -3px;
-}
-
-/* ── File preview column (shell-level, separate from chat) ── */
-
-.viewer-column {
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  max-height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--bg-elevated);
-  border-left: 1px solid var(--border);
-  box-shadow: -8px 0 24px color-mix(in srgb, var(--shadow) 55%, transparent);
-}
-
-.viewer-column .file-viewer {
-  flex: 1 1 auto;
-  min-height: 0;
 }
 
 /* ── Sidebar ───────────────────────────────────────── */
@@ -6445,6 +6411,247 @@ html[data-theme="light"] .icon-btn.send {
   line-height: 1.45;
 }
 
+/* ── Files tab section (right-panel `files` tab) ─────── */
+/* Trae / Cursor-style multi-tab file workspace: tabs at top, optional
+ * inline file tree on the right with a draggable split handle. */
+
+.files-section-root {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  --files-tree-w: 38%;
+}
+
+.files-section-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.files-section-open-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 8px;
+  background: var(--bg-hover);
+  color: var(--text);
+  border: none;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.files-section-open-btn:hover {
+  background: color-mix(in srgb, var(--bg-hover) 70%, var(--text) 6%);
+}
+.files-section-open-icon { display: inline-flex; align-items: center; }
+.files-section-open-label { font-weight: 600; }
+
+.files-section-breadcrumb {
+  flex: 1 1 auto;
+  min-width: 80px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.files-section-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 50%;
+  overflow-x: auto;
+  /* Hide scrollbar (cosmetic only — chrome on macOS would look off). */
+  scrollbar-width: none;
+}
+.files-section-tabs::-webkit-scrollbar { display: none; }
+
+.files-tab {
+  flex: 0 0 auto;
+  max-width: 180px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 8px;
+  border-radius: 6px 6px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-bottom: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.files-tab:hover { color: var(--text); background: var(--bg-hover); }
+.files-tab.active {
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border);
+}
+.files-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+.files-tab-close {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 3px;
+}
+.files-tab-close:hover { background: var(--bg-hover); }
+
+.files-section-add-wrap,
+.files-section-editor-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.files-section-add,
+.files-section-editor-btn,
+.files-section-toggle-tree {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.files-section-add { width: 22px; padding: 0; }
+.files-section-editor-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.files-section-toggle-tree { padding: 4px 7px; }
+.files-section-add:hover,
+.files-section-editor-btn:not(:disabled):hover,
+.files-section-toggle-tree:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.files-section-divider {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+/* Right side: editor pane (flex) | split handle | tree pane (CSS var). */
+.files-section-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+.files-section-editor {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  background: var(--bg-elevated);
+}
+.files-section-editor > .file-viewer,
+.files-section-editor > .file-viewer-empty-state {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.resize-handle-files-tree {
+  position: relative;
+  flex: 0 0 6px;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+}
+.resize-handle-files-tree::after {
+  content: "";
+  position: absolute;
+  left: 2.5px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+.resize-handle-files-tree:hover::after {
+  background: var(--accent, #5b8def);
+}
+
+.files-section-tree {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  border-left: 1px solid var(--border);
+  /* Override inline width passed by App via JS. */
+  width: var(--files-tree-w, 38%) !important;
+  /* But keep a floor — never collapse the filter input. */
+  min-width: 180px;
+}
+
+.files-section-tree .file-tree {
+  height: 100%;
+}
+
+.files-section-tree-rail {
+  flex: 0 0 32px;
+  width: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  background: var(--bg-sidebar);
+  border-left: 1px solid var(--border);
+}
+
+.files-section-tree-rail-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.files-section-tree-rail-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.dropdown-empty {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
 /* ── File viewer ───────────────────────────────────── */
 
 .file-viewer {
@@ -6759,7 +6966,6 @@ html[data-theme="light"] .icon-btn.send {
   html[data-theme="light"] {
     --sidebar-w: 16%;
     --right-panel-w: 18%;
-    --viewer-w: 20%;
   }
 }
 
@@ -6769,7 +6975,6 @@ html[data-theme="light"] .icon-btn.send {
   html[data-theme="light"] {
     --sidebar-w: 14%;
     --right-panel-w: 22%;
-    --viewer-w: 24%;
   }
 }
 

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 import { AgentBackend } from "./backend";
 import {
   runGrokInstaller,
@@ -914,6 +915,59 @@ function registerIpc(): void {
       }
       await setChannel(channel);
       return getChannel();
+    },
+  );
+
+  // ── "Open in editor…" support ──────────────────────────────────────
+  // Phase 1: static known-editor catalogue (no PATH probing yet). The
+  // renderer just calls openInEditor with the id and we spawn the
+  // launcher detached. `system-default` defers to Electron's shell helper
+  // (which uses the OS-registered file association).
+  ipcMain.handle("files:listExternalEditors", async () => {
+    return [
+      { id: "vscode", label: "VS Code", available: true },
+      { id: "vscode-insiders", label: "VS Code Insiders", available: true },
+      { id: "cursor", label: "Cursor", available: true },
+      { id: "sublime", label: "Sublime Text", available: true },
+      { id: "zed", label: "Zed", available: true },
+      { id: "webstorm", label: "WebStorm", available: true },
+      { id: "system-default", label: "System default", available: true },
+    ];
+  });
+
+  ipcMain.handle(
+    "files:openInEditor",
+    async (_e, editorId: string, filePath: string) => {
+      if (!filePath || typeof filePath !== "string") {
+        throw new Error("filePath is required");
+      }
+      if (editorId === "system-default") {
+        const result = await shell.openPath(filePath);
+        if (result) throw new Error(result); // shell.openPath returns error string on failure
+        return;
+      }
+      const cmds: Record<string, string[]> = {
+        vscode: ["code", "--reuse-window", filePath],
+        "vscode-insiders": ["code-insiders", "--reuse-window", filePath],
+        cursor: ["cursor", filePath],
+        sublime: ["subl", filePath],
+        zed: ["zed", filePath],
+        webstorm: ["webstorm", filePath],
+      };
+      const args = cmds[editorId];
+      if (!args) throw new Error(`Unknown editor: ${editorId}`);
+      const child = spawn(args[0], args.slice(1), {
+        detached: true,
+        stdio: "ignore",
+        shell: false,
+      });
+      child.on("error", (err) => {
+        console.warn(
+          `[files:openInEditor] spawn ${args[0]} failed:`,
+          err.message,
+        );
+      });
+      child.unref();
     },
   );
 }
