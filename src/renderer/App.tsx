@@ -5312,13 +5312,6 @@ export function App() {
                                           <span className="di-title">
                                             {mod.name}
                                           </span>
-                                          <span className="di-desc">
-                                            {mod.modelId}
-                                            {mod.description &&
-                                            mod.description !== group.name
-                                              ? ` · ${mod.description}`
-                                              : ""}
-                                          </span>
                                         </button>
                                       ))}
                                     </div>
