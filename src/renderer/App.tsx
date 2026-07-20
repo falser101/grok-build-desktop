@@ -1524,8 +1524,47 @@ export function App() {
   const openFilePathRef = useRef(openFilePath);
   openFilePathRef.current = openFilePath;
 
+  /**
+   * Open a brand-new files tab (used by the `+` menu / terminal "open
+   * file" action). Does NOT replace the active tab's path.
+   */
   const openFile = useCallback((path: string) => {
     setRightPanelTabs((prev) => {
+      // Empty path = blank picker tab; never dedupe those.
+      if (path) {
+        const existing = prev.find(
+          (t) => t.kind === "files" && t.path === path,
+        );
+        if (existing) {
+          setActiveTabId(existing.id);
+          return prev;
+        }
+      }
+      const id = newRightTabId();
+      setActiveTabId(id);
+      return [...prev, { id, kind: "files", path }];
+    });
+    setRightPanelOpen(true);
+    setFileTreeCollapsed(false);
+  }, []);
+
+  /**
+   * Select a file inside the currently active files tab — updates that
+   * tab's path in place so the left editor pane shows the file without
+   * spawning a new tab chip.
+   */
+  const selectFileInActiveTab = useCallback((path: string) => {
+    if (!path) return;
+    setRightPanelTabs((prev) => {
+      const active = prev.find((t) => t.id === activeTabIdRef.current);
+      if (active?.kind === "files") {
+        return prev.map((t) =>
+          t.id === active.id && t.kind === "files"
+            ? { ...t, path }
+            : t,
+        );
+      }
+      // No active files tab — fall back to openFile behaviour.
       const existing = prev.find(
         (t) => t.kind === "files" && t.path === path,
       );
@@ -6266,7 +6305,7 @@ export function App() {
                   treeCollapsed={fileTreeCollapsed}
                   fileTreeWidth={panelLayout.fileTreeWidth}
                   onClose={() => closeRightTab(activeTab.id)}
-                  onNewFile={openFile}
+                  onNewFile={selectFileInActiveTab}
                   onSetFileTreeCollapsed={setFileTreeCollapsed}
                   onResizePointerDown={onResizePointerDown("filesTree")}
                   onInsertMention={insertFileMention}
