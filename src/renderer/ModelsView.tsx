@@ -23,12 +23,16 @@ import { usePrefs } from "./PrefsContext";
 const ModelRow = memo(function ModelRow({
   mod,
   onToggle,
+  onToggle1M,
   m,
 }: {
   mod: ModelProviderModel;
   onToggle: () => void;
+  onToggle1M: () => void;
   m: Messages;
 }) {
+  const has1M =
+    typeof mod.contextWindow === "number" && mod.contextWindow >= 1_000_000;
   return (
     <label className={`models-model-row ${mod.enabled ? "on" : ""}`}>
       <span className="models-model-check" aria-hidden>
@@ -49,6 +53,18 @@ const ModelRow = memo(function ModelRow({
       >
         {mod.source === "fetched" ? m.modelsSourceFetched : m.modelsSourceManual}
       </span>
+      <label
+        className="models-1m-check"
+        title={m.models1MTooltip}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          checked={has1M}
+          onChange={onToggle1M}
+        />
+        <span className="models-1m-label">1M</span>
+      </label>
     </label>
   );
 });
@@ -586,6 +602,7 @@ export function ModelsView({
           configKey: m.configKey || undefined,
           source: m.source,
           enabled: m.enabled,
+          contextWindow: m.contextWindow,
         })),
       };
       if (!input.name) throw new Error(m.modelsNameRequired);
@@ -717,6 +734,27 @@ export function ModelsView({
         ...e,
         models: e.models.map((m) =>
           m.id === modelId ? { ...m, enabled: !m.enabled } : m,
+        ),
+      };
+    });
+  };
+
+  const toggle1M = (modelId: string) => {
+    setEditor((e) => {
+      if (!e) return e;
+      return {
+        ...e,
+        models: e.models.map((m) =>
+          m.id === modelId
+            ? {
+                ...m,
+                contextWindow:
+                  typeof m.contextWindow === "number" &&
+                  m.contextWindow >= 1_000_000
+                    ? undefined
+                    : 1_000_000,
+              }
+            : m,
         ),
       };
     });
@@ -1324,6 +1362,7 @@ export function ModelsView({
                       key={mod.id}
                       mod={mod}
                       onToggle={() => toggleModel(mod.id)}
+                      onToggle1M={() => toggle1M(mod.id)}
                       m={m}
                     />
                   ))

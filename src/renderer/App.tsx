@@ -40,13 +40,13 @@ import { AccountMenu } from "./AccountMenu";
 import { ExtensionsView, type ExtTab } from "./ExtensionsView";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
-import { ModelsView } from "./ModelsView";
+
 import { PlanPanel } from "./PlanPanel";
 import { PlanApprovalCard } from "./PlanApprovalCard";
 import { PlanProgressBubble } from "./PlanProgressBubble";
 import { WaitingSessionsBanner } from "./WaitingSessionsBanner";
 import { usePrefs } from "./PrefsContext";
-import { SettingsView } from "./SettingsView";
+import { SettingsView, type SettingsSectionId } from "./SettingsView";
 import { TerminalPanel } from "./TerminalPanel";
 import { ToolCard } from "./ToolCard";
 import {
@@ -104,10 +104,51 @@ const LAYOUT_STORAGE_KEY = "grok-desktop-layout-v2";
 /** Legacy px-based key — migrate once then drop. */
 const LAYOUT_STORAGE_KEY_LEGACY = "grok-desktop-layout";
 
+/**
+ * Sidebar toggle icons matching the right-panel toggle style:
+ * a simple window outline (rect) with a single vertical divider line.
+ * No extra content lines — same clean look as chat-side-toggle.
+ *
+ *   collapse (pinned + expanded) → divider at x=6  (sidebar visible, 4u)
+ *   expand  (pinned + collapsed) → divider at x=5  (rail, 3u — matches right toggle's closed proportion)
+ *   pin     (unpinned / hover)   → divider at x=5  (same as collapsed)
+ */
+
+function SidebarIcon({
+  name,
+}: {
+  name: "collapse" | "expand" | "pin";
+}): React.ReactElement {
+  const dividerX = name === "collapse" ? 6 : 5;
+  return (
+    <svg
+      className="sidebar-toggle-icon"
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="2" y="3" width="12" height="10" rx="1.5" />
+      <path d={`M${dividerX} 3v10`} />
+    </svg>
+  );
+}
+
 type PanelLayout = {
   /** Sidebar width as % of shell (0–100). */
   sidebarWidth: number;
   sidebarCollapsed: boolean;
+  /**
+   * Whether the sidebar is "pinned" open. When false, the sidebar is hidden
+   * and only revealed by hovering the cursor near the left edge of the window.
+   * Cmd/Ctrl+B toggles pin. Default = pinned (true).
+   */
+  sidebarPinned: boolean;
   /** Right panel width as % of shell. */
   rightPanelWidth: number;
   /** File preview column width as % of shell. */
@@ -150,6 +191,7 @@ function defaultPanelLayout(): PanelLayout {
   return {
     sidebarWidth: SIDEBAR_DEFAULT,
     sidebarCollapsed: false,
+    sidebarPinned: true,
     rightPanelWidth: RIGHT_DEFAULT,
     viewerWidth: VIEWER_DEFAULT,
   };
@@ -170,6 +212,7 @@ function loadPanelLayout(): PanelLayout {
         SIDEBAR_MAX,
       ),
       sidebarCollapsed: Boolean(p.sidebarCollapsed),
+      sidebarPinned: p.sidebarPinned === undefined ? true : Boolean(p.sidebarPinned),
       rightPanelWidth: normalizeWidthPct(
         p.rightPanelWidth,
         RIGHT_DEFAULT,
@@ -965,7 +1008,7 @@ function userPromptsFromTimeline(timeline: TimelineItem[]): string[] {
   }
   return chrono.reverse();
 }
-type MainView = "chat" | "settings" | "extensions" | "models";
+type MainView = "chat" | "settings" | "extensions";
 
 interface ModelGroup {
   id: string;
@@ -1081,9 +1124,25 @@ export function App() {
   const suggestRafRef = useRef<number | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  /**
+   * In auto (hover) mode the sidebar floats as an overlay. This state holds
+   * whether the overlay is currently revealed (mouse is near the left edge
+   * or hovering the overlay itself).
+   */
+  const [sidebarHoverOpen, setSidebarHoverOpen] = useState(false);
+  /** Set to true once user moves the mouse into the sidebar in hover mode. */
+  const sidebarHoverActiveRef = useRef(false);
   const [menu, setMenu] = useState<MenuKind>(null);
   const [view, setView] = useState<MainView>("chat");
   const [extTab, setExtTab] = useState<ExtTab>("mcp");
+  /**
+   * Section to land on inside Settings. Defaults to "general" — the
+   * Settings view re-reads this every time it mounts, so external callers
+   * (e.g. the model dropdown's "Manage models" item) just set this then
+   * switch the main view to "settings".
+   */
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSectionId>("general");
   /** Desktop provider configKey → provider (for composer grouping). */
   const [modelKeyIndex, setModelKeyIndex] = useState<ModelConfigKeyIndex>({});
   /** Filter model menu by provider id (`all` = every group). */
@@ -1169,8 +1228,6 @@ export function App() {
   const [openFilePath, setOpenFilePath] = useState<string | null>(null);
   /** Timeline message id briefly highlighted after pin click. */
   const [flashMsgId, setFlashMsgId] = useState<string | null>(null);
-  /** Export conversation dropdown (copy MD / download .md). */
-  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   /** Brief status after export / download. */
   const [exportToast, setExportToast] = useState<string | null>(null);
   /**
@@ -1181,7 +1238,10 @@ export function App() {
   const [pinnedUser, setPinnedUser] = useState<UserTimelineItem | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const chatPaneRef = useRef<HTMLDivElement | null>(null);
-  const exportMenuRef = useRef<HTMLDivElement | null>(null);
+  // Top-of-chat overflow menu (rename / fork / export / delete on the
+  // active conversation). Distinct from the sidebar's per-session ctx menu.
+  const chatActionsRef = useRef<HTMLDivElement | null>(null);
+  const [chatActionsOpen, setChatActionsOpen] = useState(false);
   const exportToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -1288,9 +1348,13 @@ export function App() {
   // (During drag, pointer handlers own the grid columns via applyShellColumns.)
   useLayoutEffect(() => {
     if (isResizingRef.current || resizeDragRef.current) return;
-    const leftPct = panelLayout.sidebarCollapsed
-      ? SIDEBAR_RAIL
-      : panelLayout.sidebarWidth;
+    // Auto (hover) mode: the grid reserves zero width and the sidebar floats
+    // as a fixed-position overlay. Pinned-but-collapsed: keep the thin rail.
+    const leftPct = panelLayout.sidebarPinned
+      ? panelLayout.sidebarCollapsed
+        ? SIDEBAR_RAIL
+        : panelLayout.sidebarWidth
+      : 0;
     const viewerOpen =
       view === "chat" &&
       (Boolean(openFilePath) ||
@@ -1302,6 +1366,7 @@ export function App() {
   }, [
     applyShellColumns,
     panelLayout.sidebarCollapsed,
+    panelLayout.sidebarPinned,
     panelLayout.sidebarWidth,
     panelLayout.rightPanelWidth,
     panelLayout.viewerWidth,
@@ -1316,9 +1381,11 @@ export function App() {
     const onResize = () => {
       if (isResizingRef.current || resizeDragRef.current) return;
       const layout = panelLayoutRef.current;
-      const leftPct = layout.sidebarCollapsed
-        ? SIDEBAR_RAIL
-        : layout.sidebarWidth;
+      const leftPct = layout.sidebarPinned
+        ? layout.sidebarCollapsed
+          ? SIDEBAR_RAIL
+          : layout.sidebarWidth
+        : 0;
       const viewerOpen =
         viewRef.current === "chat" &&
         (Boolean(openFilePathRef.current) ||
@@ -1373,9 +1440,11 @@ export function App() {
         /* ignore */
       }
 
-      const leftFixed = layout.sidebarCollapsed
-        ? SIDEBAR_RAIL
-        : layout.sidebarWidth;
+      const leftFixed = layout.sidebarPinned
+        ? layout.sidebarCollapsed
+          ? SIDEBAR_RAIL
+          : layout.sidebarWidth
+        : 0;
       const rightFixed = layout.rightPanelWidth;
       const viewerFixed = layout.viewerWidth;
       const shellW = Math.max(
@@ -1477,8 +1546,13 @@ export function App() {
 
         if (drag.side === "left") {
           if (live < SIDEBAR_COLLAPSE) {
+            // Shrinking below the threshold hides the sidebar entirely
+            // (hover mode) rather than collapsing it into the thin rail —
+            // matches the right-panel behavior where dragging past its
+            // collapse threshold closes the panel completely.
             setPanelLayout((prev) => ({
               ...prev,
+              sidebarPinned: false,
               sidebarCollapsed: true,
               sidebarWidth: clamp(
                 drag.startW >= SIDEBAR_MIN ? drag.startW : SIDEBAR_DEFAULT,
@@ -2009,30 +2083,40 @@ export function App() {
     };
   }, [wsMenuOpen]);
 
-  // Close export menu on outside click or Escape
+  // Close the top-of-chat overflow menu on outside click or Escape.
+  // Capture-phase pointerdown so nested stopPropagation (composer, timeline
+  // rail, etc.) cannot swallow the event; defer attach so the opening click
+  // does not immediately re-close the menu.
   useEffect(() => {
-    if (!exportMenuOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (
-        exportMenuRef.current &&
-        !exportMenuRef.current.contains(e.target as Node)
-      ) {
-        setExportMenuOpen(false);
+    if (!chatActionsOpen) return;
+    const onDoc = (e: Event) => {
+      const root = chatActionsRef.current;
+      if (!root) return;
+      const target = e.target as Node | null;
+      if (target && root.contains(target)) return;
+      // Shadow / retargeted events: also check the composed path.
+      if (typeof (e as PointerEvent).composedPath === "function") {
+        const path = (e as PointerEvent).composedPath();
+        if (path.includes(root)) return;
       }
+      setChatActionsOpen(false);
     };
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        setExportMenuOpen(false);
+        setChatActionsOpen(false);
       }
     };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
+    const t = window.setTimeout(() => {
+      document.addEventListener("pointerdown", onDoc, true);
+      document.addEventListener("keydown", onKey);
+    }, 0);
     return () => {
-      document.removeEventListener("mousedown", onDoc);
+      window.clearTimeout(t);
+      document.removeEventListener("pointerdown", onDoc, true);
       document.removeEventListener("keydown", onKey);
     };
-  }, [exportMenuOpen]);
+  }, [chatActionsOpen]);
 
   // Close session context menu on outside click / Escape
   useEffect(() => {
@@ -2209,7 +2293,7 @@ export function App() {
   ]);
 
   const onExportCopyMarkdown = useCallback(async () => {
-    setExportMenuOpen(false);
+    setChatActionsOpen(false);
     if (snap.timeline.length === 0) {
       showExportToast(m.exportEmpty);
       return;
@@ -2230,7 +2314,7 @@ export function App() {
   ]);
 
   const onExportDownloadMarkdown = useCallback(() => {
-    setExportMenuOpen(false);
+    setChatActionsOpen(false);
     if (snap.timeline.length === 0) {
       showExportToast(m.exportEmpty);
       return;
@@ -2363,6 +2447,50 @@ export function App() {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
   }, []);
+
+  // Project the active snap into a SessionSummary-shaped object so the
+  // existing rename / fork / delete callbacks (which already take
+  // SessionSummary for the sidebar ctx menu) can be reused from the
+  // top-of-chat overflow menu without changing their signatures.
+  const activeSessionForMenu = useMemo<SessionSummary | null>(() => {
+    if (!snap.sessionId) return null;
+    return {
+      sessionId: snap.sessionId,
+      cwd: snap.workspace || "",
+      project: projectFromCwd(snap.workspace || ""),
+      title: snap.sessionTitle || "",
+      updatedAt: "",
+      modelId: snap.modelId,
+    };
+  }, [snap.sessionId, snap.workspace, snap.sessionTitle, snap.modelId]);
+
+  const onRenameActiveSession = useCallback(() => {
+    setChatActionsOpen(false);
+    if (!activeSessionForMenu) return;
+    beginRename(activeSessionForMenu);
+  }, [activeSessionForMenu, beginRename]);
+
+  const onForkActiveSession = useCallback(() => {
+    setChatActionsOpen(false);
+    if (!activeSessionForMenu) return;
+    void onForkSession(activeSessionForMenu);
+  }, [activeSessionForMenu, onForkSession]);
+
+  const onDeleteActiveSession = useCallback(() => {
+    setChatActionsOpen(false);
+    if (!activeSessionForMenu) return;
+    void onDeleteSession(activeSessionForMenu);
+  }, [activeSessionForMenu, onDeleteSession]);
+
+  const onCopyMarkdownFromMenu = useCallback(() => {
+    setChatActionsOpen(false);
+    void onExportCopyMarkdown();
+  }, [onExportCopyMarkdown]);
+
+  const onDownloadMarkdownFromMenu = useCallback(() => {
+    setChatActionsOpen(false);
+    onExportDownloadMarkdown();
+  }, [onExportDownloadMarkdown]);
 
   const onSessionContextMenu = useCallback(
     (e: ReactMouseEvent, session: SessionSummary) => {
@@ -3137,8 +3265,14 @@ export function App() {
     setView("extensions");
   }, []);
 
-  const openModels = useCallback(() => {
-    setView("models");
+  /**
+   * Navigate into Settings and pre-select a specific section. Used by the
+   * composer model's "Manage models…" item, which now lands inside
+   * Settings → 模型 instead of opening the standalone Models view.
+   */
+  const openSettingsSection = useCallback((section: SettingsSectionId) => {
+    setSettingsSection(section);
+    setView("settings");
   }, []);
 
   const refreshModelIndex = useCallback(async () => {
@@ -3681,138 +3815,40 @@ export function App() {
   const toggleSidebar = useCallback(() => {
     setPanelLayout((p) => ({
       ...p,
-      sidebarCollapsed: !p.sidebarCollapsed,
+      // Cmd/Ctrl+B toggles between "pinned" and "auto (hover)" modes.
+      sidebarPinned: !p.sidebarPinned,
+      // Switching into pinned mode always reveals the sidebar so the user
+      // immediately sees it; switching into hover mode collapses it.
+      sidebarCollapsed: !p.sidebarPinned ? false : true,
     }));
   }, []);
 
-  const openRightTool = useCallback(
-    (tab: "files" | "terminal" | "plan") => {
-      if (tab === "terminal") setTermKeepAlive(true);
-      setRightPanelTab(tab);
-      setRightPanelOpen(true);
-    },
-    [],
-  );
-
-  const respondPlanApproval = useCallback(
-    (
-      requestId: string,
-      outcome: PlanApprovalOutcome,
-      feedback?: string,
-    ) => {
-      void window.desktop.respondPlanApproval(requestId, outcome, feedback);
-    },
-    [],
-  );
-
-  const refreshPlanContent = useCallback(() => {
-    void window.desktop.refreshPlanContent();
+  // Collapsing the sidebar from the top-left ◀ button means the user
+  // wants it out of the way — switch straight into hover (auto) mode so
+  // there is no visible rail, and the overlay only appears on left-edge hover.
+  const collapseSidebar = useCallback(() => {
+    setPanelLayout((p) => ({
+      ...p,
+      sidebarPinned: false,
+      sidebarCollapsed: true,
+    }));
   }, []);
 
-  // Ctrl/Cmd+B toggles the left session sidebar (always available).
-  useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod || e.altKey || e.shiftKey) return;
-      if (e.key === "b" || e.key === "B") {
-        e.preventDefault();
-        e.stopPropagation();
-        toggleSidebar();
-      }
-    };
-    document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
-  }, [toggleSidebar]);
+  const expandSidebar = useCallback(() => {
+    setPanelLayout((p) => ({
+      ...p,
+      sidebarCollapsed: false,
+    }));
+  }, []);
 
-  // Shortcuts open the right panel into a specific tool (panel stays open).
-  useEffect(() => {
-    if (view !== "chat") return;
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod || e.altKey) return;
-      if (e.key === "p" || e.key === "P") {
-        if (e.shiftKey) {
-          e.preventDefault();
-          e.stopPropagation();
-          openRightTool("plan");
-          return;
-        }
-        e.preventDefault();
-        e.stopPropagation();
-        openRightTool("files");
-        return;
-      }
-      if (e.key === "`") {
-        e.preventDefault();
-        e.stopPropagation();
-        openRightTool("terminal");
-        return;
-      }
-    };
-    document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
-  }, [view, openRightTool]);
-
-  // Auto-open Plan panel when a plan approval arrives or todos first appear.
-  const prevPlanApprovalRef = useRef<string | null>(null);
-  const prevTodoCountRef = useRef(0);
-  useEffect(() => {
-    if (view !== "chat") return;
-    const approvalId = snap.pendingPlanApproval?.requestId ?? null;
-    if (approvalId && approvalId !== prevPlanApprovalRef.current) {
-      openRightTool("plan");
-    }
-    prevPlanApprovalRef.current = approvalId;
-
-    const n = snap.todos?.length ?? 0;
-    if (n > 0 && prevTodoCountRef.current === 0 && !rightPanelOpen) {
-      // Soft open: only when panel is closed and todos appear for the first time.
-      openRightTool("plan");
-    }
-    prevTodoCountRef.current = n;
-  }, [
-    view,
-    snap.pendingPlanApproval?.requestId,
-    snap.todos?.length,
-    rightPanelOpen,
-    openRightTool,
-  ]);
-
-  return (
-    <div
-      ref={shellRef}
-      className={`shell ${rightOpen ? "shell-right-open" : ""} ${
-        panelLayout.sidebarCollapsed ? "shell-sidebar-collapsed" : ""
-      } ${showViewerColumn ? "shell-viewer-open" : ""}`}
-    >
-      {loading && view === "chat" ? <div className="loading-bar" /> : null}
-
-      {snap.pendingQuestion ? (
-        <AskUserQuestionModal
-          request={snap.pendingQuestion}
-          m={m}
-          onSubmit={(response) => void onAskUserQuestion(response)}
-        />
-      ) : null}
-
-      {panelLayout.sidebarCollapsed ? (
-        <div className="sidebar-rail">
-          <button
-            type="button"
-            className="sidebar-rail-btn"
-            title={m.sidebarExpand}
-            aria-label={m.sidebarExpand}
-            onClick={toggleSidebar}
-          >
-            <span className="sidebar-rail-icon" aria-hidden>
-              <span />
-              <span />
-              <span />
-            </span>
-          </button>
-        </div>
-      ) : (
-      <aside className="sidebar">
+  // Shared body of the left sidebar. Used in two places:
+  //   - "pinned"  → inside the grid column when sidebarPinned && !sidebarCollapsed.
+  //   - "hover"   → inside the floating overlay revealed by left-edge hover.
+  // The `mode` argument only changes which top button is shown (collapse vs.
+  // pin-to-grid) and whether the resize handle is rendered.
+  const sidebarBody = useMemo(() => {
+    return (mode: "pinned" | "hover"): React.ReactNode => (
+      <>
         <div className="sidebar-top">
           <button
             className="nav-btn primary"
@@ -3841,15 +3877,6 @@ export function App() {
             <span className="icon">🧩</span>
             <span className="nav-label">{m.navExtensions}</span>
           </button>
-          <button
-            className={`nav-btn ${view === "models" ? "active" : ""}`}
-            onClick={() => openModels()}
-            title={m.navModels}
-            aria-label={m.navModels}
-          >
-            <span className="icon">◎</span>
-            <span className="nav-label">{m.navModels}</span>
-          </button>
         </div>
 
         <div className="sidebar-search">
@@ -3876,40 +3903,40 @@ export function App() {
                 )?.status;
                 const statusLabel = sessionStatusLabel(hitStatus, m);
                 return (
-                <button
-                  key={`hit-${hit.sessionId}`}
-                  className={`session-item search-hit ${
-                    hit.sessionId === snap.sessionId && view === "chat"
-                      ? "active"
-                      : ""
-                  }${hitStatus && hitStatus !== "idle" ? ` is-${hitStatus.replace("_", "-")}` : ""}`}
-                  title={
-                    statusLabel
-                      ? `${hit.summary || m.untitledSession} · ${statusLabel}`
-                      : hit.snippet || hit.summary
-                  }
-                  onClick={() => void loadSearchHit(hit)}
-                  onContextMenu={(e) =>
-                    onSessionContextMenu(e, {
-                      sessionId: hit.sessionId,
-                      cwd: hit.cwd,
-                      project: projectFromCwd(hit.cwd),
-                      title: hit.summary || m.untitledSession,
-                      updatedAt: hit.updatedAt,
-                      status: hitStatus,
-                    })
-                  }
-                >
-                  <span className="session-item-row">
-                    <SessionStatusIcon status={hitStatus} label={statusLabel} />
-                    <span className="session-title">
-                      {hit.summary || m.untitledSession}
+                  <button
+                    key={`hit-${hit.sessionId}`}
+                    className={`session-item search-hit ${
+                      hit.sessionId === snap.sessionId && view === "chat"
+                        ? "active"
+                        : ""
+                    }${hitStatus && hitStatus !== "idle" ? ` is-${hitStatus.replace("_", "-")}` : ""}`}
+                    title={
+                      statusLabel
+                        ? `${hit.summary || m.untitledSession} · ${statusLabel}`
+                        : hit.snippet || hit.summary
+                    }
+                    onClick={() => void loadSearchHit(hit)}
+                    onContextMenu={(e) =>
+                      onSessionContextMenu(e, {
+                        sessionId: hit.sessionId,
+                        cwd: hit.cwd,
+                        project: projectFromCwd(hit.cwd),
+                        title: hit.summary || m.untitledSession,
+                        updatedAt: hit.updatedAt,
+                        status: hitStatus,
+                      })
+                    }
+                  >
+                    <span className="session-item-row">
+                      <SessionStatusIcon status={hitStatus} label={statusLabel} />
+                      <span className="session-title">
+                        {hit.summary || m.untitledSession}
+                      </span>
                     </span>
-                  </span>
-                  {hit.snippet ? (
-                    <span className="session-snippet">{hit.snippet}</span>
-                  ) : null}
-                </button>
+                    {hit.snippet ? (
+                      <span className="session-snippet">{hit.snippet}</span>
+                    ) : null}
+                  </button>
                 );
               })}
             </div>
@@ -4107,18 +4134,280 @@ export function App() {
             }}
           />
         </div>
-        <div
-          className="resize-handle resize-handle-left"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={m.resizeSidebar}
-          title={m.resizeSidebar}
-          onPointerDown={onResizePointerDown("left")}
-          onDoubleClick={() =>
-            setPanelLayout((p) => ({ ...p, sidebarCollapsed: true }))
-          }
+        {mode === "pinned" ? (
+          <div
+            className="resize-handle resize-handle-left"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={m.resizeSidebar}
+            title={m.resizeSidebar}
+            onPointerDown={onResizePointerDown("left")}
+            onDoubleClick={() => collapseSidebar()}
+          />
+        ) : null}
+      </>
+    );
+  }, [
+    m,
+    view,
+    extTab,
+    openExtensions,
+    onNewSession,
+    sessionQuery,
+    setSessionQuery,
+    searchBusy,
+    searchHits,
+    snap,
+    connectionReady,
+    groups,
+    collapsed,
+    setCollapsed,
+    renamingId,
+    renameDraft,
+    renameInputRef,
+    commitRename,
+    onLoadSession,
+    beginRename,
+    onSessionContextMenu,
+    onForkSession,
+    onDeleteSession,
+    onNewSessionInProject,
+    ctxMenu,
+    accountEmailDisplay,
+    connectionLabel,
+    accountSignedIn,
+    accountBusy,
+    accountStatus,
+    setView,
+    onAccountLogin,
+    onAccountLogout,
+    snap.usage,
+    setLocalError,
+    onResizePointerDown,
+    setPanelLayout,
+    collapseSidebar,
+    loadSearchHit,
+  ]);
+
+  const openRightTool = useCallback(
+    (tab: "files" | "terminal" | "plan") => {
+      if (tab === "terminal") setTermKeepAlive(true);
+      setRightPanelTab(tab);
+      setRightPanelOpen(true);
+    },
+    [],
+  );
+
+  const respondPlanApproval = useCallback(
+    (
+      requestId: string,
+      outcome: PlanApprovalOutcome,
+      feedback?: string,
+    ) => {
+      void window.desktop.respondPlanApproval(requestId, outcome, feedback);
+    },
+    [],
+  );
+
+  const refreshPlanContent = useCallback(() => {
+    void window.desktop.refreshPlanContent();
+  }, []);
+
+  // Ctrl/Cmd+B toggles between pinned and auto (hover) sidebar modes.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod || e.altKey || e.shiftKey) return;
+      if (e.key === "b" || e.key === "B") {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleSidebar();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [toggleSidebar]);
+
+  // Auto (hover) mode: reveal the sidebar when the cursor approaches the
+  // left edge of the window. Hide it when the cursor leaves the overlay.
+  useEffect(() => {
+    if (panelLayout.sidebarPinned) {
+      // Switching to pinned mode should always close any hover overlay.
+      sidebarHoverActiveRef.current = false;
+      setSidebarHoverOpen(false);
+      return;
+    }
+    const EDGE_PX = 8;
+    const onMove = (e: MouseEvent) => {
+      if (e.clientX <= EDGE_PX) {
+        sidebarHoverActiveRef.current = true;
+        setSidebarHoverOpen(true);
+      }
+    };
+    document.addEventListener("mousemove", onMove);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+    };
+  }, [panelLayout.sidebarPinned]);
+
+  // Shortcuts open the right panel into a specific tool (panel stays open).
+  useEffect(() => {
+    if (view !== "chat") return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod || e.altKey) return;
+      if (e.key === "p" || e.key === "P") {
+        if (e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          openRightTool("plan");
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        openRightTool("files");
+        return;
+      }
+      if (e.key === "`") {
+        e.preventDefault();
+        e.stopPropagation();
+        openRightTool("terminal");
+        return;
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [view, openRightTool]);
+
+  // Auto-open Plan panel when a plan approval arrives or todos first appear.
+  const prevPlanApprovalRef = useRef<string | null>(null);
+  const prevTodoCountRef = useRef(0);
+  useEffect(() => {
+    if (view !== "chat") return;
+    const approvalId = snap.pendingPlanApproval?.requestId ?? null;
+    if (approvalId && approvalId !== prevPlanApprovalRef.current) {
+      openRightTool("plan");
+    }
+    prevPlanApprovalRef.current = approvalId;
+
+    const n = snap.todos?.length ?? 0;
+    if (n > 0 && prevTodoCountRef.current === 0 && !rightPanelOpen) {
+      // Soft open: only when panel is closed and todos appear for the first time.
+      openRightTool("plan");
+    }
+    prevTodoCountRef.current = n;
+  }, [
+    view,
+    snap.pendingPlanApproval?.requestId,
+    snap.todos?.length,
+    rightPanelOpen,
+    openRightTool,
+  ]);
+
+  return (
+    <div
+      ref={shellRef}
+      className={`shell ${rightOpen ? "shell-right-open" : ""} ${
+        panelLayout.sidebarCollapsed ? "shell-sidebar-collapsed" : ""
+      } ${showViewerColumn ? "shell-viewer-open" : ""} ${
+        view === "settings" ? "shell-view-settings" : ""
+      }`}
+    >
+      {loading && view === "chat" ? <div className="loading-bar" /> : null}
+
+      {snap.pendingQuestion ? (
+        <AskUserQuestionModal
+          request={snap.pendingQuestion}
+          m={m}
+          onSubmit={(response) => void onAskUserQuestion(response)}
         />
-      </aside>
+      ) : null}
+
+      <div className="shell-header" />
+
+      {view === "chat" ? (
+      <button
+        type="button"
+        className="chat-topbar-btn chat-side-toggle-left"
+        onClick={
+          panelLayout.sidebarPinned
+            ? panelLayout.sidebarCollapsed
+              ? expandSidebar
+              : collapseSidebar
+            : toggleSidebar
+        }
+        title={
+          panelLayout.sidebarPinned
+            ? panelLayout.sidebarCollapsed
+              ? `${m.sidebarExpand} (Ctrl+B)`
+              : `${m.sidebarCollapse} (Ctrl+B)`
+            : `${m.sidebarPin} (Ctrl+B)`
+        }
+        aria-label={
+          panelLayout.sidebarPinned
+            ? panelLayout.sidebarCollapsed
+              ? `${m.sidebarExpand} (Ctrl+B)`
+              : `${m.sidebarCollapse} (Ctrl+B)`
+            : `${m.sidebarPin} (Ctrl+B)`
+        }
+      >
+        <span className="icon" aria-hidden>
+          {panelLayout.sidebarPinned ? (
+            panelLayout.sidebarCollapsed ? (
+              <SidebarIcon name="expand" />
+            ) : (
+              <SidebarIcon name="collapse" />
+            )
+          ) : (
+            <SidebarIcon name="pin" />
+          )}
+        </span>
+      </button>
+      ) : null}
+
+      {panelLayout.sidebarPinned ? (
+        panelLayout.sidebarCollapsed ? (
+          <div className="sidebar-rail">
+            <button
+              type="button"
+              className="sidebar-rail-btn"
+              title={`${m.sidebarExpand} (Ctrl+B)`}
+              aria-label={`${m.sidebarExpand} (Ctrl+B)`}
+              onClick={expandSidebar}
+            >
+              <SidebarIcon name="expand" />
+            </button>
+          </div>
+        ) : (
+          <aside className="sidebar">{sidebarBody("pinned")}</aside>
+        )
+      ) : (
+        // Auto (hover) mode: keep the rail as a visual anchor + an invisible
+        // trigger strip; float the sidebar as an overlay when revealed.
+        <>
+          <div
+            className="sidebar-rail sidebar-trigger-rail"
+            aria-hidden
+            onMouseEnter={() => {
+              sidebarHoverActiveRef.current = true;
+              setSidebarHoverOpen(true);
+            }}
+          />
+          {sidebarHoverOpen ? (
+            <div
+              className="sidebar-hover-overlay"
+              onMouseEnter={() => {
+                sidebarHoverActiveRef.current = true;
+              }}
+              onMouseLeave={() => {
+                sidebarHoverActiveRef.current = false;
+                setSidebarHoverOpen(false);
+              }}
+            >
+              <aside className="sidebar">{sidebarBody("hover")}</aside>
+            </div>
+          ) : null}
+        </>
       )}
 
       <section className="main">
@@ -4140,6 +4429,8 @@ export function App() {
               }}
               installerStatus={snap.installerStatus}
               lastUpdateCheckAt={snap.lastUpdateCheckAt}
+              onProvidersChanged={() => void refreshModelsAfterProviderChange()}
+              initialSection={settingsSection}
             />
           </div>
         ) : view === "extensions" ? (
@@ -4151,16 +4442,125 @@ export function App() {
               m={m}
             />
           </div>
-        ) : view === "models" ? (
-          <div className="main-scroll settings-scroll">
-            <ModelsView
-              onBack={() => setView("chat")}
-              m={m}
-              onProvidersChanged={() => void refreshModelsAfterProviderChange()}
-            />
-          </div>
         ) : (
           <div className="main-chat">
+            {/* Full-width conversation header: sits at the top of the whole
+                chat page (not inside the max-width-constrained chat-rail) so
+                the title is top-left and the divider meets both panel edges. */}
+            <div className="chat-topbar">
+              <div className="chat-pane-title-wrap">
+                <svg
+                  className="chat-pane-title-icon"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                </svg>
+                <span
+                  className={`chat-pane-title${
+                    snap.sessionTitle ? "" : " is-empty"
+                  }`}
+                  title={snap.sessionTitle || m.untitledSession}
+                >
+                  {snap.sessionTitle || m.untitledSession}
+                </span>
+                {hasSession && !showHome ? (
+                  <div
+                    className="chat-actions-wrap"
+                    ref={chatActionsRef}
+                  >
+                    <button
+                      type="button"
+                      className={`chat-actions-btn${
+                        chatActionsOpen ? " active" : ""
+                      }`}
+                      onClick={() => setChatActionsOpen((v) => !v)}
+                      aria-haspopup="menu"
+                      aria-expanded={chatActionsOpen}
+                      title={m.chatActionsTitle}
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.75"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                      >
+                        <circle cx="5" cy="12" r="1.4" />
+                        <circle cx="12" cy="12" r="1.4" />
+                        <circle cx="19" cy="12" r="1.4" />
+                      </svg>
+                    </button>
+                    {chatActionsOpen ? (
+                      <div className="chat-actions-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="chat-actions-menu-item"
+                          onClick={onRenameActiveSession}
+                        >
+                          {m.renameSession}
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="chat-actions-menu-item"
+                          onClick={onForkActiveSession}
+                        >
+                          {m.forkSession}
+                        </button>
+                        <div
+                          className="chat-actions-menu-sep"
+                          aria-hidden
+                        />
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="chat-actions-menu-item"
+                          onClick={onCopyMarkdownFromMenu}
+                          disabled={snap.timeline.length === 0}
+                        >
+                          {m.exportCopyMarkdown}
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="chat-actions-menu-item"
+                          onClick={onDownloadMarkdownFromMenu}
+                          disabled={snap.timeline.length === 0}
+                        >
+                          {m.exportDownloadMarkdown}
+                        </button>
+                        <div
+                          className="chat-actions-menu-sep"
+                          aria-hidden
+                        />
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="chat-actions-menu-item danger"
+                          onClick={onDeleteActiveSession}
+                        >
+                          {m.deleteSession}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+              <div className="chat-topbar-spacer" />
+            </div>
             {/* Left-edge History Timeline rail. Replaces the old "current turn"
                 pin chip: a fixed-height vertical strip centered on the chat
                 column. Each user message is a short horizontal tick. The rail
@@ -4278,67 +4678,8 @@ export function App() {
                 })()
               : null}
 
-            {/* Chat column only: pin + timeline + composer share identical width. */}
+            {/* Chat column only: timeline + composer share identical width. */}
             <div className="chat-rail">
-            <div className="chat-topbar">
-              {/* The top-of-chat "current turn" pin has been replaced by the
-                  left-edge History Timeline rail. The topbar keeps a spacer so
-                  trailing topbar buttons (export menu, etc.) keep their right
-                  alignment. */}
-              <div className="chat-topbar-spacer" />
-              {!showHome && snap.timeline.length > 0 ? (
-                <div className="export-menu-wrap" ref={exportMenuRef}>
-                  <button
-                    type="button"
-                    className={`chat-topbar-btn export-btn${
-                      exportMenuOpen ? " active" : ""
-                    }`}
-                    onClick={() => setExportMenuOpen((v) => !v)}
-                    title={m.exportConversation}
-                    aria-haspopup="menu"
-                    aria-expanded={exportMenuOpen}
-                  >
-                    <svg
-                      className="icon"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.75"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden
-                    >
-                      <path d="M12 3v12" />
-                      <path d="m7 10 5 5 5-5" />
-                      <path d="M5 19h14" />
-                    </svg>
-                    {m.exportConversation}
-                  </button>
-                  {exportMenuOpen ? (
-                    <div className="export-menu" role="menu">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="export-menu-item"
-                        onClick={() => void onExportCopyMarkdown()}
-                      >
-                        {m.exportCopyMarkdown}
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="export-menu-item"
-                        onClick={() => onExportDownloadMarkdown()}
-                      >
-                        {m.exportDownloadMarkdown}
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
             {exportToast ? (
               <div className="export-toast" role="status" aria-live="polite">
                 {exportToast}
@@ -5322,7 +5663,7 @@ export function App() {
                                   className="dropdown-item model-manage-item"
                                   onClick={() => {
                                     setMenu(null);
-                                    openModels();
+                                    openSettingsSection("models");
                                   }}
                                 >
                                   <span className="di-title">

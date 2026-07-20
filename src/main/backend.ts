@@ -4306,7 +4306,14 @@ export class AgentBackend {
   }
 
   async cancel(): Promise<void> {
-    if (!this.client || !this.sessionId || this.connection !== "ready") return;
+    if (!this.client || !this.sessionId || this.connection !== "ready") {
+      // No active session to cancel — force-clear busy so the UI stop
+      // button does not stay stuck even if the prompt RPC never settles.
+      this.busy = false;
+      this.clearTurnPlanArtifacts();
+      this.emitSnapshot();
+      return;
+    }
     // Only cancel the focused session — other concurrent turns keep running.
     const sid = this.sessionId;
     this.cancelPermissionsForSession(sid, "session cancel");
@@ -4314,21 +4321,32 @@ export class AgentBackend {
     this.cancelTrustPromptsForSession(sid, "session cancel");
     this.emitSnapshot();
     try {
-      await this.client.request("session/cancel", {
+      const cancelResult = await this.client.request("session/cancel", {
         sessionId: sid,
       });
-      this.log("info", `Cancel sent session=${sid}`);
-      // Prompt promise will reject/settle; if compact is mid-flight, surface cancel.
+      // session/cancel timed out but the stream was active — the cancel
+      // RPC was still sent over the wire and the agent should have received
+      // it. Treat as success.
+      if (isAbsorbedByStream(cancelResult)) {
+        this.log("info", `Cancel absorbed by stream for ${sid}`);
+      } else {
+        this.log("info", `Cancel sent session=${sid}`);
+      }
       if (this.compacting) {
         this.finishCompact("cancelled");
       }
       this.busy = false;
       this.clearTurnPlanArtifacts();
-      // clearTurnPlanArtifacts() already syncActiveIntoRuntimes(); just emit.
       this.emitSnapshot();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.log("warn", `Cancel failed: ${message}`);
+      // Even if the cancel RPC itself threw, force-clear busy so the
+      // stop button does not remain stuck. The prompt's finally block
+      // will also run when its RPC settles.
+      this.busy = false;
+      this.clearTurnPlanArtifacts();
+      this.emitSnapshot();
     }
   }
 

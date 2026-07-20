@@ -18,6 +18,8 @@ export interface Messages {
   renameSession: string;
   deleteSession: string;
   forkSession: string;
+  /** Top-of-chat kebab menu button tooltip. */
+  chatActionsTitle: string;
   renamePlaceholder: string;
   deleteConfirm: string;
   untitledSession: string;
@@ -347,6 +349,14 @@ export interface Messages {
   accountSectionDesc: string;
   permissionsSection: string;
   permissionsSectionDesc: string;
+  // Settings nav
+  settingsNavGeneral: string;
+  settingsNavAccount: string;
+  settingsNavModels: string;
+  settingsNavAgent: string;
+  settingsNavAbout: string;
+  settingsSearchPlaceholder: string;
+  settingsBackToApp: string;
   alwaysApproveSetting: string;
   alwaysApproveSettingDesc: string;
   alwaysApproveEnabled: string;
@@ -398,6 +408,8 @@ export interface Messages {
   resizeRightPanel: string;
   resizeViewer: string;
   sidebarExpand: string;
+  sidebarCollapse: string;
+  sidebarPin: string;
   workspaceLabel: string;
   workspaceEmpty: string;
   workspacePick: string;
@@ -524,7 +536,6 @@ export interface Messages {
   dropFilesHint: string;
 
   // Custom model providers
-  navModels: string;
   modelsTitle: string;
   modelsSubtitle: string;
   modelsAddProvider: string;
@@ -560,6 +571,7 @@ export interface Messages {
   modelsAddManual: string;
   modelsManualIdPlaceholder: string;
   modelsManualNamePlaceholder: string;
+  models1MTooltip: string;
   modelsFilterModels: string;
   modelsNoModelsYet: string;
   modelsSourceFetched: string;
@@ -651,6 +663,7 @@ const en: Messages = {
   renameSession: "Rename",
   deleteSession: "Delete",
   forkSession: "Fork",
+  chatActionsTitle: "Conversation actions",
   renamePlaceholder: "Session title",
   deleteConfirm: "Delete this session permanently? This cannot be undone.",
   untitledSession: "Untitled",
@@ -910,6 +923,13 @@ const en: Messages = {
   permissionsSection: "Permissions",
   permissionsSectionDesc:
     "How the agent is allowed to run tools and edit files.",
+  settingsNavGeneral: "General",
+  settingsNavAccount: "Account",
+  settingsNavModels: "Models",
+  settingsNavAgent: "Agent",
+  settingsNavAbout: "About",
+  settingsSearchPlaceholder: "Search settings…",
+  settingsBackToApp: "Back to app",
   alwaysApproveSetting: "Always-approve mode",
   alwaysApproveSettingDesc:
     "Skip permission prompts for all tools (YOLO). Synced with ~/.grok/config.toml and the CLI.",
@@ -961,6 +981,8 @@ const en: Messages = {
   resizeRightPanel: "Drag to resize panel (drag small to collapse)",
   resizeViewer: "Drag to resize file preview (drag small to close)",
   sidebarExpand: "Expand sidebar (Ctrl+B)",
+  sidebarCollapse: "Collapse sidebar (Ctrl+B to switch to auto mode)",
+  sidebarPin: "Pin sidebar (Ctrl+B to toggle pin/auto)",
   workspaceLabel: "Workspace",
   workspaceEmpty: "No workspace",
   workspacePick: "Select workspace",
@@ -1088,7 +1110,6 @@ const en: Messages = {
     "Config is shared with the CLI. Agent sessions may need a new turn or reconnect to reload MCP/plugins.",
   dropFilesHint: "Drop files to attach",
 
-  navModels: "Models",
   modelsTitle: "Models & providers",
   modelsSubtitle:
     "Add domestic and international providers, fetch or enter models, then switch them from the composer. Writes [model.*] into ~/.grok/config.toml (same as CLI).",
@@ -1129,6 +1150,7 @@ const en: Messages = {
   modelsAddManual: "Add model",
   modelsManualIdPlaceholder: "Model id (e.g. gpt-4o)",
   modelsManualNamePlaceholder: "Display name (optional)",
+  models1MTooltip: "1M context window",
   modelsFilterModels: "Filter models…",
   modelsNoModelsYet:
     "No models yet. Fetch from the API or add a model id manually.",
@@ -1219,6 +1241,7 @@ const zh: Messages = {
   renameSession: "重命名",
   deleteSession: "删除",
   forkSession: "分叉",
+  chatActionsTitle: "对话操作",
   renamePlaceholder: "会话标题",
   deleteConfirm: "确定永久删除此会话？此操作无法撤销。",
   untitledSession: "未命名",
@@ -1471,6 +1494,13 @@ const zh: Messages = {
   accountSectionDesc:
     "登录、退出、API Key 与 agent 连接。与 CLI 共用 ~/.grok。",
   permissionsSection: "权限",
+  settingsNavGeneral: "常规",
+  settingsNavAccount: "账户",
+  settingsNavModels: "模型",
+  settingsNavAgent: "Agent",
+  settingsNavAbout: "关于",
+  settingsSearchPlaceholder: "搜索设置…",
+  settingsBackToApp: "返回应用",
   permissionsSectionDesc: "Agent 运行工具与修改文件时的确认策略。",
   alwaysApproveSetting: "始终批准模式",
   alwaysApproveSettingDesc:
@@ -1523,6 +1553,8 @@ const zh: Messages = {
   resizeRightPanel: "拖动调整右侧宽度（拖到很小可折叠）",
   resizeViewer: "拖动调整文件预览宽度（拖到很小可关闭）",
   sidebarExpand: "展开左侧栏 (Ctrl+B)",
+  sidebarCollapse: "收起左侧栏（Ctrl+B 切换为自动模式）",
+  sidebarPin: "固定左侧栏（Ctrl+B 切换固定/自动）",
   workspaceLabel: "工作区",
   workspaceEmpty: "未选择工作区",
   workspacePick: "选择工作区",
@@ -1646,7 +1678,6 @@ const zh: Messages = {
     "配置与 CLI 共享。MCP / 插件变更可能需要新会话或重连后生效。",
   dropFilesHint: "拖入文件以添加附件",
 
-  navModels: "模型",
   modelsTitle: "模型与提供商",
   modelsSubtitle:
     "添加国内外模型提供商，可自动拉取或手动录入模型，并在输入框中切换。写入 ~/.grok/config.toml 的 [model.*]（与 CLI 一致）。",
@@ -1685,6 +1716,7 @@ const zh: Messages = {
   modelsAddManual: "添加模型",
   modelsManualIdPlaceholder: "模型 id（如 gpt-4o）",
   modelsManualNamePlaceholder: "显示名（可选）",
+  models1MTooltip: "支持 100 万上下文",
   modelsFilterModels: "筛选模型…",
   modelsNoModelsYet: "暂无模型。可从 API 拉取，或手动输入模型 id。",
   modelsSourceFetched: "API",

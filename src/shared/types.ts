@@ -641,6 +641,8 @@ export interface ModelProviderModel {
   configKey: string;
   source: "fetched" | "manual";
   enabled: boolean;
+  /** Override context window in tokens (e.g. 1000000 for DeepSeek V4). */
+  contextWindow?: number;
 }
 
 /** User-configured provider instance (may have multiple models). */
@@ -678,6 +680,7 @@ export interface UpsertProviderInput {
     configKey?: string;
     source?: "fetched" | "manual";
     enabled?: boolean;
+    contextWindow?: number;
   }>;
 }
 

@@ -1,12 +1,26 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AccountStatus,
   InstallerStatus,
   UsageInfo,
 } from "@shared/types";
 import { usePrefs } from "./PrefsContext";
-import type { LocalePref, ThemePref } from "./prefs";
+import type { LocalePref, ThemePref, UserPrefs } from "./prefs";
+import type { Messages } from "./i18n";
 import { AgentSettingsView } from "./AgentSettingsView";
+import { ModelsView } from "./ModelsView";
+
+/**
+ * Identifiers for the left-rail sections of the settings page. Imported by
+ * App.tsx so external entry points (e.g. the chat model's "Manage models"
+ * dropdown item) can request a specific section.
+ */
+export type SettingsSectionId =
+  | "general"
+  | "account"
+  | "models"
+  | "agent"
+  | "about";
 
 interface OptionCardProps<T extends string> {
   value: T;
@@ -160,6 +174,8 @@ export function SettingsView({
   onRefreshUsage,
   installerStatus,
   lastUpdateCheckAt,
+  onProvidersChanged,
+  initialSection,
 }: {
   onBack: () => void;
   accountEmail?: string | null;
@@ -172,6 +188,15 @@ export function SettingsView({
   onRefreshUsage?: () => Promise<void>;
   installerStatus: InstallerStatus;
   lastUpdateCheckAt?: string;
+  onProvidersChanged?: () => void;
+  /**
+   * Section to show on mount / when the parent re-enters Settings.
+   * External callers (e.g. the composer model's "Manage models…" item)
+   * set this and then switch the main view to "settings"; the view
+   * also keeps a local activeSection so in-page nav clicks don't get
+   * clobbered.
+   */
+  initialSection?: SettingsSectionId;
 }) {
   const {
     prefs,
@@ -375,395 +400,697 @@ export function SettingsView({
     }
   };
 
-  return (
-    <div className="settings-page">
-      <header className="settings-header">
-        <button type="button" className="settings-back" onClick={onBack}>
-          ← {m.backToChat}
-        </button>
-        <h1 className="settings-title">{m.settingsTitle}</h1>
-        <p className="settings-subtitle">{m.settingsSubtitle}</p>
-      </header>
+  // Nav sections shown in the left rail. Each maps to one or more cards in
+  // the right pane. Defaults to the most common entry point (account).
+  const SECTIONS: { id: SettingsSectionId; label: string }[] = [
+    { id: "general", label: m.settingsNavGeneral },
+    { id: "account", label: m.settingsNavAccount },
+    { id: "models", label: m.settingsNavModels },
+    { id: "agent", label: m.settingsNavAgent },
+    { id: "about", label: m.settingsNavAbout },
+  ];
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>(
+    initialSection ?? "general",
+  );
+  const [navQuery, setNavQuery] = useState("");
+  // Sync the active section when an external caller (composer dropdown,
+  // etc.) requests a specific section while Settings is already mounted.
+  // Uses a ref to ignore the very first mount — that's already handled by
+  // useState's initial value above.
+  const initialSectionSeen = useRef(false);
+  useEffect(() => {
+    if (!initialSectionSeen.current) {
+      initialSectionSeen.current = true;
+      return;
+    }
+    setActiveSection(initialSection ?? "general");
+  }, [initialSection]);
+  const filteredSections = useMemo(() => {
+    const q = navQuery.trim().toLowerCase();
+    if (!q) return SECTIONS;
+    return SECTIONS.filter((s) => s.label.toLowerCase().includes(q));
+  }, [navQuery]);
 
-      <div className="settings-sections">
+  return (
+    <div className="settings-page settings-page-nav">
+      <aside className="settings-nav">
+        <button
+          type="button"
+          className="settings-nav-back"
+          onClick={onBack}
+          title={m.settingsBackToApp}
+          aria-label={m.settingsBackToApp}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"
+            stroke="currentColor" strokeWidth="1.4"
+            strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M10 3l-5 5 5 5" />
+          </svg>
+          <span>{m.settingsBackToApp}</span>
+        </button>
+
+        <div className="settings-nav-search">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"
+            stroke="currentColor" strokeWidth="1.4"
+            strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="7" cy="7" r="4.5" />
+            <path d="M14 14l-3.5-3.5" />
+          </svg>
+          <input
+            type="text"
+            value={navQuery}
+            onChange={(e) => setNavQuery(e.target.value)}
+            placeholder={m.settingsSearchPlaceholder}
+            spellCheck={false}
+            autoComplete="off"
+          />
+        </div>
+
+        <nav className="settings-nav-list" aria-label={m.settingsTitle}>
+          {filteredSections.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={`settings-nav-item ${
+                activeSection === s.id ? "active" : ""
+              }`}
+              onClick={() => setActiveSection(s.id)}
+              aria-current={activeSection === s.id ? "page" : undefined}
+            >
+              <SettingsNavIcon section={s.id} />
+              <span>{s.label}</span>
+            </button>
+          ))}
+          {filteredSections.length === 0 ? (
+            <div className="settings-nav-empty">{m.settingsSearchPlaceholder}</div>
+          ) : null}
+        </nav>
+      </aside>
+
+      <div className="settings-pane">
+        <header className="settings-pane-head">
+          <h1 className="settings-pane-title">
+            {SECTIONS.find((s) => s.id === activeSection)?.label}
+          </h1>
+        </header>
+
         {error ? <div className="settings-banner error">{error}</div> : null}
         {info ? <div className="settings-banner info">{info}</div> : null}
 
-        {/* ── Account identity & session ── */}
-        <section className="settings-card">
-          <div className="settings-card-head">
-            <h2>{m.accountSection}</h2>
-            <p>{m.accountSectionDesc}</p>
-          </div>
-          <div className="settings-info-list">
-            <InfoRow
-              label={m.signedInAs}
-              value={
-                signedIn
-                  ? displayName
-                    ? `${displayName} (${email || "—"})`
-                    : email || m.accountSessionActive
-                  : m.notSignedIn
+        <div className="settings-pane-body">
+          {activeSection === "general" ? (
+            <GeneralCards
+              m={m}
+              prefs={prefs}
+              systemLocaleLabel={systemLocaleLabel}
+              systemThemeLabel={systemThemeLabel}
+              localeOptions={localeOptions}
+              themeOptions={themeOptions}
+              setLocale={setLocale}
+              setTheme={setTheme}
+              alwaysApprove={alwaysApprove}
+              onSetAlwaysApprove={onSetAlwaysApprove}
+              autoTrustNewSessions={autoTrustNewSessions}
+              onSetAutoTrustNewSessions={onSetAutoTrustNewSessions}
+            />
+          ) : null}
+
+          {activeSection === "account" ? (
+            <AccountCards
+              m={m}
+              signedIn={signedIn}
+              displayName={displayName}
+              email={email}
+              acct={acct}
+              connectionLabel={connectionLabel}
+              apiKeyLabel={apiKeyLabel}
+              loginMsg={loginMsg}
+              deviceUrl={deviceUrl}
+              deviceCode={deviceCode}
+              copyDevice={copyDevice}
+              onCancelLogin={onCancelLogin}
+              loginBusy={loginBusy}
+              onLogin={onLogin}
+              busy={busy}
+              onLogout={onLogout}
+              onReconnect={onReconnect}
+              usage={usage}
+              onRefreshUsageClick={onRefreshUsageClick}
+              onManageBilling={onManageBilling}
+              apiKeyField={
+                <ApiKeyField
+                  label={m.accountApiKeyLabel}
+                  placeholder={m.accountApiKeyPlaceholder}
+                  placeholderSet={m.accountApiKeyPlaceholderSet}
+                  apiKeySet={!!acct?.apiKeySet}
+                  showLabel={m.accountShow}
+                  hideLabel={m.accountHide}
+                  onSave={() => void onSaveApiKey()}
+                  onClear={() => void onClearApiKey()}
+                  busy={busy}
+                  envSource={acct?.apiKeySource === "env"}
+                  envHint={m.accountApiKeyEnvHint}
+                  saveLabel={m.accountSaveApiKey}
+                  clearLabel={m.accountClearApiKey}
+                  draft={apiKeyDraft}
+                  setDraft={setApiKeyDraft}
+                  clearDisabled={!acct?.apiKeySet || acct.apiKeySource === "env"}
+                />
               }
             />
-            <InfoRow label={m.connectionStatus} value={connectionLabel} />
-            {acct?.authMode ? (
-              <InfoRow label={m.accountAuthMode} value={acct.authMode} />
-            ) : null}
-            {acct?.expiresAt ? (
-              <InfoRow
-                label={m.accountExpires}
-                value={new Date(acct.expiresAt).toLocaleString()}
-              />
-            ) : null}
-            {acct?.issuer ? (
-              <InfoRow label={m.accountIssuer} value={acct.issuer} />
-            ) : null}
-            {acct?.teamId ? (
-              <InfoRow label={m.accountTeamId} value={acct.teamId} />
-            ) : null}
-            <InfoRow label={m.accountApiKeyStatus} value={apiKeyLabel} />
-          </div>
+          ) : null}
 
-          {loginMsg || deviceUrl || deviceCode ? (
-            <div className="account-login-panel">
-              {loginMsg ? (
-                <p className="account-login-msg">{loginMsg}</p>
-              ) : null}
-              {deviceCode ? (
-                <div className="account-device-code" title={m.accountDeviceCode}>
-                  {deviceCode}
-                </div>
-              ) : null}
-              {deviceUrl ? (
-                <a
-                  className="account-device-url"
-                  href={deviceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {deviceUrl}
-                </a>
-              ) : null}
-              <div className="settings-actions">
-                {deviceUrl || deviceCode ? (
-                  <button
-                    type="button"
-                    className="settings-btn"
-                    onClick={() => void copyDevice()}
-                  >
-                    {m.accountCopyCode}
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="settings-btn danger"
-                  disabled={busy}
-                  onClick={() => void onCancelLogin()}
-                >
-                  {m.accountCancelLogin}
-                </button>
-              </div>
+          {activeSection === "models" ? (
+            <div className="settings-models-embed">
+              <ModelsView
+                onBack={onBack}
+                m={m}
+                onProvidersChanged={onProvidersChanged}
+              />
             </div>
           ) : null}
 
-          <div className="settings-actions">
-            <button
-              type="button"
-              className="settings-btn primary"
-              disabled={loginBusy}
-              onClick={() => void onLogin("oauth")}
-            >
-              {m.accountLoginBrowser}
-            </button>
-            <button
-              type="button"
-              className="settings-btn"
-              disabled={loginBusy}
-              onClick={() => void onLogin("device")}
-            >
-              {m.accountLoginDevice}
-            </button>
-            <button
-              type="button"
-              className="settings-btn"
-              disabled={busy || !signedIn}
-              onClick={() => void onLogout()}
-            >
-              {m.accountLogout}
-            </button>
-            <button
-              type="button"
-              className="settings-btn"
-              disabled={busy}
-              onClick={() => void onReconnect()}
-            >
-              {m.accountReconnect}
-            </button>
-          </div>
-          <p className="settings-help">{m.accountLoginHelp}</p>
-        </section>
+          {activeSection === "agent" ? (
+            <AgentSettingsView
+              status={installerStatus}
+              lastCheck={lastUpdateCheckAt}
+              m={m}
+            />
+          ) : null}
 
-        {/* ── Usage / subscription ── */}
-        <section className="settings-card">
-          <div className="settings-card-head">
-            <h2>{m.accountUsageSection}</h2>
-            <p>{m.accountUsageDesc}</p>
-          </div>
-          {usage && !usage.error ? (
-            <>
-              <div className="account-usage-block settings-usage">
-                <div className="account-usage-row">
-                  <span className="account-usage-label">
-                    {usage.usageLabel}
-                  </span>
-                  <span className="account-usage-pct">{usage.usageShort}</span>
-                </div>
-                <div
-                  className="account-usage-bar"
-                  role="progressbar"
-                  aria-valuenow={Math.round(usage.usagePct)}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                >
-                  <span
-                    className={`account-usage-fill ${
-                      usage.usagePct >= 90
-                        ? "critical"
-                        : usage.usagePct >= 75
-                          ? "warn"
-                          : ""
-                    }`}
-                    style={{ width: `${Math.min(100, usage.usagePct)}%` }}
-                  />
-                </div>
+          {activeSection === "about" ? (
+            <section className="settings-card">
+              <div className="settings-card-head">
+                <h2>{m.aboutSection}</h2>
+                <p>{m.aboutSectionDesc}</p>
               </div>
               <div className="settings-info-list">
-                {usage.subscriptionTier ? (
-                  <InfoRow
-                    label={m.accountUsageTier}
-                    value={usage.subscriptionTier}
-                  />
-                ) : null}
-                {usage.periodEndDisplay ? (
-                  <InfoRow
-                    label={m.accountUsageReset}
-                    value={usage.periodEndDisplay}
-                  />
-                ) : null}
-                {usage.prepaidUsd !== undefined && usage.prepaidUsd > 0 ? (
-                  <InfoRow
-                    label={m.accountUsageCredits}
-                    value={`$${usage.prepaidUsd.toFixed(
-                      Number.isInteger(usage.prepaidUsd) ? 0 : 2,
-                    )}`}
-                  />
-                ) : null}
-                {usage.autoTopupEnabled !== undefined &&
-                usage.prepaidUsd !== undefined &&
-                usage.prepaidUsd > 0 ? (
-                  <InfoRow
-                    label={m.accountUsageAutoTopup}
-                    value={
-                      usage.autoTopupEnabled && usage.autoTopupAmountUsd != null
-                        ? `$${usage.autoTopupAmountUsd.toFixed(2)}${
-                            usage.autoTopupMaxUsd != null
-                              ? ` (max $${usage.autoTopupMaxUsd.toFixed(2)}/mo)`
-                              : ""
-                          }`
-                        : m.accountUsageAutoTopupOff
-                    }
-                  />
-                ) : null}
-                {usage.payAsYouGo &&
-                usage.onDemandCapUsd != null &&
-                usage.onDemandUsedUsd != null ? (
-                  <InfoRow
-                    label={m.accountUsagePayg}
-                    value={`$${usage.onDemandUsedUsd.toFixed(2)} / $${usage.onDemandCapUsd.toFixed(2)}`}
-                  />
-                ) : null}
-                {usage.fetchedAt ? (
-                  <InfoRow
-                    label={m.accountUsageUpdated}
-                    value={new Date(usage.fetchedAt).toLocaleString()}
-                  />
-                ) : null}
+                <InfoRow label={m.appName} value="Grok Build Desktop" />
               </div>
-            </>
-          ) : (
-            <p className="settings-help">
-              {usage?.error || m.accountUsageUnavailable}
-            </p>
-          )}
-          <div className="settings-actions">
-            <button
-              type="button"
-              className="settings-btn primary"
-              disabled={busy}
-              onClick={() => void onRefreshUsageClick()}
-            >
-              {m.accountUsageRefresh}
-            </button>
-            <button
-              type="button"
-              className="settings-btn"
-              disabled={busy}
-              onClick={() => void onManageBilling()}
-            >
-              {m.accountUsageManage}
-            </button>
-          </div>
-        </section>
-
-        {/* ── API Key ── */}
-        <section className="settings-card">
-          <div className="settings-card-head">
-            <h2>{m.accountApiKeySection}</h2>
-            <p>{m.accountApiKeyDesc}</p>
-          </div>
-          <ApiKeyField
-            label={m.accountApiKeyLabel}
-            placeholder={m.accountApiKeyPlaceholder}
-            placeholderSet={m.accountApiKeyPlaceholderSet}
-            apiKeySet={!!acct?.apiKeySet}
-            showLabel={m.accountShow}
-            hideLabel={m.accountHide}
-            onSave={() => void onSaveApiKey()}
-            onClear={() => void onClearApiKey()}
-            busy={busy}
-            envSource={acct?.apiKeySource === "env"}
-            envHint={m.accountApiKeyEnvHint}
-            saveLabel={m.accountSaveApiKey}
-            clearLabel={m.accountClearApiKey}
-            draft={apiKeyDraft}
-            setDraft={setApiKeyDraft}
-            clearDisabled={!acct?.apiKeySet || acct.apiKeySource === "env"}
-          />
-        </section>
-
-        <AgentSettingsView
-          status={installerStatus}
-          lastCheck={lastUpdateCheckAt}
-          m={m}
-        />
-
-        <section className="settings-card">
-          <div className="settings-card-head">
-            <h2>{m.languageSection}</h2>
-            <p>{m.languageDesc}</p>
-          </div>
-          <div
-            className="settings-options"
-            role="radiogroup"
-            aria-label={m.language}
-          >
-            {localeOptions.map((opt) => (
-              <OptionCard
-                key={opt.id}
-                value={opt.id}
-                selected={prefs.locale === opt.id}
-                title={opt.title}
-                description={
-                  opt.id === "system"
-                    ? `${m.currentResolved}: ${systemLocaleLabel}`
-                    : undefined
-                }
-                onSelect={setLocale}
-              />
-            ))}
-          </div>
-        </section>
-
-        <section className="settings-card">
-          <div className="settings-card-head">
-            <h2>{m.appearanceSection}</h2>
-            <p>{m.themeDesc}</p>
-          </div>
-          <div
-            className="settings-options"
-            role="radiogroup"
-            aria-label={m.theme}
-          >
-            {themeOptions.map((opt) => (
-              <OptionCard
-                key={opt.id}
-                value={opt.id}
-                selected={prefs.theme === opt.id}
-                title={opt.title}
-                description={
-                  opt.id === "system"
-                    ? `${m.currentResolved}: ${systemThemeLabel}`
-                    : undefined
-                }
-                onSelect={setTheme}
-              />
-            ))}
-          </div>
-        </section>
-
-        <section className="settings-card">
-          <div className="settings-card-head">
-            <h2>{m.permissionsSection}</h2>
-            <p>{m.permissionsSectionDesc}</p>
-          </div>
-          <div className="settings-card-head" style={{ marginBottom: 8 }}>
-            <h3 className="settings-subhead">{m.alwaysApproveSetting}</h3>
-            <p>{m.alwaysApproveSettingDesc}</p>
-          </div>
-          <div
-            className="settings-options"
-            role="radiogroup"
-            aria-label={m.alwaysApproveSetting}
-          >
-            <OptionCard
-              value="off"
-              selected={!alwaysApprove}
-              title={m.alwaysApproveDisabled}
-              onSelect={() => onSetAlwaysApprove(false)}
-            />
-            <OptionCard
-              value="on"
-              selected={alwaysApprove}
-              title={m.alwaysApproveEnabled}
-              onSelect={() => onSetAlwaysApprove(true)}
-            />
-          </div>
-
-          <div className="settings-card-head" style={{ marginBottom: 8, marginTop: 16 }}>
-            <h3 className="settings-subhead">{m.autoTrustSetting}</h3>
-            <p>{m.autoTrustSettingDesc}</p>
-          </div>
-          <div
-            className="settings-options"
-            role="radiogroup"
-            aria-label={m.autoTrustSetting}
-          >
-            <OptionCard
-              value="off"
-              selected={!autoTrustNewSessions}
-              title={m.autoTrustDisabled}
-              onSelect={() => onSetAutoTrustNewSessions(false)}
-            />
-            <OptionCard
-              value="on"
-              selected={autoTrustNewSessions}
-              title={m.autoTrustEnabled}
-              onSelect={() => onSetAutoTrustNewSessions(true)}
-            />
-          </div>
-        </section>
-
-        <section className="settings-card">
-          <div className="settings-card-head">
-            <h2>{m.aboutSection}</h2>
-            <p>{m.aboutSectionDesc}</p>
-          </div>
-          <div className="settings-info-list">
-            <InfoRow label={m.appName} value="Grok Build Desktop" />
-          </div>
-        </section>
+            </section>
+          ) : null}
+        </div>
       </div>
     </div>
+  );
+}
+
+/** Tiny inline icon for each settings nav item. */
+function SettingsNavIcon({
+  section,
+}: {
+  section: SettingsSectionId;
+}): React.ReactElement {
+  const common = {
+    width: 14,
+    height: 14,
+    viewBox: "0 0 16 16",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.4,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  switch (section) {
+    case "general":
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="2.5" />
+          <path d="M8 1.5v1.5M8 13v1.5M1.5 8h1.5M13 8h1.5M3.5 3.5l1 1M11.5 11.5l1 1M3.5 12.5l1-1M11.5 4.5l1-1" />
+        </svg>
+      );
+    case "account":
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="6" r="2.5" />
+          <path d="M3 13.5c.6-2.3 2.6-3.5 5-3.5s4.4 1.2 5 3.5" />
+        </svg>
+      );
+    case "models":
+      return (
+        <svg {...common}>
+          <path d="M8 1.5l5.5 3v6L8 13.5 2.5 10.5v-6z" />
+          <path d="M8 7.5l5.5-3M8 7.5L2.5 4.5M8 7.5v6" />
+        </svg>
+      );
+    case "agent":
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="10" height="7" rx="1.5" />
+          <path d="M6 5V3.5a2 2 0 014 0V5" />
+          <circle cx="6" cy="8.5" r="0.6" fill="currentColor" />
+          <circle cx="10" cy="8.5" r="0.6" fill="currentColor" />
+          <path d="M6.5 10.5h3" />
+        </svg>
+      );
+    case "about":
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="6" />
+          <path d="M8 7v4.5M8 4.5v0.1" />
+        </svg>
+      );
+  }
+}
+
+        {/* Section bodies are rendered by <AccountCards /> and
+            <GeneralCards /> below — keeps this return statement legible
+            while preserving every existing card. */}
+
+// ── Section bodies ────────────────────────────────────
+// Splitting these out keeps the main SettingsView return short. Each card
+// here is the same JSX that used to live inline — verbatim, just relocated.
+
+interface AccountCardsProps {
+  m: Messages;
+  signedIn: boolean;
+  displayName: string | undefined;
+  email: string;
+  acct: AccountStatus | null;
+  connectionLabel: string;
+  apiKeyLabel: string;
+  loginMsg: string | null;
+  deviceUrl: string | null;
+  deviceCode: string | null;
+  copyDevice: () => Promise<void>;
+  onCancelLogin: () => Promise<void>;
+  loginBusy: boolean;
+  onLogin: (method: "oauth" | "device") => Promise<void>;
+  busy: boolean;
+  onLogout: () => Promise<void>;
+  onReconnect: () => Promise<void>;
+  usage: UsageInfo | null | undefined;
+  onRefreshUsageClick: () => Promise<void>;
+  onManageBilling: () => Promise<void>;
+  apiKeyField: React.ReactElement;
+}
+
+function AccountCards(props: AccountCardsProps): React.ReactElement {
+  const {
+    m,
+    signedIn,
+    displayName,
+    email,
+    acct,
+    connectionLabel,
+    apiKeyLabel,
+    loginMsg,
+    deviceUrl,
+    deviceCode,
+    copyDevice,
+    onCancelLogin,
+    loginBusy,
+    onLogin,
+    busy,
+    onLogout,
+    onReconnect,
+    usage,
+    onRefreshUsageClick,
+    onManageBilling,
+    apiKeyField,
+  } = props;
+
+  return (
+    <>
+      {/* ── Account identity & session ── */}
+      <section className="settings-card">
+        <div className="settings-card-head">
+          <h2>{m.accountSection}</h2>
+          <p>{m.accountSectionDesc}</p>
+        </div>
+        <div className="settings-info-list">
+          <InfoRow
+            label={m.signedInAs}
+            value={
+              signedIn
+                ? displayName
+                  ? `${displayName} (${email || "—"})`
+                  : email || m.accountSessionActive
+                : m.notSignedIn
+            }
+          />
+          <InfoRow label={m.connectionStatus} value={connectionLabel} />
+          {acct?.authMode ? (
+            <InfoRow label={m.accountAuthMode} value={acct.authMode} />
+          ) : null}
+          {acct?.expiresAt ? (
+            <InfoRow
+              label={m.accountExpires}
+              value={new Date(acct.expiresAt).toLocaleString()}
+            />
+          ) : null}
+          {acct?.issuer ? (
+            <InfoRow label={m.accountIssuer} value={acct.issuer} />
+          ) : null}
+          {acct?.teamId ? (
+            <InfoRow label={m.accountTeamId} value={acct.teamId} />
+          ) : null}
+          <InfoRow label={m.accountApiKeyStatus} value={apiKeyLabel} />
+        </div>
+
+        {loginMsg || deviceUrl || deviceCode ? (
+          <div className="account-login-panel">
+            {loginMsg ? (
+              <p className="account-login-msg">{loginMsg}</p>
+            ) : null}
+            {deviceCode ? (
+              <div className="account-device-code" title={m.accountDeviceCode}>
+                {deviceCode}
+              </div>
+            ) : null}
+            {deviceUrl ? (
+              <a
+                className="account-device-url"
+                href={deviceUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {deviceUrl}
+              </a>
+            ) : null}
+            <div className="settings-actions">
+              {deviceUrl || deviceCode ? (
+                <button
+                  type="button"
+                  className="settings-btn"
+                  onClick={() => void copyDevice()}
+                >
+                  {m.accountCopyCode}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="settings-btn danger"
+                disabled={busy}
+                onClick={() => void onCancelLogin()}
+              >
+                {m.accountCancelLogin}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="settings-btn primary"
+            disabled={loginBusy}
+            onClick={() => void onLogin("oauth")}
+          >
+            {m.accountLoginBrowser}
+          </button>
+          <button
+            type="button"
+            className="settings-btn"
+            disabled={loginBusy}
+            onClick={() => void onLogin("device")}
+          >
+            {m.accountLoginDevice}
+          </button>
+          <button
+            type="button"
+            className="settings-btn"
+            disabled={busy || !signedIn}
+            onClick={() => void onLogout()}
+          >
+            {m.accountLogout}
+          </button>
+          <button
+            type="button"
+            className="settings-btn"
+            disabled={busy}
+            onClick={() => void onReconnect()}
+          >
+            {m.accountReconnect}
+          </button>
+        </div>
+        <p className="settings-help">{m.accountLoginHelp}</p>
+      </section>
+
+      {/* ── Usage / subscription ── */}
+      <section className="settings-card">
+        <div className="settings-card-head">
+          <h2>{m.accountUsageSection}</h2>
+          <p>{m.accountUsageDesc}</p>
+        </div>
+        {usage && !usage.error ? (
+          <>
+            <div className="account-usage-block settings-usage">
+              <div className="account-usage-row">
+                <span className="account-usage-label">{usage.usageLabel}</span>
+                <span className="account-usage-pct">{usage.usageShort}</span>
+              </div>
+              <div
+                className="account-usage-bar"
+                role="progressbar"
+                aria-valuenow={Math.round(usage.usagePct)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <span
+                  className={`account-usage-fill ${
+                    usage.usagePct >= 90
+                      ? "critical"
+                      : usage.usagePct >= 75
+                        ? "warn"
+                        : ""
+                  }`}
+                  style={{ width: `${Math.min(100, usage.usagePct)}%` }}
+                />
+              </div>
+            </div>
+            <div className="settings-info-list">
+              {usage.subscriptionTier ? (
+                <InfoRow
+                  label={m.accountUsageTier}
+                  value={usage.subscriptionTier}
+                />
+              ) : null}
+              {usage.periodEndDisplay ? (
+                <InfoRow
+                  label={m.accountUsageReset}
+                  value={usage.periodEndDisplay}
+                />
+              ) : null}
+              {usage.prepaidUsd !== undefined && usage.prepaidUsd > 0 ? (
+                <InfoRow
+                  label={m.accountUsageCredits}
+                  value={`$${usage.prepaidUsd.toFixed(
+                    Number.isInteger(usage.prepaidUsd) ? 0 : 2,
+                  )}`}
+                />
+              ) : null}
+              {usage.autoTopupEnabled !== undefined &&
+              usage.prepaidUsd !== undefined &&
+              usage.prepaidUsd > 0 ? (
+                <InfoRow
+                  label={m.accountUsageAutoTopup}
+                  value={
+                    usage.autoTopupEnabled && usage.autoTopupAmountUsd != null
+                      ? `$${usage.autoTopupAmountUsd.toFixed(2)}${
+                          usage.autoTopupMaxUsd != null
+                            ? ` (max $${usage.autoTopupMaxUsd.toFixed(2)}/mo)`
+                            : ""
+                        }`
+                      : m.accountUsageAutoTopupOff
+                  }
+                />
+              ) : null}
+              {usage.payAsYouGo &&
+              usage.onDemandCapUsd != null &&
+              usage.onDemandUsedUsd != null ? (
+                <InfoRow
+                  label={m.accountUsagePayg}
+                  value={`$${usage.onDemandUsedUsd.toFixed(2)} / $${usage.onDemandCapUsd.toFixed(2)}`}
+                />
+              ) : null}
+              {usage.fetchedAt ? (
+                <InfoRow
+                  label={m.accountUsageUpdated}
+                  value={new Date(usage.fetchedAt).toLocaleString()}
+                />
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <p className="settings-help">
+            {usage?.error || m.accountUsageUnavailable}
+          </p>
+        )}
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="settings-btn primary"
+            disabled={busy}
+            onClick={() => void onRefreshUsageClick()}
+          >
+            {m.accountUsageRefresh}
+          </button>
+          <button
+            type="button"
+            className="settings-btn"
+            disabled={busy}
+            onClick={() => void onManageBilling()}
+          >
+            {m.accountUsageManage}
+          </button>
+        </div>
+      </section>
+
+      {/* ── API Key ── */}
+      <section className="settings-card">
+        <div className="settings-card-head">
+          <h2>{m.accountApiKeySection}</h2>
+          <p>{m.accountApiKeyDesc}</p>
+        </div>
+        {apiKeyField}
+      </section>
+    </>
+  );
+}
+
+interface GeneralCardsProps {
+  m: Messages;
+  prefs: UserPrefs;
+  systemLocaleLabel: string;
+  systemThemeLabel: string;
+  localeOptions: { id: LocalePref; title: string }[];
+  themeOptions: { id: ThemePref; title: string }[];
+  setLocale: (next: LocalePref) => void;
+  setTheme: (next: ThemePref) => void;
+  alwaysApprove: boolean;
+  onSetAlwaysApprove: (enabled: boolean) => void;
+  autoTrustNewSessions: boolean;
+  onSetAutoTrustNewSessions: (enabled: boolean) => void;
+}
+
+function GeneralCards(props: GeneralCardsProps): React.ReactElement {
+  const {
+    m,
+    prefs,
+    systemLocaleLabel,
+    systemThemeLabel,
+    localeOptions,
+    themeOptions,
+    setLocale,
+    setTheme,
+    alwaysApprove,
+    onSetAlwaysApprove,
+    autoTrustNewSessions,
+    onSetAutoTrustNewSessions,
+  } = props;
+
+  return (
+    <>
+      <section className="settings-card">
+        <div className="settings-card-head">
+          <h2>{m.languageSection}</h2>
+          <p>{m.languageDesc}</p>
+        </div>
+        <div
+          className="settings-options"
+          role="radiogroup"
+          aria-label={m.language}
+        >
+          {localeOptions.map((opt) => (
+            <OptionCard
+              key={opt.id}
+              value={opt.id}
+              selected={prefs.locale === opt.id}
+              title={opt.title}
+              description={
+                opt.id === "system"
+                  ? `${m.currentResolved}: ${systemLocaleLabel}`
+                  : undefined
+              }
+              onSelect={setLocale}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="settings-card">
+        <div className="settings-card-head">
+          <h2>{m.appearanceSection}</h2>
+          <p>{m.themeDesc}</p>
+        </div>
+        <div
+          className="settings-options"
+          role="radiogroup"
+          aria-label={m.theme}
+        >
+          {themeOptions.map((opt) => (
+            <OptionCard
+              key={opt.id}
+              value={opt.id}
+              selected={prefs.theme === opt.id}
+              title={opt.title}
+              description={
+                opt.id === "system"
+                  ? `${m.currentResolved}: ${systemThemeLabel}`
+                  : undefined
+              }
+              onSelect={setTheme}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="settings-card">
+        <div className="settings-card-head">
+          <h2>{m.permissionsSection}</h2>
+          <p>{m.permissionsSectionDesc}</p>
+        </div>
+        <div className="settings-card-head" style={{ marginBottom: 8 }}>
+          <h3 className="settings-subhead">{m.alwaysApproveSetting}</h3>
+          <p>{m.alwaysApproveSettingDesc}</p>
+        </div>
+        <div
+          className="settings-options"
+          role="radiogroup"
+          aria-label={m.alwaysApproveSetting}
+        >
+          <OptionCard
+            value="off"
+            selected={!alwaysApprove}
+            title={m.alwaysApproveDisabled}
+            onSelect={() => onSetAlwaysApprove(false)}
+          />
+          <OptionCard
+            value="on"
+            selected={alwaysApprove}
+            title={m.alwaysApproveEnabled}
+            onSelect={() => onSetAlwaysApprove(true)}
+          />
+        </div>
+
+        <div
+          className="settings-card-head"
+          style={{ marginBottom: 8, marginTop: 16 }}
+        >
+          <h3 className="settings-subhead">{m.autoTrustSetting}</h3>
+          <p>{m.autoTrustSettingDesc}</p>
+        </div>
+        <div
+          className="settings-options"
+          role="radiogroup"
+          aria-label={m.autoTrustSetting}
+        >
+          <OptionCard
+            value="off"
+            selected={!autoTrustNewSessions}
+            title={m.autoTrustDisabled}
+            onSelect={() => onSetAutoTrustNewSessions(false)}
+          />
+          <OptionCard
+            value="on"
+            selected={autoTrustNewSessions}
+            title={m.autoTrustEnabled}
+            onSelect={() => onSetAutoTrustNewSessions(true)}
+          />
+        </div>
+      </section>
+    </>
   );
 }

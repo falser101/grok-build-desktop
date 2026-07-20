@@ -148,18 +148,18 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     nameZh: "DeepSeek 深度求索",
     region: "cn",
     // Official docs (https://api-docs.deepseek.com/guides/anthropic_api/):
-    //   OpenAI-compatible: POST https://api.deepseek.com/v1/chat/completions
+    //   OpenAI-compatible: POST https://api.deepseek.com/chat/completions
     //   Anthropic-compatible: POST https://api.deepseek.com/anthropic/v1/messages
     // Anthropic path uses `x-api-key` header (same convention as Anthropic).
     baseUrl: "https://api.deepseek.com/anthropic/v1",
     apiBackend: "messages",
     protocolEndpoints: {
       messages: "https://api.deepseek.com/anthropic/v1",
-      chat_completions: "https://api.deepseek.com/v1",
+      chat_completions: "https://api.deepseek.com",
     },
     authStyle: "x-api-key",
     // List models via OpenAI-compatible host (Anthropic path has no /models).
-    modelsListBaseUrl: "https://api.deepseek.com/v1",
+    modelsListBaseUrl: "https://api.deepseek.com",
     envKey: "DEEPSEEK_API_KEY",
     accent: "#4d8aff",
     logo: "./assets/provider-icons/deepseek.png",
@@ -392,6 +392,10 @@ function normalizeModel(
     configKey: raw.configKey || makeConfigKey(providerId, id),
     source: raw.source === "fetched" ? "fetched" : "manual",
     enabled: raw.enabled !== false,
+    contextWindow:
+      typeof raw.contextWindow === "number" && raw.contextWindow > 0
+        ? raw.contextWindow
+        : undefined,
   };
 }
 
@@ -503,6 +507,12 @@ function buildModelSection(provider: ModelProviderConfig, model: ModelProviderMo
   lines.push(`name = ${tomlString(model.name)}`);
   lines.push(`description = ${tomlString(provider.name)}`);
   lines.push(`api_backend = ${tomlString(provider.apiBackend)}`);
+  if (
+    typeof model.contextWindow === "number" &&
+    model.contextWindow > 0
+  ) {
+    lines.push(`context_window = ${model.contextWindow}`);
+  }
 
   const headers: Record<string, string> = {
     ...(provider.extraHeaders || {}),
@@ -621,6 +631,7 @@ export async function upsertProvider(
     configKey?: string;
     source?: "fetched" | "manual";
     enabled?: boolean;
+    contextWindow?: number;
   };
 
   let modelsIn: ModelDraft[];
@@ -682,6 +693,7 @@ export async function upsertProvider(
         source: m.source,
         enabled: m.enabled,
         configKey: m.configKey || makeConfigKey(id, m.id),
+        contextWindow: m.contextWindow,
       }),
     ),
     createdAt: existing?.createdAt || now,

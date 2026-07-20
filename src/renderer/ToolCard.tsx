@@ -19,10 +19,11 @@ function kindLabel(m: Messages, kind: string | undefined): string {
     case "edit":
     case "apply_patch":
     case "search_replace":
+      return m.toolKindEdit;
     case "write":
     case "create":
     case "patch":
-      return m.toolKindEdit;
+      return m.toolKindWrite;
     case "search":
     case "grep":
     case "find":
