@@ -254,13 +254,12 @@ body.is-resizing-panels .xterm {
 
 
 
-/* Only hide heavy panes when resizing shell columns (sidebar / right
- * panel), not when scrubbing the inner files-tree split — that must
- * stay visible and track the mouse live. */
-body.is-resizing-panels:not(.is-resizing-files-tree) .file-viewer,
-body.is-resizing-panels:not(.is-resizing-files-tree) .file-tree {
-  content-visibility: hidden;
-}
+/*
+ * Don't blank file content while the user drags a panel edge — the
+ * `content-visibility: hidden` trick was used for xterm only. The file
+ * viewer / tree are cheap enough to keep visible during scrubbing so
+ * the user can see the layout tracking their cursor.
+ */
 
 body.is-resizing-files-tree {
   cursor: col-resize !important;
