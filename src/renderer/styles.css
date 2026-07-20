@@ -5147,139 +5147,71 @@ html[data-theme="light"] .icon-btn.send {
   background: var(--bg);
 }
 
-/* ── Unified right-panel tab bar ─────────────────── */
-/* Mirrors the .term-tab visual: pill-shaped chips that live on the
- * same dark sidebar surface, with a small dot to denote active and
- * a × close button. Layout left → right: file tabs → plan/terminal
- * chips → + menu. The whole row scrolls horizontally when overflow. */
-
-.right-panel-tabs {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 6px 8px;
-  background: var(--bg-sidebar);
-  border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+/* ── Right-panel tab style (deprecated) ─────────── */
+/* The unified tab bar was retired in favour of a single floating `+`
+ * button + per-panel-toolbar layout. The class names below are kept
+ * as no-op stubs so any stale references still parse. */
+.right-panel-tabs,
+.right-panel-tabs::-webkit-scrollbar,
+.right-panel-tabs::-webkit-scrollbar-thumb,
+.right-panel-tabs::-webkit-scrollbar-track {
+  display: none;
 }
-.right-panel-tabs::-webkit-scrollbar { height: 4px; }
-.right-panel-tabs::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 2px;
-}
-.right-panel-tabs::-webkit-scrollbar-track { background: transparent; }
-
-.right-panel-tab {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 4px 4px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  line-height: 1.2;
-  color: var(--text-muted);
-  background: transparent;
-  border: 1px solid transparent;
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-  max-width: 200px;
-  min-width: 0;
-}
-.right-panel-tab:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-.right-panel-tab.active {
-  background: var(--bg);
-  color: var(--text);
-  border-color: var(--border);
-}
-
-.right-panel-tab-dot {
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: transparent;
-}
-.right-panel-tab.active .right-panel-tab-dot {
-  background: var(--accent, #5b8def);
-}
-
-.right-panel-tab-icon {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  color: var(--text-dim);
-}
-.right-panel-tab.active .right-panel-tab-icon {
-  color: var(--accent, #5b8def);
-}
-
-.right-panel-tab-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 150px;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.right-panel-tab-close {
-  flex: 0 0 auto;
-  border: none;
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-  padding: 0 6px;
-  border-radius: 4px;
-}
-.right-panel-tab-close:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-/* Vertical separator between file tabs and the tool tabs (Plan / Terminal). */
+.right-panel-tab,
+.right-panel-tab:hover,
+.right-panel-tab.active,
+.right-panel-tab-dot,
+.right-panel-tab-icon,
+.right-panel-tab-label,
+.right-panel-tab-close,
 .right-panel-tab-sep {
-  flex: 0 0 auto;
-  width: 1px;
-  height: 18px;
-  background: var(--border);
-  margin: 0 6px;
+  /* deliberately no-op — kept so legacy class names don't 404 */
+}
+
+/* Floating `+` button anchored to the top-right of the right panel.
+ * Sits above the rendered content (file viewer / plan panel / terminal)
+ * and reveals a 2-3 item dropdown (file / terminal [/ plan]). */
+.right-panel-floating-plus {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+}
+
+/* When the floating `+` is shown, leave headroom in the file viewer
+ * so the button doesn't overlap the file's own close/insert buttons. */
+.right-panel-aside .files-section-editor {
+  padding-top: 4px;
 }
 
 .right-panel-plus-wrap {
   position: relative;
   flex: 0 0 auto;
-  margin-left: 4px;
 }
 .right-panel-plus-wrap .dropdown {
-  /* Override default upward popup so the menu drops below the + button
-   * (stays inside the tab row and above subsequent rows). */
+  /* Float the menu below the trigger, anchored to the right edge so
+   * it doesn't bleed past the right panel's right border. */
   top: calc(100% + 6px);
   bottom: auto;
   left: auto;
   right: 0;
   min-width: 180px;
   max-height: none;
+  z-index: 60;
 }
 .right-panel-plus {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   border: 1px solid var(--border);
-  background: transparent;
+  background: var(--bg-elevated);
   color: var(--text-muted);
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .right-panel-plus:hover {
   color: var(--text);

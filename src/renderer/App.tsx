@@ -193,143 +193,69 @@ function normalizeWidthPct(
   if (value > max + 5) return pxToPct(value, min, max);
   return clamp(value, min, max);
 }
-
 /**
- * Render a single right-panel tab chip. Used by the unified tab bar in
- * App.tsx so every kind (files / plan / terminal) shares one visual.
+ * Optional extra entry — host can add e.g. a Plan shortcut beside the
+ * built-in File / Terminal entries.
  */
-function renderTab(
-  m: Messages,
-  tab: RightTab,
-  label: string,
-  isActive: boolean,
-  onActivate: () => void,
-  onClose: () => void,
-) {
-  const kindClass =
-    tab.kind === "files"
-      ? " kind-files"
-      : tab.kind === "plan"
-        ? " kind-plan"
-        : " kind-terminal";
-  return (
-    <div
-      className={"right-panel-tab" + (isActive ? " active" : "") + kindClass}
-      onClick={onActivate}
-      role="tab"
-      aria-selected={isActive}
-      title={
-        tab.kind === "files"
-          ? tab.path
-          : tab.kind === "plan"
-            ? m.sidePanelPlan
-            : m.sidePanelTerminal
-      }
-    >
-      <span className="right-panel-tab-dot" aria-hidden />
-      <span className="right-panel-tab-icon" aria-hidden>
-        {tab.kind === "files" ? (
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-            <path
-              d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.1 1.3h5.1A1.2 1.2 0 0 1 13.5 5.5v6.3a1.2 1.2 0 0 1-1.2 1.2H3.7a1.2 1.2 0 0 1-1.2-1.2V4.2Z"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinejoin="round"
-            />
-          </svg>
-        ) : tab.kind === "plan" ? (
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-            <path
-              d="M3.5 2.5h9A.5.5 0 0 1 13 3v10a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13V3a.5.5 0 0 1 .5-.5Z"
-              stroke="currentColor"
-              strokeWidth="1.2"
-            />
-            <path
-              d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-            />
-          </svg>
-        ) : (
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-            <rect
-              x="2.5"
-              y="3"
-              width="11"
-              height="10"
-              rx="1.5"
-              stroke="currentColor"
-              strokeWidth="1.2"
-            />
-            <path
-              d="M5 7.2 6.6 8.5 5 9.8M8.2 10.2h2.6"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        )}
-      </span>
-      <span className="right-panel-tab-label">{label}</span>
-      <button
-        type="button"
-        className="right-panel-tab-close"
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose();
-        }}
-        aria-label={m.filesCloseTabTooltip}
-        title={m.filesCloseTabTooltip}
-      >
-        ×
-      </button>
-    </div>
-  );
+interface PlusExtraItem {
+  id: string;
+  label: string;
+  icon: "plan";
+  onPick: () => void;
 }
 
 /**
- * Right-panel `+` button dropdown — opens a Plan, Terminal, or file-
- * tree focus action. File picking is handled by focusing the existing
- * tree filter; new files creation is left for a future patch.
+ * Right-panel `+` button — built-in entries: File + Terminal. Hosts can
+ * pass `extraItems` to inject additional shortcuts (e.g. Plan).
  */
 function RightPanelPlusMenu({
   m,
-  onPickFiles,
-  onPickPlan,
-  onPickTerminal,
+  onPick,
+  extraItems,
 }: {
   m: Messages;
-  onPickFiles: () => void;
-  onPickPlan: () => void;
-  onPickTerminal: () => void;
+  onPick: (kind: "file" | "terminal") => void;
+  extraItems?: PlusExtraItem[];
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      if (wrapRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
     };
-    document.addEventListener("mousedown", onDoc);
+    // Use click (not mousedown) so the button's own click can toggle
+    // the menu open without an immediate close.
+    document.addEventListener("click", onDoc);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("click", onDoc);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
   return (
-    <div className="right-panel-plus-wrap" ref={ref}>
+    <div className="right-panel-plus-wrap" ref={wrapRef}>
       <button
+        ref={buttonRef}
         type="button"
         className="right-panel-plus"
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
         aria-haspopup="menu"
         aria-expanded={open}
         title={m.termNewTab}
@@ -337,17 +263,27 @@ function RightPanelPlusMenu({
         +
       </button>
       {open ? (
-        <div className="dropdown" role="menu">
+        <div className="dropdown" ref={menuRef} role="menu">
           <button
             type="button"
             className="dropdown-item"
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              onPickFiles();
+              onPick("file");
             }}
           >
-            {m.filesPickFromWorkspace}
+            <span className="di-icon" aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.1 1.3h5.1A1.2 1.2 0 0 1 13.5 5.5v6.3a1.2 1.2 0 0 1-1.2 1.2H3.7a1.2 1.2 0 0 1-1.2-1.2V4.2Z"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            <span>{m.sidePanelFiles}</span>
           </button>
           <button
             type="button"
@@ -355,22 +291,67 @@ function RightPanelPlusMenu({
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              onPickPlan();
+              onPick("terminal");
             }}
           >
-            {m.sidePanelPlan}
+            <span className="di-icon" aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <rect
+                  x="2.5"
+                  y="3"
+                  width="11"
+                  height="10"
+                  rx="1.5"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                />
+                <path
+                  d="M5 7.2 6.6 8.5 5 9.8M8.2 10.2h2.6"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            <span>{m.sidePanelTerminal}</span>
           </button>
-          <button
-            type="button"
-            className="dropdown-item"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onPickTerminal();
-            }}
-          >
-            {m.sidePanelTerminal}
-          </button>
+          {extraItems?.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="dropdown-item"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                item.onPick();
+              }}
+            >
+              {item.icon === "plan" ? (
+                <span className="di-icon" aria-hidden>
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                  >
+                    <path
+                      d="M3.5 2.5h9A.5.5 0 0 1 13 3v10a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13V3a.5.5 0 0 1 .5-.5Z"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                    />
+                    <path
+                      d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </span>
+              ) : null}
+              <span>{item.label}</span>
+            </button>
+          ))}
         </div>
       ) : null}
     </div>
@@ -6156,6 +6137,32 @@ export function App() {
             onPointerDown={onResizePointerDown("right")}
             onDoubleClick={() => setRightPanelOpen(false)}
           />
+          {/* Floating `+` button in the top-right corner of the right
+           *  panel. Always visible once a tab is open; opens a 2-item
+           *  menu (File / Terminal) plus a Plan shortcut. */}
+          {rightPanelTabs.length > 0 ? (
+            <div className="right-panel-floating-plus">
+              <RightPanelPlusMenu
+                m={m}
+                onPick={(kind) => {
+                  if (kind === "terminal") {
+                    openTerminalTab();
+                  } else {
+                    openFile("");
+                    setFileTreeCollapsed(false);
+                  }
+                }}
+                extraItems={[
+                  {
+                    id: "plan",
+                    label: m.sidePanelPlan,
+                    icon: "plan",
+                    onPick: () => openPlanTab(),
+                  },
+                ]}
+              />
+            </div>
+          ) : null}
           <div className="right-panel-body">
             {rightPanelTabs.length === 0 ? (
               // Landing view: three entry cards. Picking one promotes
@@ -6250,71 +6257,6 @@ export function App() {
               </div>
             ) : (
               <>
-                {/* Tabbed view: top bar + content. */}
-                <div
-                  className="right-panel-tabs"
-                  role="tablist"
-                  aria-label={m.sidePanelToggle}
-                >
-                  {/* File tabs first. */}
-                  {rightPanelTabs
-                    .filter((t) => t.kind === "files")
-                    .map((tab) => {
-                      if (tab.kind !== "files") return null;
-                      const isActive = tab.id === activeTabId;
-                      const label = tab.path
-                        ? tab.path.split(/[/\\]/).pop() || tab.path
-                        : m.openFileTitle;
-                      return renderTab(
-                        m,
-                        tab,
-                        label,
-                        isActive,
-                        () => setActiveTabId(tab.id),
-                        () => closeRightTab(tab.id),
-                      );
-                    })}
-
-                  {/* Then a separator and the tool tabs (Plan / Terminal). */}
-                  {rightPanelTabs.some((t) => t.kind !== "files") ? (
-                    <span className="right-panel-tab-sep" aria-hidden />
-                  ) : null}
-                  {rightPanelTabs
-                    .filter((t) => t.kind !== "files")
-                    .map((tab) => {
-                      const isActive = tab.id === activeTabId;
-                      const label =
-                        tab.kind === "plan"
-                          ? m.sidePanelPlan
-                          : m.sidePanelTerminal;
-                      return renderTab(
-                        m,
-                        tab,
-                        label,
-                        isActive,
-                        () => setActiveTabId(tab.id),
-                        () => closeRightTab(tab.id),
-                      );
-                    })}
-
-                  {/* `+` menu opens a fresh tab — file / plan / terminal. */}
-                  <RightPanelPlusMenu
-                    m={m}
-                    onPickFiles={() => {
-                      setFileTreeCollapsed(false);
-                      requestAnimationFrame(() => {
-                        const input =
-                          document.querySelector<HTMLInputElement>(
-                            ".files-section-tree .file-tree-filter input",
-                          );
-                        input?.focus();
-                      });
-                    }}
-                    onPickPlan={openPlanTab}
-                    onPickTerminal={() => openTerminalTab()}
-                  />
-                </div>
-
                 <div className="right-panel-content">
                   {activeTab?.kind === "files" ? (
                     <FilesTabSection
@@ -6328,6 +6270,7 @@ export function App() {
                       onSetFileTreeCollapsed={setFileTreeCollapsed}
                       onResizePointerDown={onResizePointerDown("filesTree")}
                       onInsertMention={insertFileMention}
+
                     />
                   ) : null}
                   {activeTab?.kind === "plan" ? (
@@ -6340,6 +6283,7 @@ export function App() {
                       onClose={() => closeRightTab(activeTab.id)}
                       onRespondApproval={respondPlanApproval}
                       onRefreshPlan={refreshPlanContent}
+
                     />
                   ) : null}
                   {activeTab?.kind === "terminal" ? (
@@ -6350,6 +6294,7 @@ export function App() {
                       m={m}
                       onLastTabClosed={() => closeRightTab(activeTab.id)}
                       onOpenFile={() => openFile("")}
+
                     />
                   ) : null}
                 </div>
