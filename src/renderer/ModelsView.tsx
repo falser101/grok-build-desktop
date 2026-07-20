@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import type {
   ApiBackend,
   FetchedModelInfo,
@@ -10,6 +16,40 @@ import type {
 } from "@shared/types";
 import type { Messages } from "./i18n";
 import { usePrefs } from "./PrefsContext";
+
+/** Memoised so toggling one row doesn't re-render every other row. */
+const ModelRow = memo(function ModelRow({
+  mod,
+  onToggle,
+  m,
+}: {
+  mod: ModelProviderModel;
+  onToggle: () => void;
+  m: Messages;
+}) {
+  return (
+    <label className={`models-model-row ${mod.enabled ? "on" : ""}`}>
+      <span className="models-model-check" aria-hidden>
+        <input
+          type="checkbox"
+          checked={mod.enabled}
+          onChange={onToggle}
+        />
+        <span className="models-model-check-box" />
+      </span>
+      <span className="models-model-text">
+        <span className="models-model-name">{mod.name}</span>
+        <span className="models-model-id">{mod.id}</span>
+      </span>
+      <span
+        className={`models-source-badge ${mod.source}`}
+        title={mod.source}
+      >
+        {mod.source === "fetched" ? m.modelsSourceFetched : m.modelsSourceManual}
+      </span>
+    </label>
+  );
+});
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -996,31 +1036,12 @@ export function ModelsView({
                   <div className="ext-empty">{m.modelsNoModelsYet}</div>
                 ) : (
                   editorModelsVisible.map((mod) => (
-                    <label
+                    <ModelRow
                       key={mod.id}
-                      className={`models-model-row ${mod.enabled ? "on" : ""}`}
-                    >
-                      <span className="models-model-check" aria-hidden>
-                        <input
-                          type="checkbox"
-                          checked={mod.enabled}
-                          onChange={() => toggleModel(mod.id)}
-                        />
-                        <span className="models-model-check-box" />
-                      </span>
-                      <span className="models-model-text">
-                        <span className="models-model-name">{mod.name}</span>
-                        <span className="models-model-id">{mod.id}</span>
-                      </span>
-                      <span
-                        className={`models-source-badge ${mod.source}`}
-                        title={mod.source}
-                      >
-                        {mod.source === "fetched"
-                          ? m.modelsSourceFetched
-                          : m.modelsSourceManual}
-                      </span>
-                    </label>
+                      mod={mod}
+                      onToggle={() => toggleModel(mod.id)}
+                      m={m}
+                    />
                   ))
                 )}
               </div>

@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import type { TimelineItem } from "@shared/types";
 import type { Messages } from "./i18n";
 import { DiffList } from "./DiffView";
@@ -80,8 +80,11 @@ export const ToolCard = memo(function ToolCard({
   const hasDetails = hasDiffs || hasOutput;
   const sc = statusClass(item.status);
 
-  // Prefer open when there are diffs (coding feedback); keep pure stdout closed.
-  const defaultOpen = hasDiffs;
+  // Open state lives locally so that streaming updates to item.status /
+  // item.outputText don't override the user's manual collapse. We start
+  // with `hasDiffs` as the default (most useful for coding feedback) and
+  // then respect user toggles forever after.
+  const [open, setOpen] = useState<boolean>(hasDiffs);
 
   const header = (
     <div className="tool-card-header">
@@ -108,7 +111,8 @@ export const ToolCard = memo(function ToolCard({
   return (
     <details
       className={`tool-card expandable status-${sc}`}
-      open={defaultOpen}
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
     >
       <summary className="tool-card-summary">{header}</summary>
       <div className="tool-card-body">

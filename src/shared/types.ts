@@ -896,6 +896,11 @@ export interface DesktopApi {
   fetchProviderModels: (input: FetchModelsInput) => Promise<FetchedModelInfo[]>;
   /** Map agent modelId (configKey) → provider for composer grouping. */
   getModelConfigKeyIndex: () => Promise<ModelConfigKeyIndex>;
+  /**
+   * Tell the agent to re-read `~/.grok/config.toml` `[model.*]` and push a
+   * fresh catalog into the composer (after Models settings changes).
+   */
+  reloadAgentModels: () => Promise<void>;
   // ── Account ──
   getAccountStatus: () => Promise<AccountStatus>;
   /** Browser OAuth (`--oauth`) or device-code (`--device-auth`). */

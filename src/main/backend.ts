@@ -1667,9 +1667,14 @@ export class AgentBackend {
     this.questionQueue = kept;
   }
 
-  private applyModelsFromSession(modelsVal: JsonValue | undefined): void {
+  private applyModelsFromSession(
+    modelsVal: JsonValue | undefined,
+    opts?: { replaceEmpty?: boolean },
+  ): void {
     const { current, available } = parseModels(modelsVal);
-    if (available.length > 0) {
+    // session/new often omits models on partial results — keep previous list.
+    // models/update after config reload must replace even when empty.
+    if (available.length > 0 || opts?.replaceEmpty) {
       this.availableModels = available;
     }
     if (current) this.modelId = current;
@@ -1680,6 +1685,27 @@ export class AgentBackend {
       if (typeof cur.contextWindow === "number" && cur.contextWindow > 0) {
         this.contextWindow = cur.contextWindow;
       }
+    }
+  }
+
+  /**
+   * Ask the agent to re-read `[model.*]` from config.toml and push a fresh
+   * catalog (`x.ai/models/update`). Used after desktop provider save/delete.
+   * No-op when the agent is not connected.
+   */
+  async reloadModelsFromConfig(): Promise<void> {
+    if (!this.client?.connected || this.connection !== "ready") {
+      this.log("info", "reloadModels: agent not ready — skipped");
+      return;
+    }
+    try {
+      await this.requestExt("internal/reload_models", {}, 30_000);
+      this.log("info", "reloadModels: agent reloaded model list from config.toml");
+      // apply_config notifies clients; if notification is delayed/lost, still
+      // try a soft wait — snapshot will update when models/update arrives.
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log("warn", `reloadModels failed: ${message}`);
     }
   }
 
@@ -3082,6 +3108,28 @@ export class AgentBackend {
       method === "x.ai/sessions/changed"
     ) {
       void this.refreshHistory();
+      return;
+    }
+    // Agent model catalog hot-reload (config.toml [model.*] / models_cache).
+    // Without this, custom providers written by Models settings never appear
+    // in the composer chip until a full agent restart.
+    if (
+      method === "_x.ai/models/update" ||
+      method === "x.ai/models/update"
+    ) {
+      this.applyModelsFromSession(params as JsonValue, { replaceEmpty: true });
+      // Keep parked runtimes' catalogs in sync so warm switches see new models.
+      for (const rt of this.runtimes.values()) {
+        rt.availableModels = this.availableModels.map((m) => ({
+          ...m,
+          reasoningEfforts: m.reasoningEfforts?.map((e) => ({ ...e })),
+        }));
+      }
+      this.emitSnapshot();
+      this.log(
+        "info",
+        `models/update: ${this.availableModels.length} model(s) available`,
+      );
     }
   }
 

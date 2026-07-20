@@ -30,6 +30,12 @@ export function TerminalPanel({
   const termIdRef = useRef<string | null>(null);
   const workspaceRef = useRef(workspace);
   const disposedRef = useRef(false);
+  // App-layer batching: PTY `data` events arrive in small IPC chunks. We
+  // concatenate into a buffer and flush to xterm once per frame so we don't
+  // trigger one parser pass per packet.
+  const dataBufRef = useRef<string>("");
+  const dataFlushRafRef = useRef<number | null>(null);
+  const lastDimsRef = useRef<{ cols: number; rows: number } | null>(null);
 
   workspaceRef.current = workspace;
 
@@ -51,9 +57,19 @@ export function TerminalPanel({
       /* ignore */
     }
     if (id && term.cols > 0 && term.rows > 0) {
-      void window.desktop
-        .termResize(id, term.cols, term.rows)
-        .catch(() => undefined);
+      // ResizeObserver sometimes fires with the same dimensions — skip
+      // the IPC roundtrip when nothing actually changed.
+      const prev = lastDimsRef.current;
+      if (
+        !prev ||
+        prev.cols !== term.cols ||
+        prev.rows !== term.rows
+      ) {
+        lastDimsRef.current = { cols: term.cols, rows: term.rows };
+        void window.desktop
+          .termResize(id, term.cols, term.rows)
+          .catch(() => undefined);
+      }
     }
   }, []);
 
@@ -160,6 +176,19 @@ export function TerminalPanel({
     xtermRef.current = term;
     fitRef.current = fit;
 
+    const flushData = () => {
+      dataFlushRafRef.current = null;
+      const buf = dataBufRef.current;
+      if (!buf) return;
+      dataBufRef.current = "";
+      xtermRef.current?.write(buf);
+    };
+
+    const scheduleFlush = () => {
+      if (dataFlushRafRef.current != null) return;
+      dataFlushRafRef.current = requestAnimationFrame(flushData);
+    };
+
     const onData = term.onData((data) => {
       const id = termIdRef.current;
       if (!id) return;
@@ -169,11 +198,13 @@ export function TerminalPanel({
     const onBinary = term.onBinary((data) => {
       const id = termIdRef.current;
       if (!id) return;
-      // Convert binary string to raw bytes for PTY.
+      // Convert binary string to raw bytes for PTY. xterm wants binary in
+      // the host's charset; we forward the string bytes via onData below.
       let raw = "";
       for (let i = 0; i < data.length; i++) {
         raw += String.fromCharCode(data.charCodeAt(i) & 0xff);
       }
+      // Forward as user input to PTY (mirroring onData path).
       void window.desktop.termWrite(id, raw).catch(() => undefined);
     });
 
@@ -201,12 +232,25 @@ export function TerminalPanel({
     };
   }, []);
 
-  // Stream PTY output → xterm.
+  // Stream PTY output → xterm. Coalesce small IPC chunks into one
+  // `xterm.write()` per animation frame (avoids one parse pass per packet).
   useEffect(() => {
-    return window.desktop.onTermEvent((ev) => {
+    const flushData = () => {
+      dataFlushRafRef.current = null;
+      const buf = dataBufRef.current;
+      if (!buf) return;
+      dataBufRef.current = "";
+      xtermRef.current?.write(buf);
+    };
+    const scheduleFlush = () => {
+      if (dataFlushRafRef.current != null) return;
+      dataFlushRafRef.current = requestAnimationFrame(flushData);
+    };
+    const off = window.desktop.onTermEvent((ev) => {
       if (ev.type === "data") {
         if (termIdRef.current && ev.id !== termIdRef.current) return;
-        xtermRef.current?.write(ev.data);
+        dataBufRef.current += ev.data;
+        scheduleFlush();
       } else if (ev.type === "exit") {
         if (termIdRef.current && ev.id !== termIdRef.current) return;
         const code = ev.code ?? "?";
@@ -217,6 +261,17 @@ export function TerminalPanel({
         setTermId(null);
       }
     });
+    return () => {
+      off();
+      // Drain any remaining bytes so we don't drop output on unmount.
+      if (dataFlushRafRef.current != null) {
+        cancelAnimationFrame(dataFlushRafRef.current);
+        dataFlushRafRef.current = null;
+        const tail = dataBufRef.current;
+        dataBufRef.current = "";
+        if (tail) xtermRef.current?.write(tail);
+      }
+    };
   }, [m.termExited]);
 
   // Start shell once xterm is ready; restart when workspace changes.

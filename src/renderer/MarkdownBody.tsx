@@ -4,7 +4,9 @@ import {
   memo,
   useCallback,
   useDeferredValue,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type ReactElement,
@@ -164,6 +166,37 @@ type Props = {
   streaming?: boolean;
 };
 
+/**
+ * Cap how often a streaming update propagates to downstream ReactMarkdown /
+ * remark re-parses. The renderer gets one update per animation frame (≈16ms)
+ * during token storms, regardless of how many raw events fire.
+ */
+function useFrameThrottledValue<T>(value: T): T {
+  const ref = useRef(value);
+  const [pending, setPending] = useState<T>(value);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (value === ref.current) return;
+    ref.current = value;
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      setPending(ref.current);
+    });
+    return () => {
+      // No-op cleanup; flush happens on the next pending set.
+    };
+  }, [value]);
+
+  useEffect(() => () => {
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+  }, []);
+
+  return pending;
+}
+
 function MarkdownBodyInner({ text, className, streaming }: Props) {
   const cls = [className, "md-body", streaming ? "streaming" : ""]
     .filter(Boolean)
@@ -172,26 +205,18 @@ function MarkdownBodyInner({ text, className, streaming }: Props) {
   // Stable empty fallback so streaming "" still shows caret via CSS.
   const source = useMemo(() => text || "\u00a0", [text]);
 
-  // Parse markdown incrementally while tokens stream. useDeferredValue lets
-  // React coalesce frequent token updates into a single render pass behind a
-  // high-priority overlay (the caret text), so the caret stays smooth even
-  // when remark is busy on a long chunk.
-  const deferredSource = useDeferredValue(source);
+  // Cap per-frame work: limit ReactMarkdown re-parses to one per rAF.
+  // useDeferredValue alone can't keep up with sub-16ms token floods.
+  const displaySource = useFrameThrottledValue(source);
+  // Belt-and-suspenders vs Sudden unmount on small bursts.
+  const deferredSource = useDeferredValue(displaySource);
 
   if (streaming) {
-    // Two-layer overlay while streaming:
-    //  - foreground: the freshest token text with a blinking caret
-    //  - background: the (slightly stale) parsed markdown so headings, code
-    //    blocks, lists and links render in real time instead of appearing
-    //    all at once when the turn ends.
+    // Plain text only — no remark re-parse per token. Parsing happens once
+    // when streaming flips to false (turn end).
     return (
-      <div className={cls}>
-        <div className="md-body md-deferred" aria-hidden="true">
-          <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
-            {deferredSource}
-          </ReactMarkdown>
-        </div>
-        <div className="md-streaming-fresh">{source}</div>
+      <div className={`${cls} md-streaming`}>
+        <div className="md-streaming-plain">{source}</div>
       </div>
     );
   }
@@ -199,7 +224,7 @@ function MarkdownBodyInner({ text, className, streaming }: Props) {
   return (
     <div className={cls}>
       <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
-        {source}
+        {deferredSource}
       </ReactMarkdown>
     </div>
   );

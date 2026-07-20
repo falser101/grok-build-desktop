@@ -63,15 +63,20 @@ function FileViewerInner({ path, m, onClose, onInsertMention }: Props) {
     return parts;
   }, [data]);
 
+  const lineCount = lines.length || (data?.content ? 1 : 0);
+
+  /**
+   * For huge files, skip highlight.js entirely — its O(n) output on a single
+   * string can blow up to MBs of innerHTML. Above the threshold we fall back
+   * to plain text. Below it we keep the existing highlighted code path.
+   */
+  const SKIP_HLJS_LINES = 3000;
+  const skipHighlight = lineCount > SKIP_HLJS_LINES;
   const highlightedHtml = useMemo(() => {
     if (!data || data.binary) return "";
+    if (skipHighlight) return "";
     return highlightCode(data.content, data.language);
-  }, [data]);
-
-  // Split highlighted HTML by lines — hljs may nest spans across lines.
-  // Safer approach: highlight whole file then split on \n while tracking open tags
-  // is complex. Simpler: line-number gutter + single pre with highlighted HTML.
-  const lineCount = lines.length || (data?.content ? 1 : 0);
+  }, [data, skipHighlight]);
 
   return (
     <div className="file-viewer">
@@ -165,17 +170,27 @@ function FileViewerInner({ path, m, onClose, onInsertMention }: Props) {
           ) : (
             <div className="file-viewer-code-wrap">
               <div className="file-viewer-gutter" aria-hidden>
-                {Array.from({ length: Math.max(lineCount, 1) }, (_, i) => (
-                  <span key={i}>{i + 1}</span>
-                ))}
+                {skipHighlight ? (
+                  <span className="file-viewer-gutter-huge">
+                    {m.filesHugeFileHint.replace("{n}", String(lineCount))}
+                  </span>
+                ) : (
+                  Array.from({ length: Math.max(lineCount, 1) }, (_, i) => (
+                    <span key={i}>{i + 1}</span>
+                  ))
+                )}
               </div>
               <pre className="file-viewer-code hljs">
-                <code
-                  className={`language-${data.language}`}
-                  dangerouslySetInnerHTML={{
-                    __html: highlightedHtml || "\u00a0",
-                  }}
-                />
+                {skipHighlight ? (
+                  <code>{data.content || "\u00a0"}</code>
+                ) : (
+                  <code
+                    className={`language-${data.language}`}
+                    dangerouslySetInnerHTML={{
+                      __html: highlightedHtml || "\u00a0",
+                    }}
+                  />
+                )}
               </pre>
             </div>
           )

@@ -1,7 +1,10 @@
 import {
   memo,
   useCallback,
+  useDeferredValue,
   useEffect,
+  useMemo,
+  useRef,
   useState,
   type KeyboardEvent,
 } from "react";
@@ -23,7 +26,12 @@ type NodeState = {
   error?: string;
 };
 
-/** Codex-like simple file/folder glyph (not emoji). */
+/** Keep a callback's identity stable across renders for memoised children. */
+function useLatestCallback<T extends (...args: never[]) => unknown>(cb: T): T {
+  const ref = useRef(cb);
+  ref.current = cb;
+  return useCallback(((...args: Parameters<T>) => ref.current(...args)) as T, []);
+}
 function fileIconKind(entry: FileEntry): string {
   if (entry.isDir) return "dir";
   const ext = entry.name.includes(".")
@@ -80,25 +88,30 @@ function fileIconKind(entry: FileEntry): string {
   }
 }
 
-function TreeNode({
+const TreeNodeInner = memo(function TreeNodeInner({
   entry,
   depth,
   selectedPath,
   expanded,
-  nodeState,
+  childLoading,
+  childError,
+  childList,
   onToggle,
   onSelectFile,
+  nodeState,
 }: {
   entry: FileEntry;
   depth: number;
   selectedPath: string | null;
   expanded: Set<string>;
-  nodeState: Record<string, NodeState>;
+  childLoading: boolean;
+  childError?: string;
+  childList?: FileEntry[];
   onToggle: (path: string) => void;
   onSelectFile: (path: string) => void;
+  nodeState: Record<string, NodeState>;
 }) {
   const isOpen = entry.isDir && expanded.has(entry.path);
-  const state = nodeState[entry.path];
   const active = !entry.isDir && selectedPath === entry.path;
 
   const onKey = (e: KeyboardEvent) => {
@@ -145,7 +158,7 @@ function TreeNode({
       </button>
       {entry.isDir && isOpen ? (
         <div className="file-tree-children" role="group">
-          {state?.loading ? (
+          {childLoading ? (
             <div
               className="file-tree-status"
               style={{ paddingLeft: 20 + depth * 12 }}
@@ -153,15 +166,15 @@ function TreeNode({
               …
             </div>
           ) : null}
-          {state?.error ? (
+          {childError ? (
             <div
               className="file-tree-status error"
               style={{ paddingLeft: 20 + depth * 12 }}
             >
-              {state.error}
+              {childError}
             </div>
           ) : null}
-          {state?.children?.map((child) => (
+          {childList?.map((child) => (
             <TreeNode
               key={child.path}
               entry={child}
@@ -177,7 +190,45 @@ function TreeNode({
       ) : null}
     </>
   );
-}
+});
+
+/**
+ * Wrapper that resolves this node's child slice once (so the memo body can
+ * extract only primitive props instead of taking the whole `nodeState`).
+ */
+const TreeNode = memo(function TreeNodeOuter({
+  entry,
+  depth,
+  selectedPath,
+  expanded,
+  nodeState,
+  onToggle,
+  onSelectFile,
+}: {
+  entry: FileEntry;
+  depth: number;
+  selectedPath: string | null;
+  expanded: Set<string>;
+  nodeState: Record<string, NodeState>;
+  onToggle: (path: string) => void;
+  onSelectFile: (path: string) => void;
+}) {
+  const state = entry.isDir ? nodeState[entry.path] : undefined;
+  return (
+    <TreeNodeInner
+      entry={entry}
+      depth={depth}
+      selectedPath={selectedPath}
+      expanded={expanded}
+      nodeState={nodeState}
+      childLoading={Boolean(state?.loading)}
+      childError={state?.error}
+      childList={state?.children}
+      onToggle={onToggle}
+      onSelectFile={onSelectFile}
+    />
+  );
+});
 
 function FileTreeInner({
   workspace,
@@ -241,13 +292,23 @@ function FileTreeInner({
     [loadDir, nodeState],
   );
 
-  const root = nodeState[""];
-  const q = filter.trim().toLowerCase();
+  // Ref-stable callbacks for memoised TreeNode — children re-render only
+  // when their own data props change, not every parent render.
+  const onToggleStable = useLatestCallback(onToggle);
+  const onSelectFileStable = useLatestCallback(onSelectFile);
 
-  const visibleChildren = (root?.children ?? []).filter((e) => {
-    if (!q) return true;
-    return e.name.toLowerCase().includes(q);
-  });
+  const root = nodeState[""];
+  const deferredFilter = useDeferredValue(filter);
+  const q = deferredFilter.trim().toLowerCase();
+
+  const visibleChildren = useMemo(
+    () =>
+      (root?.children ?? []).filter((e) => {
+        if (!q) return true;
+        return e.name.toLowerCase().includes(q);
+      }),
+    [root?.children, q],
+  );
 
   const projectName = workspace
     ? workspace.replace(/\\/g, "/").split("/").filter(Boolean).pop() ||
@@ -340,8 +401,8 @@ function FileTreeInner({
                 selectedPath={selectedPath}
                 expanded={expanded}
                 nodeState={nodeState}
-                onToggle={onToggle}
-                onSelectFile={onSelectFile}
+                onToggle={onToggleStable}
+                onSelectFile={onSelectFileStable}
               />
             ))}
           </div>

@@ -722,7 +722,10 @@ function registerIpc(): void {
       if (!input || typeof input !== "object") {
         throw new Error("provider input is required");
       }
-      return upsertProvider(input);
+      const result = await upsertProvider(input);
+      // Sync config.toml → agent catalog so composer model chip updates.
+      void backend.reloadModelsFromConfig();
+      return result;
     },
   );
   ipcMain.handle("models:deleteProvider", async (_e, id: string) => {
@@ -730,6 +733,7 @@ function registerIpc(): void {
       throw new Error("provider id is required");
     }
     await deleteProvider(id.trim());
+    void backend.reloadModelsFromConfig();
   });
   ipcMain.handle(
     "models:addFromPreset",
@@ -737,7 +741,9 @@ function registerIpc(): void {
       if (typeof presetId !== "string" || !presetId.trim()) {
         throw new Error("presetId is required");
       }
-      return addFromPreset(presetId.trim(), overrides);
+      const result = await addFromPreset(presetId.trim(), overrides);
+      void backend.reloadModelsFromConfig();
+      return result;
     },
   );
   ipcMain.handle(
@@ -750,6 +756,10 @@ function registerIpc(): void {
     },
   );
   ipcMain.handle("models:getConfigKeyIndex", async () => getConfigKeyIndex());
+  /** Force agent to re-read config.toml [model.*] (composer refresh). */
+  ipcMain.handle("models:reloadAgentModels", async () => {
+    await backend.reloadModelsFromConfig();
+  });
 
   // ── Account ─────────────────────────────────────────────────────
 

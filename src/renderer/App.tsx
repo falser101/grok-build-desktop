@@ -3150,6 +3150,16 @@ export function App() {
     }
   }, []);
 
+  /** After Models settings change: regroup + force agent to re-read config.toml. */
+  const refreshModelsAfterProviderChange = useCallback(async () => {
+    await refreshModelIndex();
+    try {
+      await window.desktop.reloadAgentModels();
+    } catch {
+      // Agent may be offline; next connect/session will pick up config.
+    }
+  }, [refreshModelIndex]);
+
   useEffect(() => {
     void refreshModelIndex();
   }, [refreshModelIndex, snap.availableModels]);
@@ -4146,7 +4156,7 @@ export function App() {
             <ModelsView
               onBack={() => setView("chat")}
               m={m}
-              onProvidersChanged={() => void refreshModelIndex()}
+              onProvidersChanged={() => void refreshModelsAfterProviderChange()}
             />
           </div>
         ) : (
@@ -5210,7 +5220,9 @@ export function App() {
                             setMenu((cur) =>
                               cur === "model" ? null : "model",
                             );
-                            void refreshModelIndex();
+                            // Regroup + re-pull agent catalog (covers config
+                            // edits that the watcher may have missed).
+                            void refreshModelsAfterProviderChange();
                           }}
                           title={m.switchModel}
                         >

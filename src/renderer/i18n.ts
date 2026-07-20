@@ -372,6 +372,8 @@ export interface Messages {
   filesClose: string;
   filesBinary: string;
   filesTruncated: string;
+  /** Shown for very large code files (highlight.js disabled). */
+  filesHugeFileHint: string;
   /** Shown under very large images that got truncated for inline preview. */
   filesImageTruncated: string;
   filesShowSource: string;
@@ -921,6 +923,7 @@ const en: Messages = {
   filesClose: "Close file",
   filesBinary: "Binary file — cannot preview as text.",
   filesTruncated: "Preview truncated (first 512 KB).",
+  filesHugeFileHint: "{n} lines · syntax highlighting disabled for performance",
   filesImageTruncated: "Image preview truncated — file is {size} on disk.",
   filesShowSource: "Source",
   filesShowPreview: "Preview",
@@ -1469,6 +1472,7 @@ const zh: Messages = {
   filesClose: "关闭文件",
   filesBinary: "二进制文件，无法以文本预览。",
   filesTruncated: "预览已截断（仅前 512 KB）。",
+  filesHugeFileHint: "{n} 行 · 为性能关闭了语法高亮",
   filesImageTruncated: "图片预览已截断，原始文件大小 {size}。",
   filesShowSource: "源码",
   filesShowPreview: "预览",

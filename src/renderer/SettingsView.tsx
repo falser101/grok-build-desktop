@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type {
   AccountStatus,
   InstallerStatus,
@@ -52,6 +52,98 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * API key input row. Memoised so typing in the field only re-renders this
+ * small subtree instead of the whole SettingsView (locale/theme pickers,
+ * account info rows, usage panel, etc.).
+ *
+ * The "show / hide" toggle is owned locally because it's purely a UI concern
+ * for this row and doesn't need to live in the parent.
+ */
+const ApiKeyField = memo(function ApiKeyField({
+  placeholder,
+  placeholderSet,
+  apiKeySet,
+  showLabel,
+  hideLabel,
+  onSave,
+  onClear,
+  busy,
+  envSource,
+  envHint,
+  saveLabel,
+  clearLabel,
+  label,
+  draft,
+  setDraft,
+  clearDisabled,
+}: {
+  placeholder: string;
+  placeholderSet: string;
+  apiKeySet: boolean;
+  showLabel: string;
+  hideLabel: string;
+  onSave: () => void;
+  onClear: () => void;
+  busy: boolean;
+  envSource: boolean;
+  envHint: string;
+  saveLabel: string;
+  clearLabel: string;
+  label: string;
+  draft: string;
+  setDraft: (v: string) => void;
+  clearDisabled: boolean;
+}) {
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  return (
+    <div className="settings-form">
+      <label className="settings-field">
+        <span>{label}</span>
+        <div className="settings-input-row">
+          <input
+            type={showApiKey ? "text" : "password"}
+            className="settings-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={apiKeySet ? placeholderSet : placeholder}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            className="settings-btn"
+            onClick={() => setShowApiKey((v) => !v)}
+          >
+            {showApiKey ? hideLabel : showLabel}
+          </button>
+        </div>
+      </label>
+      <div className="settings-actions">
+        <button
+          type="button"
+          className="settings-btn primary"
+          disabled={busy || !draft.trim()}
+          onClick={onSave}
+        >
+          {saveLabel}
+        </button>
+        <button
+          type="button"
+          className="settings-btn"
+          disabled={busy || clearDisabled}
+          onClick={onClear}
+          title={envSource ? envHint : undefined}
+        >
+          {clearLabel}
+        </button>
+      </div>
+      {envSource ? <p className="settings-help">{envHint}</p> : null}
+    </div>
+  );
+});
+
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -96,8 +188,10 @@ export function SettingsView({
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  const [apiKeyDraft, setApiKeyDraft] = useState("");
-  const [showApiKey, setShowApiKey] = useState(false);
+  const [apiKeyDraft, setApiKeyDraftRaw] = useState("");
+  // Stable setter so it can be passed into the memoised <ApiKeyField /> without
+  // busting memo on every parent render.
+  const setApiKeyDraft = useCallback((v: string) => setApiKeyDraftRaw(v), []);
 
   const [loginMsg, setLoginMsg] = useState<string | null>(null);
   const [deviceUrl, setDeviceUrl] = useState<string | null>(null);
@@ -232,17 +326,26 @@ export function SettingsView({
       await window.desktop.openExternal(url);
     });
 
-  const localeOptions: { id: LocalePref; title: string }[] = [
-    { id: "system", title: m.followSystem },
-    { id: "en", title: m.english },
-    { id: "zh", title: m.chinese },
-  ];
+  // Static option lists — only depend on `m`, which is stable until the user
+  // changes locale, so wrapping in useMemo avoids re-allocating two arrays on
+  // every SettingsView render (e.g. on every keystroke in the API key field).
+  const localeOptions = useMemo<{ id: LocalePref; title: string }[]>(
+    () => [
+      { id: "system", title: m.followSystem },
+      { id: "en", title: m.english },
+      { id: "zh", title: m.chinese },
+    ],
+    [m.followSystem, m.english, m.chinese],
+  );
 
-  const themeOptions: { id: ThemePref; title: string }[] = [
-    { id: "system", title: m.followSystem },
-    { id: "dark", title: m.themeDark },
-    { id: "light", title: m.themeLight },
-  ];
+  const themeOptions = useMemo<{ id: ThemePref; title: string }[]>(
+    () => [
+      { id: "system", title: m.followSystem },
+      { id: "dark", title: m.themeDark },
+      { id: "light", title: m.themeLight },
+    ],
+    [m.followSystem, m.themeDark, m.themeLight],
+  );
 
   const systemLocaleLabel =
     systemLocale === "zh" ? m.chinese : m.english;
@@ -519,59 +622,24 @@ export function SettingsView({
             <h2>{m.accountApiKeySection}</h2>
             <p>{m.accountApiKeyDesc}</p>
           </div>
-          <div className="settings-form">
-            <label className="settings-field">
-              <span>{m.accountApiKeyLabel}</span>
-              <div className="settings-input-row">
-                <input
-                  type={showApiKey ? "text" : "password"}
-                  className="settings-input"
-                  value={apiKeyDraft}
-                  onChange={(e) => setApiKeyDraft(e.target.value)}
-                  placeholder={
-                    acct?.apiKeySet
-                      ? m.accountApiKeyPlaceholderSet
-                      : m.accountApiKeyPlaceholder
-                  }
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  className="settings-btn"
-                  onClick={() => setShowApiKey((v) => !v)}
-                >
-                  {showApiKey ? m.accountHide : m.accountShow}
-                </button>
-              </div>
-            </label>
-            <div className="settings-actions">
-              <button
-                type="button"
-                className="settings-btn primary"
-                disabled={busy || !apiKeyDraft.trim()}
-                onClick={() => void onSaveApiKey()}
-              >
-                {m.accountSaveApiKey}
-              </button>
-              <button
-                type="button"
-                className="settings-btn"
-                disabled={busy || !acct?.apiKeySet || acct.apiKeySource === "env"}
-                onClick={() => void onClearApiKey()}
-                title={
-                  acct?.apiKeySource === "env"
-                    ? m.accountApiKeyEnvHint
-                    : undefined
-                }
-              >
-                {m.accountClearApiKey}
-              </button>
-            </div>
-            {acct?.apiKeySource === "env" ? (
-              <p className="settings-help">{m.accountApiKeyEnvHint}</p>
-            ) : null}
-          </div>
+          <ApiKeyField
+            label={m.accountApiKeyLabel}
+            placeholder={m.accountApiKeyPlaceholder}
+            placeholderSet={m.accountApiKeyPlaceholderSet}
+            apiKeySet={!!acct?.apiKeySet}
+            showLabel={m.accountShow}
+            hideLabel={m.accountHide}
+            onSave={() => void onSaveApiKey()}
+            onClear={() => void onClearApiKey()}
+            busy={busy}
+            envSource={acct?.apiKeySource === "env"}
+            envHint={m.accountApiKeyEnvHint}
+            saveLabel={m.accountSaveApiKey}
+            clearLabel={m.accountClearApiKey}
+            draft={apiKeyDraft}
+            setDraft={setApiKeyDraft}
+            clearDisabled={!acct?.apiKeySet || acct.apiKeySource === "env"}
+          />
         </section>
 
         <AgentSettingsView

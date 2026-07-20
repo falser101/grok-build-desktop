@@ -228,6 +228,8 @@ const api: DesktopApi = {
     ipcRenderer.invoke(
       "models:getConfigKeyIndex",
     ) as Promise<ModelConfigKeyIndex>,
+  reloadAgentModels: () =>
+    ipcRenderer.invoke("models:reloadAgentModels") as Promise<void>,
   getAccountStatus: () =>
     ipcRenderer.invoke("account:getStatus") as Promise<AccountStatus>,
   login: (method: AccountLoginMethod) =>
