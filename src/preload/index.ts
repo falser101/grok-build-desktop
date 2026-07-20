@@ -26,6 +26,7 @@ import type {
   PathSuggestion,
   PlanApprovalOutcome,
   PluginEntry,
+  ProviderUsageResult,
   PromptAttachment,
   PromptPayload,
   SearchSessionsOptions,
@@ -228,6 +229,11 @@ const api: DesktopApi = {
     ipcRenderer.invoke(
       "models:getConfigKeyIndex",
     ) as Promise<ModelConfigKeyIndex>,
+  queryProviderUsage: (providerId: string) =>
+    ipcRenderer.invoke(
+      "models:queryProviderUsage",
+      providerId,
+    ) as Promise<ProviderUsageResult>,
   reloadAgentModels: () =>
     ipcRenderer.invoke("models:reloadAgentModels") as Promise<void>,
   getAccountStatus: () =>

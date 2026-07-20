@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type {
@@ -12,6 +13,7 @@ import type {
   ModelProviderModel,
   ModelProviderPreset,
   ModelProviderRegion,
+  ProviderUsageResult,
   UpsertProviderInput,
 } from "@shared/types";
 import type { Messages } from "./i18n";
@@ -75,6 +77,196 @@ function avatarColor(name: string): number {
     h = (h * 31 + name.charCodeAt(i)) | 0;
   }
   return Math.abs(h) % 6;
+}
+
+/** True when a provider supports coding-plan usage queries (currently MiniMax). */
+function providerSupportsUsage(p: ModelProviderConfig): boolean {
+  const id = (p.presetId || "").toLowerCase();
+  const url = (p.baseUrl || "").toLowerCase();
+  return (
+    id === "minimax" ||
+    url.includes("api.minimaxi.com") ||
+    url.includes("api.minimax.io")
+  );
+}
+
+/** Compact "remaining time until reset" label, e.g. "3h53m" / "6d12h" / "—". */
+function formatResetCountdown(resetMs: number | undefined): string {
+  if (!resetMs || !Number.isFinite(resetMs)) return "—";
+  const now = Date.now();
+  let diff = resetMs - now;
+  if (diff <= 0) return "—";
+  const totalMinutes = Math.floor(diff / 60_000);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}d${hours}h`;
+  if (hours > 0) return `${hours}h${minutes}m`;
+  return `${minutes}m`;
+}
+
+/** Human-friendly relative timestamp for the strip footer. */
+function formatFetchedAgo(
+  fetchedAt: string | undefined,
+  m: Messages,
+): string {
+  if (!fetchedAt) return m.modelsUsageUnavailable;
+  const t = Date.parse(fetchedAt);
+  if (!Number.isFinite(t)) return m.modelsUsageUnavailable;
+  const diffMin = Math.max(0, Math.floor((Date.now() - t) / 60_000));
+  if (diffMin < 1) return m.modelsUsageJustNow;
+  if (diffMin < 60) return m.modelsUsageMinutesAgo.replace("{n}", String(diffMin));
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return m.modelsUsageHoursAgo.replace("{n}", String(diffH));
+  const diffD = Math.floor(diffH / 24);
+  return m.modelsUsageDaysAgo.replace("{n}", String(diffD));
+}
+
+const USAGE_POLL_MS = 60_000;
+
+/**
+ * Per-card usage strip. Fetches MiniMax coding-plan quota, refreshes every
+ * `USAGE_POLL_MS`, exposes a manual refresh button. Renders nothing if the
+ * provider doesn't support usage queries — keeps MiniMax-only for now.
+ */
+const ProviderUsageStrip = memo(function ProviderUsageStrip({
+  providerId,
+  m,
+}: {
+  providerId: string;
+  m: Messages;
+}) {
+  const [result, setResult] = useState<ProviderUsageResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [tick, setTick] = useState(0);
+  const aliveRef = useRef(true);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
+  const fetchOnce = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await window.desktop.queryProviderUsage(providerId);
+      if (aliveRef.current) setResult(r);
+    } catch (err) {
+      if (aliveRef.current) {
+        setResult({
+          success: false,
+          fetchedAt: new Date().toISOString(),
+          error: errMsg(err),
+        });
+      }
+    } finally {
+      if (aliveRef.current) setLoading(false);
+    }
+  }, [providerId]);
+
+  // Initial + polling
+  useEffect(() => {
+    void fetchOnce();
+    const timer = setInterval(() => void fetchOnce(), USAGE_POLL_MS);
+    return () => clearInterval(timer);
+  }, [fetchOnce]);
+
+  // Re-render every 30s so the countdown labels stay fresh.
+  useEffect(() => {
+    const t = setInterval(() => setTick((v) => v + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const quota = result?.quota;
+  const fetchedAt = result?.fetchedAt;
+  const ago = formatFetchedAgo(fetchedAt, m);
+
+  // Inline render so the empty / error / loading states don't shift the card.
+  let body: React.ReactNode;
+  if (!result) {
+    body = (
+      <span className="models-usage-loading">{m.modelsUsageLoading}</span>
+    );
+  } else if (!result.success || !quota) {
+    body = (
+      <span
+        className="models-usage-error"
+        title={result.error || m.modelsUsageErrorShort}
+      >
+        {m.modelsUsageErrorShort}
+      </span>
+    );
+  } else {
+    body = (
+      <>
+        {typeof quota.fiveHourPct === "number" ? (
+          <span
+            className={`models-usage-cell ${usageClass(quota.fiveHourPct)}`}
+          >
+            <span className="models-usage-label">
+              {m.modelsUsageFiveHour}
+            </span>
+            <span className="models-usage-value">
+              {Math.round(quota.fiveHourPct)}%
+            </span>
+            <span className="models-usage-reset">
+              ⏱ {formatResetCountdown(quota.fiveHourResetMs)}
+            </span>
+          </span>
+        ) : null}
+        {typeof quota.sevenDayPct === "number" ? (
+          <span
+            className={`models-usage-cell ${usageClass(quota.sevenDayPct)}`}
+          >
+            <span className="models-usage-label">
+              {m.modelsUsageSevenDay}
+            </span>
+            <span className="models-usage-value">
+              {Math.round(quota.sevenDayPct)}%
+            </span>
+            <span className="models-usage-reset">
+              ⏱ {formatResetCountdown(quota.sevenDayResetMs)}
+            </span>
+          </span>
+        ) : null}
+      </>
+    );
+  }
+
+  return (
+    <div
+      className="models-usage-strip"
+      // tick drives the relative-time + countdown re-renders without forcing
+      // a refetch on every interval.
+      data-tick={tick}
+    >
+      <div className="models-usage-body">{body}</div>
+      <div className="models-usage-meta">
+        <span className="models-usage-time" title={fetchedAt}>
+          ⏱ {ago}
+        </span>
+        <button
+          type="button"
+          className="models-usage-refresh"
+          onClick={() => void fetchOnce()}
+          disabled={loading}
+          title={m.modelsUsageRefresh}
+          aria-label={m.modelsUsageRefresh}
+        >
+          {loading ? "…" : "↻"}
+        </button>
+      </div>
+    </div>
+  );
+});
+
+/** Color tier: green ≤60, amber ≤85, red >85. */
+function usageClass(pct: number): string {
+  if (pct > 85) return "usage-high";
+  if (pct > 60) return "usage-mid";
+  return "usage-low";
 }
 
 type EditorState = {
@@ -1191,6 +1383,9 @@ export function ModelsView({
                         </span>
                       </div>
                       <div className="models-provider-url">{p.baseUrl || "—"}</div>
+                      {providerSupportsUsage(p) ? (
+                        <ProviderUsageStrip providerId={p.id} m={m} />
+                      ) : null}
                       {count > 0 ? (
                         <div className="models-provider-models">
                           {p.models

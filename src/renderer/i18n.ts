@@ -565,6 +565,18 @@ export interface Messages {
   modelsSourceFetched: string;
   modelsSourceManual: string;
   modelsEnabledCount: string;
+  /** Provider card usage strip (MiniMax 5h/7d quotas). */
+  modelsUsageFiveHour: string;
+  modelsUsageSevenDay: string;
+  modelsUsageFetchedAt: string;
+  modelsUsageJustNow: string;
+  modelsUsageMinutesAgo: string;
+  modelsUsageHoursAgo: string;
+  modelsUsageDaysAgo: string;
+  modelsUsageRefresh: string;
+  modelsUsageLoading: string;
+  modelsUsageUnavailable: string;
+  modelsUsageErrorShort: string;
   modelsReconnect: string;
   modelsReconnectHint: string;
   modelsReconnected: string;
@@ -1119,6 +1131,17 @@ const en: Messages = {
   modelsSourceFetched: "API",
   modelsSourceManual: "Manual",
   modelsEnabledCount: "{n} enabled",
+  modelsUsageFiveHour: "5-hour",
+  modelsUsageSevenDay: "7-day",
+  modelsUsageFetchedAt: "Updated {when}",
+  modelsUsageJustNow: "just now",
+  modelsUsageMinutesAgo: "{n} min ago",
+  modelsUsageHoursAgo: "{n}h ago",
+  modelsUsageDaysAgo: "{n}d ago",
+  modelsUsageRefresh: "Refresh usage",
+  modelsUsageLoading: "Loading…",
+  modelsUsageUnavailable: "—",
+  modelsUsageErrorShort: "Usage unavailable",
   modelsReconnect: "Reconnect agent",
   modelsReconnectHint:
     "Reload agent so newly saved models appear in the picker",
@@ -1661,6 +1684,17 @@ const zh: Messages = {
   modelsSourceFetched: "API",
   modelsSourceManual: "手动",
   modelsEnabledCount: "已启用 {n} 个",
+  modelsUsageFiveHour: "5小时",
+  modelsUsageSevenDay: "7天",
+  modelsUsageFetchedAt: "{when}前更新",
+  modelsUsageJustNow: "刚刚",
+  modelsUsageMinutesAgo: "{n} 分钟前",
+  modelsUsageHoursAgo: "{n} 小时前",
+  modelsUsageDaysAgo: "{n} 天前",
+  modelsUsageRefresh: "刷新用量",
+  modelsUsageLoading: "加载中…",
+  modelsUsageUnavailable: "—",
+  modelsUsageErrorShort: "暂无法获取用量",
   modelsReconnect: "重连 Agent",
   modelsReconnectHint: "重载 agent 后，新保存的模型会出现在选择器中",
   modelsReconnected: "Agent 已重连",

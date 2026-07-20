@@ -7485,6 +7485,111 @@ html[data-theme="light"] {
   border-top: 1px dashed var(--border);
 }
 
+/* ── Provider usage strip (MiniMax coding-plan 5h/7d) ──────────────── */
+.models-usage-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-hover) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  font-size: 11.5px;
+  min-height: 32px;
+}
+
+.models-usage-body {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.models-usage-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.models-usage-label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.models-usage-value {
+  font-weight: 650;
+  font-size: 12.5px;
+}
+
+.models-usage-reset {
+  color: var(--text-dim);
+  font-size: 10.5px;
+  margin-left: 2px;
+}
+
+.models-usage-cell.usage-low .models-usage-value {
+  color: color-mix(in srgb, #34c759 70%, var(--text));
+}
+.models-usage-cell.usage-mid .models-usage-value {
+  color: color-mix(in srgb, #f5a524 75%, var(--text));
+}
+.models-usage-cell.usage-high .models-usage-value {
+  color: color-mix(in srgb, #f04343 80%, var(--text));
+}
+
+.models-usage-loading,
+.models-usage-error {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.models-usage-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.models-usage-time {
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.models-usage-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.models-usage-refresh:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-hover));
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.models-usage-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .models-provider-updated {
   font-size: 10.5px;
   color: var(--text-dim);

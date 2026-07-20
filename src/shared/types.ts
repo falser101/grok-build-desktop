@@ -675,6 +675,26 @@ export interface FetchedModelInfo {
   ownedBy?: string;
 }
 
+/** Coding-plan quota for a custom provider (currently MiniMax). */
+export interface ProviderUsageQuota {
+  /** 5-hour window utilization percentage (0-100). */
+  fiveHourPct?: number;
+  /** 5-hour window reset time (ms since epoch). */
+  fiveHourResetMs?: number;
+  /** 7-day window utilization percentage (0-100). */
+  sevenDayPct?: number;
+  /** 7-day window reset time (ms since epoch). */
+  sevenDayResetMs?: number;
+}
+
+/** Result of `models:queryProviderUsage` IPC. */
+export interface ProviderUsageResult {
+  success: boolean;
+  fetchedAt: string;
+  quota?: ProviderUsageQuota;
+  error?: string;
+}
+
 export interface FetchModelsInput {
   baseUrl: string;
   apiKey?: string;
@@ -896,6 +916,8 @@ export interface DesktopApi {
   fetchProviderModels: (input: FetchModelsInput) => Promise<FetchedModelInfo[]>;
   /** Map agent modelId (configKey) → provider for composer grouping. */
   getModelConfigKeyIndex: () => Promise<ModelConfigKeyIndex>;
+  /** Coding-plan usage for a custom provider (currently MiniMax). */
+  queryProviderUsage: (providerId: string) => Promise<ProviderUsageResult>;
   /**
    * Tell the agent to re-read `~/.grok/config.toml` `[model.*]` and push a
    * fresh catalog into the composer (after Models settings changes).

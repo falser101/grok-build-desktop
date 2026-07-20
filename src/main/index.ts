@@ -38,10 +38,12 @@ import {
   deleteProvider,
   fetchProviderModels,
   getConfigKeyIndex,
+  getProvider as getProviderConfig,
   listPresets,
   listProviders,
   upsertProvider,
 } from "./model-providers";
+import { queryProviderUsage } from "./provider-usage";
 import { listWorkspaceDir, readWorkspaceFile } from "./workspace-fs";
 import { TerminalHost } from "./terminal-host";
 import {
@@ -760,6 +762,25 @@ function registerIpc(): void {
   ipcMain.handle("models:reloadAgentModels", async () => {
     await backend.reloadModelsFromConfig();
   });
+  /** Query coding-plan usage for a configured provider (currently MiniMax). */
+  ipcMain.handle(
+    "models:queryProviderUsage",
+    async (_e, providerId: string) => {
+      if (typeof providerId !== "string" || !providerId.trim()) {
+        throw new Error("providerId is required");
+      }
+      const provider = await getProviderConfig(providerId.trim());
+      if (!provider) {
+        throw new Error(`Provider not found: ${providerId}`);
+      }
+      return queryProviderUsage({
+        presetId: provider.presetId,
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        envKey: provider.envKey,
+      });
+    },
+  );
 
   // ── Account ─────────────────────────────────────────────────────
 
