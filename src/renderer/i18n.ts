@@ -425,6 +425,10 @@ export interface Messages {
   termClear: string;
   termRun: string;
   termExited: string;
+  termNewTab: string;
+  termCloseTab: string;
+  termAddOpenFile: string;
+  termAddNewTerminal: string;
 
   // Plan / TODO panel
   planPanelTitle: string;
@@ -998,6 +1002,10 @@ const en: Messages = {
   termClear: "Clear terminal",
   termRun: "Run",
   termExited: "Shell exited (code {code})",
+  termNewTab: "New terminal",
+  termCloseTab: "Close terminal",
+  termAddOpenFile: "Open file",
+  termAddNewTerminal: "New terminal",
 
   planPanelTitle: "Plan / TODO",
   planTabTodos: "Todos",
@@ -1570,6 +1578,10 @@ const zh: Messages = {
   termClear: "清屏",
   termRun: "运行",
   termExited: "Shell 已退出（code {code}）",
+  termNewTab: "新建终端",
+  termCloseTab: "关闭终端",
+  termAddOpenFile: "打开文件",
+  termAddNewTerminal: "新建终端",
 
   planPanelTitle: "计划 / TODO",
   planTabTodos: "任务",

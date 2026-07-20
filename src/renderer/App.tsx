@@ -6022,6 +6022,14 @@ export function App() {
                   workspace={snap.workspace}
                   active={rightOpen && rightPanelTab === "terminal"}
                   m={m}
+                  onLastTabClosed={() => {
+                    // Last terminal tab closed — bounce back to the right
+                    // panel's entry menu (same place the user lands when
+                    // they first open the right panel).
+                    setRightPanelTab("menu");
+                    setTermKeepAlive(false);
+                  }}
+                  onOpenFile={() => setRightPanelTab("files")}
                 />
               </div>
             )}
