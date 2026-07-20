@@ -1795,6 +1795,8 @@ export function App() {
       const shell = shellRef.current;
       shell?.classList.add("shell-resizing", `shell-resizing-${side}`);
       document.body.classList.add("is-resizing-panels");
+      // Prefer window-level listeners over setPointerCapture: capture can
+      // die when ancestors get `pointer-events: none` during shell-resizing.
       try {
         handle.setPointerCapture(e.pointerId);
       } catch {
@@ -1817,6 +1819,7 @@ export function App() {
         if (!drag) return;
         const deltaPct = ((clientX - drag.startX) / shellW) * 100;
         if (drag.side === "left") {
+          // Drag handle right = wider sidebar; left = narrower.
           const raw = drag.startW + deltaPct;
           const next = clamp(raw, SIDEBAR_COLLAPSE * 0.45, SIDEBAR_MAX);
           drag.liveW = next;
@@ -1872,9 +1875,9 @@ export function App() {
       };
 
       const onUp = (ev: PointerEvent) => {
-        document.removeEventListener("pointermove", onMove);
-        document.removeEventListener("pointerup", onUp);
-        document.removeEventListener("pointercancel", onUp);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
         if (raf) {
           cancelAnimationFrame(raf);
           raf = 0;
@@ -1959,9 +1962,9 @@ export function App() {
         }
       };
 
-      document.addEventListener("pointermove", onMove, { passive: true });
-      document.addEventListener("pointerup", onUp);
-      document.addEventListener("pointercancel", onUp);
+      window.addEventListener("pointermove", onMove, { passive: true });
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
     },
     [applyShellColumns],
   );

@@ -192,10 +192,17 @@ body.is-resizing-panels * {
 .shell.shell-resizing .main {
   pointer-events: none;
   transition: none !important;
-  /* Freeze internal scroll/paint work while the column width is scrubbing */
+  /* Freeze internal scroll/paint work while the column width is scrubbing.
+   * Do NOT use `contain: strict` — it can fight live grid column updates. */
   overflow: hidden !important;
-  contain: strict;
   will-change: width;
+}
+
+/* Resize handles must stay interactive even though their parent panel
+ * has pointer-events: none during drag (otherwise setPointerCapture
+ * silently dies and the edge feels "stuck"). */
+.shell.shell-resizing .resize-handle {
+  pointer-events: auto;
 }
 
 /* xterm fit/repaint is expensive — skip until panel-resize-end */
@@ -258,8 +265,9 @@ body.is-resizing-panels .file-tree {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 6px;
-  z-index: 8;
+  /* Wide hit target so the edge is easy to grab. */
+  width: 10px;
+  z-index: 20;
   cursor: col-resize;
   touch-action: none;
   background: transparent;
@@ -283,12 +291,17 @@ body.is-resizing-panels .file-tree {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
+/*
+ * Keep handles fully inside their panel so `overflow: hidden` on
+ * `.sidebar` / `.right-panel` does not clip them (the old right:-3px /
+ * left:-3px placement was half outside and often unhittable).
+ */
 .resize-handle-left {
-  right: -3px;
+  right: 0;
 }
 
 .resize-handle-right {
-  left: -3px;
+  left: 0;
 }
 
 /* ── Sidebar ───────────────────────────────────────── */
