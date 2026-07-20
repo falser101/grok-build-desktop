@@ -1570,6 +1570,8 @@ export function App() {
     /** Live width applied to DOM during drag (no React re-render). */
     liveW: number;
     rightOpen: boolean;
+    /** For filesTree: parent body width in px (tree % is relative to this). */
+    bodyW?: number;
   } | null>(null);
   /** True while a panel edge is being dragged — skip React layout sync / persist. */
   const isResizingRef = useRef(false);
@@ -1799,6 +1801,12 @@ export function App() {
           : side === "right"
             ? layout.rightPanelWidth
             : layout.fileTreeWidth;
+      // filesTree % is of the files body, not the whole shell.
+      const filesBody =
+        side === "filesTree"
+          ? (handle.closest(".files-section-body") as HTMLElement | null)
+          : null;
+      const filesBodyW = Math.max(1, filesBody?.clientWidth ?? 320);
       // Set drag ref BEFORE any state so layout effects skip overwriting.
       resizeDragRef.current = {
         side,
@@ -1806,12 +1814,19 @@ export function App() {
         startW,
         liveW: startW,
         rightOpen: rightOpenNow,
+        bodyW: side === "filesTree" ? filesBodyW : undefined,
       };
       isResizingRef.current = true;
       // DOM-only chrome — avoid a full React re-render at drag start.
       const shell = shellRef.current;
       shell?.classList.add("shell-resizing", `shell-resizing-${side}`);
-      document.body.classList.add("is-resizing-panels");
+      // Hide heavy content only for shell column resizes, not the inner
+      // files-tree split (that would blank the editor + tree mid-drag).
+      if (side !== "filesTree") {
+        document.body.classList.add("is-resizing-panels");
+      } else {
+        document.body.classList.add("is-resizing-files-tree");
+      }
       // Prefer window-level listeners over setPointerCapture: capture can
       // die when ancestors get `pointer-events: none` during shell-resizing.
       try {
@@ -1834,32 +1849,35 @@ export function App() {
       const paint = (clientX: number) => {
         const drag = resizeDragRef.current;
         if (!drag) return;
-        const deltaPct = ((clientX - drag.startX) / shellW) * 100;
         if (drag.side === "left") {
+          const deltaPct = ((clientX - drag.startX) / shellW) * 100;
           // Drag handle right = wider sidebar; left = narrower.
           const raw = drag.startW + deltaPct;
           const next = clamp(raw, SIDEBAR_COLLAPSE * 0.45, SIDEBAR_MAX);
           drag.liveW = next;
           applyShellColumns(next, drag.rightOpen ? rightFixed : null);
         } else if (drag.side === "right") {
+          const deltaPct = ((clientX - drag.startX) / shellW) * 100;
           // Drag left edge: move left = wider right panel.
           const raw = drag.startW - deltaPct;
           const next = clamp(raw, RIGHT_COLLAPSE * 0.45, RIGHT_MAX);
           drag.liveW = next;
           applyShellColumns(leftFixed, next);
         } else {
-          // File-tree (inside right panel): drag left edge — move left = wider tree.
+          // File-tree: handle is the left edge of the tree pane.
+          // Move left → tree wider; % is of files-section-body width.
+          const bodyW = drag.bodyW ?? filesBodyW;
+          const deltaPct = ((clientX - drag.startX) / bodyW) * 100;
           const raw = drag.startW - deltaPct;
           const next = clamp(raw, FILE_TREE_COLLAPSE * 0.45, FILE_TREE_MAX);
           drag.liveW = next;
-          // Right panel width is fixed; we only update a CSS var on the
-          // right panel node, not the shell grid.
-          const rightEl = document.querySelector(".right-panel");
-          if (rightEl) {
-            (rightEl as HTMLElement).style.setProperty(
-              "--files-tree-w",
-              `${next.toFixed(2)}%`,
-            );
+          const tree = document.querySelector(
+            ".files-section-tree",
+          ) as HTMLElement | null;
+          if (tree) {
+            const pct = `${next.toFixed(2)}%`;
+            tree.style.flex = `0 0 ${pct}`;
+            tree.style.width = pct;
           }
         }
       };
@@ -1884,7 +1902,10 @@ export function App() {
           "shell-resizing-right",
           "shell-resizing-filesTree",
         );
-        document.body.classList.remove("is-resizing-panels");
+        document.body.classList.remove(
+          "is-resizing-panels",
+          "is-resizing-files-tree",
+        );
         // Let terminal / file viewers fit once after the final column widths settle.
         requestAnimationFrame(() => {
           window.dispatchEvent(new Event("panel-resize-end"));

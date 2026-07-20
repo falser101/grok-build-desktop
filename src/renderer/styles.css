@@ -254,9 +254,21 @@ body.is-resizing-panels .xterm {
 
 
 
-body.is-resizing-panels .file-viewer,
-body.is-resizing-panels .file-tree {
+/* Only hide heavy panes when resizing shell columns (sidebar / right
+ * panel), not when scrubbing the inner files-tree split — that must
+ * stay visible and track the mouse live. */
+body.is-resizing-panels:not(.is-resizing-files-tree) .file-viewer,
+body.is-resizing-panels:not(.is-resizing-files-tree) .file-tree {
   content-visibility: hidden;
+}
+
+body.is-resizing-files-tree {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+body.is-resizing-files-tree * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 /* ── Resize handles ────────────────────────────────── */

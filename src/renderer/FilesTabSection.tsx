@@ -109,9 +109,10 @@ function FilesTabSectionInner({
             <div
               className="files-section-tree"
               style={{
-                // % of the files body width (parent flex row).
-                flex: `0 0 ${Math.max(fileTreeWidth, 28)}%`,
-                width: `${Math.max(fileTreeWidth, 28)}%`,
+                // % of the files body width (parent flex row). Live drag
+                // mutates these via style on the same node in App.tsx.
+                flex: `0 0 ${Math.max(fileTreeWidth, 18)}%`,
+                width: `${Math.max(fileTreeWidth, 18)}%`,
               }}
             >
               <FileTree
