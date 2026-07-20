@@ -207,6 +207,10 @@ interface PlusExtraItem {
 /**
  * Right-panel `+` button — built-in entries: File + Terminal. Hosts can
  * pass `extraItems` to inject additional shortcuts (e.g. Plan).
+ *
+ * Menu uses `position: fixed` so it is not clipped by the tab row's
+ * `overflow-x: auto / overflow-y: hidden` (absolute dropdowns were
+ * invisible even when `open === true`).
  */
 function RightPanelPlusMenu({
   m,
@@ -218,33 +222,63 @@ function RightPanelPlusMenu({
   extraItems?: PlusExtraItem[];
 }) {
   const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(
+    null,
+  );
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
+  const updateMenuPos = useCallback(() => {
+    const btn = buttonRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    setMenuPos({
+      top: r.bottom + 6,
+      right: Math.max(8, window.innerWidth - r.right),
+    });
+  }, []);
+
+  const close = useCallback(() => {
+    setOpen(false);
+    setMenuPos(null);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (wrapRef.current?.contains(target)) return;
-      if (menuRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setOpen(false);
-        buttonRef.current?.focus();
-      }
-    };
-    // Use click (not mousedown) so the button's own click can toggle
-    // the menu open without an immediate close.
-    document.addEventListener("click", onDoc);
-    document.addEventListener("keydown", onKey);
+    updateMenuPos();
+    // Defer outside-click so the same click that opened us doesn't close us.
+    let removeDoc: (() => void) | undefined;
+    const t = window.setTimeout(() => {
+      const onDoc = (e: MouseEvent) => {
+        const target = e.target as Node;
+        if (wrapRef.current?.contains(target)) return;
+        if (menuRef.current?.contains(target)) return;
+        close();
+      };
+      const onKey = (e: globalThis.KeyboardEvent) => {
+        if (e.key === "Escape") {
+          close();
+          buttonRef.current?.focus();
+        }
+      };
+      const onScrollOrResize = () => updateMenuPos();
+      document.addEventListener("mousedown", onDoc, true);
+      document.addEventListener("keydown", onKey);
+      window.addEventListener("resize", onScrollOrResize);
+      window.addEventListener("scroll", onScrollOrResize, true);
+      removeDoc = () => {
+        document.removeEventListener("mousedown", onDoc, true);
+        document.removeEventListener("keydown", onKey);
+        window.removeEventListener("resize", onScrollOrResize);
+        window.removeEventListener("scroll", onScrollOrResize, true);
+      };
+    }, 0);
     return () => {
-      document.removeEventListener("click", onDoc);
-      document.removeEventListener("keydown", onKey);
+      window.clearTimeout(t);
+      removeDoc?.();
     };
-  }, [open]);
+  }, [open, close, updateMenuPos]);
 
   return (
     <div className="right-panel-plus-wrap" ref={wrapRef}>
@@ -253,8 +287,24 @@ function RightPanelPlusMenu({
         type="button"
         className="right-panel-plus"
         onClick={(e) => {
+          e.preventDefault();
           e.stopPropagation();
-          setOpen((v) => !v);
+          setOpen((v) => {
+            if (v) {
+              setMenuPos(null);
+              return false;
+            }
+            // Position will be set in the open effect; seed from rect now.
+            const btn = buttonRef.current;
+            if (btn) {
+              const r = btn.getBoundingClientRect();
+              setMenuPos({
+                top: r.bottom + 6,
+                right: Math.max(8, window.innerWidth - r.right),
+              });
+            }
+            return true;
+          });
         }}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -262,14 +312,26 @@ function RightPanelPlusMenu({
       >
         +
       </button>
-      {open ? (
-        <div className="dropdown" ref={menuRef} role="menu">
+      {open && menuPos ? (
+        <div
+          className="dropdown right-panel-plus-menu"
+          ref={menuRef}
+          role="menu"
+          style={{
+            position: "fixed",
+            top: menuPos.top,
+            right: menuPos.right,
+            left: "auto",
+            bottom: "auto",
+            zIndex: 10000,
+          }}
+        >
           <button
             type="button"
             className="dropdown-item"
             role="menuitem"
             onClick={() => {
-              setOpen(false);
+              close();
               onPick("file");
             }}
           >
@@ -290,7 +352,7 @@ function RightPanelPlusMenu({
             className="dropdown-item"
             role="menuitem"
             onClick={() => {
-              setOpen(false);
+              close();
               onPick("terminal");
             }}
           >
@@ -323,7 +385,7 @@ function RightPanelPlusMenu({
               className="dropdown-item"
               role="menuitem"
               onClick={() => {
-                setOpen(false);
+                close();
                 item.onPick();
               }}
             >
