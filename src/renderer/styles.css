@@ -6815,8 +6815,6 @@ html[data-theme="light"] .icon-btn.send {
   display: flex;
   flex-direction: row;
   overflow: hidden;
-  /* Anchor for absolutely-positioned handle ::after (centers the line
-   * across the editor/tree join even when the handle width is wide). */
   position: relative;
 }
 
@@ -6826,8 +6824,6 @@ html[data-theme="light"] .icon-btn.send {
   min-height: 0;
   display: flex;
   background: var(--bg-elevated);
-  position: relative;
-  z-index: 1;
 }
 .files-section-editor > .file-viewer,
 .files-section-editor > .file-viewer-empty-state {
@@ -6837,17 +6833,22 @@ html[data-theme="light"] .icon-btn.send {
 }
 
 /*
- * Editor | tree split. The handle is a real flex child with full
- * width = the entire gap between editor and tree. The visible
- * divider is its ::after pinned to the LEFT edge of the handle so
- * the line lives exactly on the editor/tree boundary (no negative
- * margin tricks — those break layout and produce a black gap).
+ * Editor | tree split. The handle is position:absolute over the join
+ * so it does not consume flex track width — flex math stays clean
+ * (editor width = body - tree width). A wide transparent hit strip
+ * keeps the grab area forgiving while the visible line stays a true
+ * 1px divider anchored to the parent's right edge.
  */
 .resize-handle-files-tree {
-  position: relative;
-  flex: 0 0 8px;
-  width: 8px;
-  z-index: 2;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* Default offset: live-updated by App.tsx from --files-tree-w. */
+  right: var(--files-tree-w, 38%);
+  width: 12px;
+  /* Center the hit strip on the join (offset back by half its width). */
+  transform: translateX(50%);
+  z-index: 5;
   cursor: col-resize;
   touch-action: none;
   background: transparent;
@@ -6855,10 +6856,13 @@ html[data-theme="light"] .icon-btn.send {
 .resize-handle-files-tree::after {
   content: "";
   position: absolute;
-  left: 0;
+  /* Re-center the visible line on the join by undoing the
+   * translateX(50%) we used to center the hit strip. */
+  left: 50%;
   top: 0;
   bottom: 0;
   width: 1px;
+  transform: translateX(-50%);
   background: var(--border);
   pointer-events: none;
   transition: background 0.12s, box-shadow 0.12s;
@@ -6870,12 +6874,12 @@ html[data-theme="light"] .icon-btn.send {
 }
 
 .files-section-tree {
-  /* Width is driven by --files-tree-w, set inline at mount and updated
-   * live by App.tsx during drag. `flex-grow: 0` + explicit `width`
-   * means React layout / CSS var are the single source of truth. */
+  /* Width is driven by --files-tree-w, set inline at mount and
+   * updated live by App.tsx during drag. flex: 0 0 auto with explicit
+   * width means the painted tree width is exactly the var value. */
   flex: 0 0 auto;
   width: var(--files-tree-w, 38%);
-  min-width: 160px;
+  min-width: 120px;
   max-width: 75%;
   display: flex;
   flex-direction: column;
@@ -6883,8 +6887,6 @@ html[data-theme="light"] .icon-btn.send {
   background: var(--bg-sidebar);
   border-left: none;
   overflow: hidden;
-  position: relative;
-  z-index: 1;
 }
 
 .files-section-tree .file-tree {
