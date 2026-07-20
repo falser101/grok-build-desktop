@@ -95,7 +95,8 @@ const SIDEBAR_COLLAPSE = 7;
 const SIDEBAR_RAIL = 2.5;
 const RIGHT_DEFAULT = 20;
 const RIGHT_MIN = 14;
-const RIGHT_MAX = 38;
+/** Allow the right panel to grow almost full-width (drag edge far left). */
+const RIGHT_MAX = 82;
 const RIGHT_COLLAPSE = 7;
 /** File-tree pane width inside the right panel's `files` tab, % of the
  *  right panel's inner width (not of the shell). */
