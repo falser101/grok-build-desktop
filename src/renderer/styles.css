@@ -6837,30 +6837,28 @@ html[data-theme="light"] .icon-btn.send {
 }
 
 /*
- * Editor | tree split. The handle is purely a transparent hit-strip
- * centered on the join; the visible line is its `::after` painted at
- * the handle's own left edge (handle width = 12px, line at 6px).
- * The tree's width is set inline by App.tsx during drag — no flex
- * grow/shrink on the tree so it cannot silently snap back.
+ * Editor | tree split. The handle is a real flex child with full
+ * width = the entire gap between editor and tree. The visible
+ * divider is its ::after pinned to the LEFT edge of the handle so
+ * the line lives exactly on the editor/tree boundary (no negative
+ * margin tricks — those break layout and produce a black gap).
  */
 .resize-handle-files-tree {
   position: relative;
-  flex: 0 0 12px;
-  width: 12px;
+  flex: 0 0 8px;
+  width: 8px;
   z-index: 2;
   cursor: col-resize;
   touch-action: none;
   background: transparent;
-  margin-right: -6px; /* visually centers the line on the editor/tree join */
 }
 .resize-handle-files-tree::after {
   content: "";
   position: absolute;
-  left: 50%;
+  left: 0;
   top: 0;
   bottom: 0;
   width: 1px;
-  transform: translateX(-50%);
   background: var(--border);
   pointer-events: none;
   transition: background 0.12s, box-shadow 0.12s;
