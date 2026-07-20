@@ -1677,7 +1677,13 @@ export class AgentBackend {
     if (available.length > 0 || opts?.replaceEmpty) {
       this.availableModels = available;
     }
-    if (current) this.modelId = current;
+    // Only adopt the agent's "current" when we don't already have one
+    // (initial session/new). After the user explicitly switches models via
+    // setModel(), `this.modelId` is the source of truth — overwriting it on
+    // every models/update notification would silently revert the user's pick
+    // (e.g. switching back to MiniMax would get clobbered to the agent
+    // default the next time models/update fires).
+    if (!this.modelId && current) this.modelId = current;
     const cur = this.availableModels.find((m) => m.modelId === this.modelId);
     if (cur) {
       this.reasoningEffort = cur.reasoningEffort ?? this.reasoningEffort;
