@@ -5147,25 +5147,137 @@ html[data-theme="light"] .icon-btn.send {
   background: var(--bg);
 }
 
-/* ── Right-panel tab style (deprecated) ─────────── */
-/* The unified tab bar was retired in favour of a single floating `+`
- * button + per-panel-toolbar layout. The class names below are kept
- * as no-op stubs so any stale references still parse. */
-.right-panel-tabs,
-.right-panel-tabs::-webkit-scrollbar,
-.right-panel-tabs::-webkit-scrollbar-thumb,
-.right-panel-tabs::-webkit-scrollbar-track {
-  display: none;
+/* ── Right-panel tab bar ─────────────────────────── */
+/* Single horizontal tab row at the top of the right panel. Hosts
+ * mixed tab kinds (files / plan / terminal) as one chip family. */
+
+.right-panel-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  min-height: 38px;
 }
-.right-panel-tab,
-.right-panel-tab:hover,
-.right-panel-tab.active,
-.right-panel-tab-dot,
-.right-panel-tab-icon,
-.right-panel-tab-label,
-.right-panel-tab-close,
-.right-panel-tab-sep {
-  /* deliberately no-op — kept so legacy class names don't 404 */
+.right-panel-tabs::-webkit-scrollbar { height: 4px; }
+.right-panel-tabs::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+.right-panel-tabs::-webkit-scrollbar-track { background: transparent; }
+
+.right-panel-tabs-empty {
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 0 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.right-panel-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 9px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.2;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  max-width: 220px;
+  min-width: 0;
+}
+.right-panel-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.right-panel-tab.active {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.right-panel-tab-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-dim);
+}
+.right-panel-tab.active .right-panel-tab-icon {
+  color: var(--accent, #5b8def);
+}
+
+.right-panel-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.right-panel-tab-close {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+.right-panel-tab-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.right-panel-tabs-plus-slot {
+  position: relative;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+/* `+` button sits on the right edge of the tab row. */
+.right-panel-plus {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.right-panel-plus:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.right-panel-plus-wrap .dropdown {
+  /* Float the menu below the trigger, anchored to the right edge. */
+  top: calc(100% + 6px);
+  bottom: auto;
+  left: auto;
+  right: 0;
+  min-width: 180px;
+  max-height: none;
+  z-index: 60;
 }
 
 /* Floating `+` button anchored to the top-right of the right panel.
@@ -5200,14 +5312,14 @@ html[data-theme="light"] .icon-btn.send {
   z-index: 60;
 }
 .right-panel-plus {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   color: var(--text-muted);
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -5227,78 +5339,33 @@ html[data-theme="light"] .icon-btn.send {
   background: var(--bg);
 }
 
-/* Right-panel landing view — three big entry cards (files / plan /
- * terminal). Shown when no tab is open yet; picking one promotes it
- * into the unified tab bar above. */
-.right-panel-landing {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px 14px;
-  background: var(--bg);
-}
-.right-panel-landing-title {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
-  padding: 4px 8px 6px;
-}
-.right-panel-landing-cta {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-sidebar);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 550;
-  cursor: pointer;
-  text-align: left;
-}
-.right-panel-landing-cta:hover {
-  background: var(--bg-hover);
-  border-color: color-mix(in srgb, var(--accent, #5b8def) 35%, var(--border));
-}
-.right-panel-landing-icon {
-  display: inline-flex;
-  align-items: center;
-  color: var(--accent, #5b8def);
-}
-.right-panel-landing-label {
-  flex: 1 1 auto;
-}
-
-.right-panel-empty {
+/* Empty-state hint shown when the right panel has no active tab. */
+.right-panel-empty-hint {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 24px 16px;
+  padding: 32px 20px;
+  color: var(--text-dim);
+  text-align: center;
 }
-.right-panel-empty-cta {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 18px;
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-}
-.right-panel-empty-cta:hover { background: var(--bg); }
 .right-panel-empty-icon {
-  color: var(--accent, #5b8def);
-  display: inline-flex;
+  color: var(--text-dim);
+  opacity: 0.7;
+  margin-bottom: 4px;
+}
+.right-panel-empty-title {
+  font-size: 14px;
+  font-weight: 560;
+  color: var(--text-muted);
+}
+.right-panel-empty-hint-text {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  max-width: 240px;
 }
 
 .right-panel-placeholder {

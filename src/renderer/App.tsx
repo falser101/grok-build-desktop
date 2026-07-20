@@ -6137,54 +6137,167 @@ export function App() {
             onPointerDown={onResizePointerDown("right")}
             onDoubleClick={() => setRightPanelOpen(false)}
           />
-          {/* Floating `+` button in the top-right corner of the right
-           *  panel. Always visible once a tab is open; opens a 2-item
-           *  menu (File / Terminal) plus a Plan shortcut. */}
-          {rightPanelTabs.length > 0 ? (
-            <div className="right-panel-floating-plus">
-              <RightPanelPlusMenu
-                m={m}
-                onPick={(kind) => {
-                  if (kind === "terminal") {
-                    openTerminalTab();
-                  } else {
-                    openFile("");
-                    setFileTreeCollapsed(false);
-                  }
-                }}
-                extraItems={[
-                  {
-                    id: "plan",
-                    label: m.sidePanelPlan,
-                    icon: "plan",
-                    onPick: () => openPlanTab(),
-                  },
-                ]}
-              />
-            </div>
-          ) : null}
           <div className="right-panel-body">
-            {rightPanelTabs.length === 0 ? (
-              // Landing view: three entry cards. Picking one promotes
-              // the chosen tab into the unified bar above.
-              <div className="right-panel-landing" aria-label={m.sidePanelToggle}>
-                <div className="right-panel-landing-title">
-                  {m.sidePanelToggle}
-                </div>
-                <button
-                  type="button"
-                  className="right-panel-landing-cta"
-                  onClick={() => {
-                    // Promote a brand-new "files" tab into the bar with
-                    // an empty path. FilesTabSection renders the empty
-                    // state next to the file tree so the user can pick
-                    // a file immediately.
-                    openFile("");
-                    setFileTreeCollapsed(false);
+            <div className="right-panel-tabs" role="tablist">
+              {rightPanelTabs.length === 0 ? (
+                <span className="right-panel-tabs-empty" aria-hidden>
+                  {m.openFileEmptyHint}
+                </span>
+              ) : null}
+
+              {rightPanelTabs.map((tab) => {
+                const isActive = tab.id === activeTabId;
+                let label = "";
+                if (tab.kind === "files") {
+                  label = tab.path
+                    ? tab.path.split(/[/\\]/).pop() || tab.path
+                    : m.openFileTitle;
+                } else if (tab.kind === "plan") {
+                  label = m.sidePanelPlan;
+                } else {
+                  label = m.sidePanelTerminal;
+                }
+                return (
+                  <div
+                    key={tab.id}
+                    className={
+                      "right-panel-tab" +
+                      (isActive ? " active" : "") +
+                      " kind-" +
+                      tab.kind
+                    }
+                    onClick={() => setActiveTabId(tab.id)}
+                    role="tab"
+                    aria-selected={isActive}
+                    title={tab.kind === "files" ? tab.path : label}
+                  >
+                    <span className="right-panel-tab-icon" aria-hidden>
+                      {tab.kind === "files" ? (
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                          <path
+                            d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.1 1.3h5.1A1.2 1.2 0 0 1 13.5 5.5v6.3a1.2 1.2 0 0 1-1.2 1.2H3.7a1.2 1.2 0 0 1-1.2-1.2V4.2Z"
+                            stroke="currentColor"
+                            strokeWidth="1.2"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      ) : tab.kind === "plan" ? (
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                          <path
+                            d="M3.5 2.5h9A.5.5 0 0 1 13 3v10a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13V3a.5.5 0 0 1 .5-.5Z"
+                            stroke="currentColor"
+                            strokeWidth="1.2"
+                          />
+                          <path
+                            d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"
+                            stroke="currentColor"
+                            strokeWidth="1.2"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      ) : (
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                          <rect
+                            x="2.5"
+                            y="3"
+                            width="11"
+                            height="10"
+                            rx="1.5"
+                            stroke="currentColor"
+                            strokeWidth="1.2"
+                          />
+                          <path
+                            d="M5 7.2 6.6 8.5 5 9.8M8.2 10.2h2.6"
+                            stroke="currentColor"
+                            strokeWidth="1.2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      )}
+                    </span>
+                    <span className="right-panel-tab-label">{label}</span>
+                    <button
+                      type="button"
+                      className="right-panel-tab-close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        closeRightTab(tab.id);
+                      }}
+                      aria-label={m.filesCloseTabTooltip}
+                      title={m.filesCloseTabTooltip}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+
+              {/* `+` menu — sits at the right edge of the tab row. */}
+              <div className="right-panel-tabs-plus-slot">
+                <RightPanelPlusMenu
+                  m={m}
+                  onPick={(kind) => {
+                    if (kind === "terminal") {
+                      openTerminalTab();
+                    } else {
+                      openFile("");
+                      setFileTreeCollapsed(false);
+                    }
                   }}
-                >
-                  <span className="right-panel-landing-icon" aria-hidden>
-                    <svg width="22" height="22" viewBox="0 0 16 16" fill="none">
+                  extraItems={[
+                    {
+                      id: "plan",
+                      label: m.sidePanelPlan,
+                      icon: "plan",
+                      onPick: () => openPlanTab(),
+                    },
+                  ]}
+                />
+              </div>
+            </div>
+
+            <div className="right-panel-content">
+              {activeTab?.kind === "files" ? (
+                <FilesTabSection
+                  workspace={snap.workspace}
+                  m={m}
+                  activeFilePath={activeTab.path}
+                  treeCollapsed={fileTreeCollapsed}
+                  fileTreeWidth={panelLayout.fileTreeWidth}
+                  onClose={() => closeRightTab(activeTab.id)}
+                  onNewFile={openFile}
+                  onSetFileTreeCollapsed={setFileTreeCollapsed}
+                  onResizePointerDown={onResizePointerDown("filesTree")}
+                  onInsertMention={insertFileMention}
+                />
+              ) : null}
+              {activeTab?.kind === "plan" ? (
+                <PlanPanel
+                  todos={snap.todos ?? []}
+                  planContent={snap.planContent}
+                  pendingApproval={snap.pendingPlanApproval}
+                  sessionMode={snap.sessionMode}
+                  m={m}
+                  onClose={() => closeRightTab(activeTab.id)}
+                  onRespondApproval={respondPlanApproval}
+                  onRefreshPlan={refreshPlanContent}
+                />
+              ) : null}
+              {activeTab?.kind === "terminal" ? (
+                <TerminalPanel
+                  key={activeTab.id}
+                  workspace={snap.workspace}
+                  active={rightOpen}
+                  m={m}
+                  onLastTabClosed={() => closeRightTab(activeTab.id)}
+                  onOpenFile={() => openFile("")}
+                />
+              ) : null}
+              {!activeTab ? (
+                <div className="right-panel-empty-hint">
+                  <div className="right-panel-empty-icon" aria-hidden>
+                    <svg width="36" height="36" viewBox="0 0 16 16" fill="none">
                       <path
                         d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.1 1.3h5.1A1.2 1.2 0 0 1 13.5 5.5v6.3a1.2 1.2 0 0 1-1.2 1.2H3.7a1.2 1.2 0 0 1-1.2-1.2V4.2Z"
                         stroke="currentColor"
@@ -6192,114 +6305,14 @@ export function App() {
                         strokeLinejoin="round"
                       />
                     </svg>
-                  </span>
-                  <span className="right-panel-landing-label">
-                    {m.sidePanelFiles}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="right-panel-landing-cta"
-                  onClick={() => {
-                    openPlanTab();
-                  }}
-                >
-                  <span className="right-panel-landing-icon" aria-hidden>
-                    <svg width="22" height="22" viewBox="0 0 16 16" fill="none">
-                      <path
-                        d="M3.5 2.5h9A.5.5 0 0 1 13 3v10a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13V3a.5.5 0 0 1 .5-.5Z"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                      />
-                      <path
-                        d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </span>
-                  <span className="right-panel-landing-label">
-                    {m.sidePanelPlan}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="right-panel-landing-cta"
-                  onClick={() => {
-                    openTerminalTab();
-                  }}
-                >
-                  <span className="right-panel-landing-icon" aria-hidden>
-                    <svg width="22" height="22" viewBox="0 0 16 16" fill="none">
-                      <rect
-                        x="2.5"
-                        y="3"
-                        width="11"
-                        height="10"
-                        rx="1.5"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                      />
-                      <path
-                        d="M5 7.2 6.6 8.5 5 9.8M8.2 10.2h2.6"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <span className="right-panel-landing-label">
-                    {m.sidePanelTerminal}
-                  </span>
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="right-panel-content">
-                  {activeTab?.kind === "files" ? (
-                    <FilesTabSection
-                      workspace={snap.workspace}
-                      m={m}
-                      activeFilePath={activeTab.path}
-                      treeCollapsed={fileTreeCollapsed}
-                      fileTreeWidth={panelLayout.fileTreeWidth}
-                      onClose={() => closeRightTab(activeTab.id)}
-                      onNewFile={openFile}
-                      onSetFileTreeCollapsed={setFileTreeCollapsed}
-                      onResizePointerDown={onResizePointerDown("filesTree")}
-                      onInsertMention={insertFileMention}
-
-                    />
-                  ) : null}
-                  {activeTab?.kind === "plan" ? (
-                    <PlanPanel
-                      todos={snap.todos ?? []}
-                      planContent={snap.planContent}
-                      pendingApproval={snap.pendingPlanApproval}
-                      sessionMode={snap.sessionMode}
-                      m={m}
-                      onClose={() => closeRightTab(activeTab.id)}
-                      onRespondApproval={respondPlanApproval}
-                      onRefreshPlan={refreshPlanContent}
-
-                    />
-                  ) : null}
-                  {activeTab?.kind === "terminal" ? (
-                    <TerminalPanel
-                      key={activeTab.id}
-                      workspace={snap.workspace}
-                      active={rightOpen}
-                      m={m}
-                      onLastTabClosed={() => closeRightTab(activeTab.id)}
-                      onOpenFile={() => openFile("")}
-
-                    />
-                  ) : null}
+                  </div>
+                  <div className="right-panel-empty-title">{m.openFileEmpty}</div>
+                  <div className="right-panel-empty-hint-text">
+                    {m.openFileEmptyHint}
+                  </div>
                 </div>
-              </>
-            )}
+              ) : null}
+            </div>
           </div>
         </aside>
       ) : null}
