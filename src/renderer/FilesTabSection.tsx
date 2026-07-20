@@ -1,4 +1,5 @@
 import { memo } from "react";
+import type { CSSProperties } from "react";
 import type { Messages } from "./i18n";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
@@ -46,7 +47,14 @@ function FilesTabSectionInner({
   onInsertMention,
 }: FilesTabSectionProps) {
   return (
-    <div className="files-section-root">
+    <div
+      className="files-section-root"
+      style={
+        treeCollapsed
+          ? undefined
+          : ({ "--files-tree-w": `${Math.max(fileTreeWidth, 18)}%` } as CSSProperties)
+      }
+    >
       <div className="files-section-body">
         <div className="files-section-editor">
           {activeFilePath ? (
@@ -108,12 +116,9 @@ function FilesTabSectionInner({
             />
             <div
               className="files-section-tree"
-              style={{
-                // % of the files body width (parent flex row). Live drag
-                // mutates these via style on the same node in App.tsx.
-                flex: `0 0 ${Math.max(fileTreeWidth, 18)}%`,
-                width: `${Math.max(fileTreeWidth, 18)}%`,
-              }}
+              /* Width lives in --files-tree-w on the parent; this node
+               * pulls it via var() in styles.css. Live drag mutates the
+               * same var. */
             >
               <FileTree
                 workspace={workspace}

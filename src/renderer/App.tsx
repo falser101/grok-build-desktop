@@ -1865,19 +1865,18 @@ export function App() {
           applyShellColumns(leftFixed, next);
         } else {
           // File-tree: handle is the left edge of the tree pane.
-          // Move left → tree wider; % is of files-section-body width.
+          // % is of the files-section-body width, set via --files-tree-w
+          // on the parent root so .files-section-tree pulls it via var().
           const bodyW = drag.bodyW ?? filesBodyW;
           const deltaPct = ((clientX - drag.startX) / bodyW) * 100;
           const raw = drag.startW - deltaPct;
           const next = clamp(raw, FILE_TREE_COLLAPSE * 0.45, FILE_TREE_MAX);
           drag.liveW = next;
-          const tree = document.querySelector(
-            ".files-section-tree",
+          const root = document.querySelector(
+            ".files-section-root",
           ) as HTMLElement | null;
-          if (tree) {
-            const pct = `${next.toFixed(2)}%`;
-            tree.style.flex = `0 0 ${pct}`;
-            tree.style.width = pct;
+          if (root) {
+            root.style.setProperty("--files-tree-w", `${next.toFixed(2)}%`);
           }
         }
       };

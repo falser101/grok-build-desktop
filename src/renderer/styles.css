@@ -6816,14 +6816,19 @@ html[data-theme="light"] .icon-btn.send {
   display: flex;
   flex-direction: row;
   overflow: hidden;
+  /* Anchor for absolutely-positioned handle ::after (centers the line
+   * across the editor/tree join even when the handle width is wide). */
+  position: relative;
 }
 
 .files-section-editor {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   display: flex;
   background: var(--bg-elevated);
+  position: relative;
+  z-index: 1;
 }
 .files-section-editor > .file-viewer,
 .files-section-editor > .file-viewer-empty-state {
@@ -6832,16 +6837,22 @@ html[data-theme="light"] .icon-btn.send {
   min-height: 0;
 }
 
-/* Editor | tree split: the handle IS the divider (no second border on tree). */
+/*
+ * Editor | tree split. The handle is purely a transparent hit-strip
+ * centered on the join; the visible line is its `::after` painted at
+ * the handle's own left edge (handle width = 12px, line at 6px).
+ * The tree's width is set inline by App.tsx during drag — no flex
+ * grow/shrink on the tree so it cannot silently snap back.
+ */
 .resize-handle-files-tree {
   position: relative;
-  flex: 0 0 10px;
-  width: 10px;
-  margin-right: -5px; /* straddle into the tree so the line centers on the join */
-  z-index: 5;
+  flex: 0 0 12px;
+  width: 12px;
+  z-index: 2;
   cursor: col-resize;
   touch-action: none;
   background: transparent;
+  margin-right: -6px; /* visually centers the line on the editor/tree join */
 }
 .resize-handle-files-tree::after {
   content: "";
@@ -6852,6 +6863,7 @@ html[data-theme="light"] .icon-btn.send {
   width: 1px;
   transform: translateX(-50%);
   background: var(--border);
+  pointer-events: none;
   transition: background 0.12s, box-shadow 0.12s;
 }
 .resize-handle-files-tree:hover::after,
@@ -6861,17 +6873,21 @@ html[data-theme="light"] .icon-btn.send {
 }
 
 .files-section-tree {
+  /* Width is driven by --files-tree-w, set inline at mount and updated
+   * live by App.tsx during drag. `flex-grow: 0` + explicit `width`
+   * means React layout / CSS var are the single source of truth. */
   flex: 0 0 auto;
-  /* Width is set inline as % of the files body; keep a readable floor. */
+  width: var(--files-tree-w, 38%);
   min-width: 160px;
-  max-width: 70%;
+  max-width: 75%;
   display: flex;
   flex-direction: column;
   height: 100%;
   background: var(--bg-sidebar);
-  /* Divider is the resize handle, not a second border. */
   border-left: none;
   overflow: hidden;
+  position: relative;
+  z-index: 1;
 }
 
 .files-section-tree .file-tree {
