@@ -1604,25 +1604,26 @@ export function App() {
   openFilePathRef.current = openFilePath;
 
   /**
-   * Open a brand-new files tab (used by the `+` menu / terminal "open
-   * file" action). Does NOT replace the active tab's path.
+   * Open a brand-new files tab (used by the `+` menu). Always selects
+   * the resulting tab. Does NOT replace the active tab's path in place.
    */
   const openFile = useCallback((path: string) => {
-    setRightPanelTabs((prev) => {
-      // Empty path = blank picker tab; never dedupe those.
-      if (path) {
-        const existing = prev.find(
-          (t) => t.kind === "files" && t.path === path,
-        );
-        if (existing) {
-          setActiveTabId(existing.id);
-          return prev;
-        }
-      }
+    // Resolve id first so we can activate outside of the setState updater
+    // (calling setActiveTabId inside a setRightPanelTabs updater is racy
+    // and can leave the previous tab selected).
+    const existing =
+      path
+        ? rightPanelTabsRef.current.find(
+            (t) => t.kind === "files" && t.path === path,
+          )
+        : undefined;
+    if (existing) {
+      setActiveTabId(existing.id);
+    } else {
       const id = newRightTabId();
+      setRightPanelTabs((prev) => [...prev, { id, kind: "files", path }]);
       setActiveTabId(id);
-      return [...prev, { id, kind: "files", path }];
-    });
+    }
     setRightPanelOpen(true);
     setFileTreeCollapsed(false);
   }, []);
@@ -1634,62 +1635,46 @@ export function App() {
    */
   const selectFileInActiveTab = useCallback((path: string) => {
     if (!path) return;
-    setRightPanelTabs((prev) => {
-      const active = prev.find((t) => t.id === activeTabIdRef.current);
-      if (active?.kind === "files") {
-        return prev.map((t) =>
-          t.id === active.id && t.kind === "files"
-            ? { ...t, path }
-            : t,
-        );
-      }
-      // No active files tab — fall back to openFile behaviour.
-      const existing = prev.find(
-        (t) => t.kind === "files" && t.path === path,
+    const active = rightPanelTabsRef.current.find(
+      (t) => t.id === activeTabIdRef.current,
+    );
+    if (active?.kind === "files") {
+      setRightPanelTabs((prev) =>
+        prev.map((t) =>
+          t.id === active.id && t.kind === "files" ? { ...t, path } : t,
+        ),
       );
-      if (existing) {
-        setActiveTabId(existing.id);
-        return prev;
-      }
-      const id = newRightTabId();
-      setActiveTabId(id);
-      return [...prev, { id, kind: "files", path }];
-    });
+      // Keep the same tab selected (already active).
+      setActiveTabId(active.id);
+    } else {
+      openFile(path);
+      return;
+    }
     setRightPanelOpen(true);
     setFileTreeCollapsed(false);
-  }, []);
+  }, [openFile]);
 
-  /** Add or focus the Plan tab (singleton). */
+  /** Add or focus the Plan tab (singleton). Always selects it. */
   const openPlanTab = useCallback(() => {
-    setRightPanelTabs((prev) => {
-      const existing = prev.find((t) => t.kind === "plan");
-      if (existing) {
-        setActiveTabId(existing.id);
-        return prev;
-      }
+    const existing = rightPanelTabsRef.current.find((t) => t.kind === "plan");
+    if (existing) {
+      setActiveTabId(existing.id);
+    } else {
       const id = newRightTabId();
+      setRightPanelTabs((prev) => [...prev, { id, kind: "plan" }]);
       setActiveTabId(id);
-      return [...prev, { id, kind: "plan" }];
-    });
+    }
     setRightPanelOpen(true);
   }, []);
 
-  /** Add a brand-new Terminal tab. The inner TerminalPanel spawns its
-   *  own PTY via the standard `termStart` IPC, so we don't track
-   *  backend ids here. Chip label uses cwd (seeded from workspace). */
+  /** Add a brand-new Terminal tab and select it immediately. */
   const openTerminalTab = useCallback(() => {
-    setRightPanelTabs((prev) => {
-      const id = newRightTabId();
-      setActiveTabId(id);
-      return [
-        ...prev,
-        {
-          id,
-          kind: "terminal",
-          cwd: snap.workspace,
-        },
-      ];
-    });
+    const id = newRightTabId();
+    setRightPanelTabs((prev) => [
+      ...prev,
+      { id, kind: "terminal", cwd: snap.workspace },
+    ]);
+    setActiveTabId(id);
     setRightPanelOpen(true);
   }, [snap.workspace]);
 
