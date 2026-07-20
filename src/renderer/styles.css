@@ -6645,6 +6645,23 @@ html[data-theme="light"] .icon-btn.send {
   background: linear-gradient(135deg, #ef4444, #f43f5e);
 }
 
+/* Logo image inside the avatar — fills the rounded box and pads slightly
+   so the icon has breathing room inside the brand background. */
+.models-preset-avatar img.models-preset-logo {
+  width: 70%;
+  height: 70%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* SVG icons (currentColor) — invert in dark theme so they stay readable
+   on dark brand backgrounds. PNG / ICO logos keep their own colours. */
+html[data-theme="dark"] .models-preset-avatar img.models-preset-logo[src$=".svg"] {
+  filter: invert(1);
+}
+
 /* Region color tokens (used by both presets and provider cards). */
 html[data-theme="dark"] {
   --models-region-intl: #6366f1;

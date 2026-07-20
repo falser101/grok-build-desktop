@@ -623,6 +623,12 @@ export interface ModelProviderPreset {
    * gets a stable visual identity.
    */
   accent?: string;
+  /**
+   * Optional path (relative to the renderer index, or absolute URL) to the
+   * provider's logo image. When set, the avatar renders this image instead
+   * of the letter glyph. Both SVG and raster (PNG / ICO) work.
+   */
+  logo?: string;
 }
 
 /** One model enabled (or listed) under a provider. */

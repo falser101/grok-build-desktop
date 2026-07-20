@@ -58,6 +58,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     apiBackend: "chat_completions",
     envKey: "OPENAI_API_KEY",
     accent: "#10a37f",
+    logo: "./assets/provider-icons/openai.svg",
     popularModels: [
       { id: "gpt-4.1", name: "GPT-4.1" },
       { id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
@@ -77,6 +78,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     authStyle: "x-api-key",
     extraHeaders: { "anthropic-version": "2023-06-01" },
     accent: "#d97757",
+    logo: "./assets/provider-icons/anthropic.svg",
     popularModels: [
       { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
       { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
@@ -92,6 +94,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     apiBackend: "chat_completions",
     envKey: "OPENROUTER_API_KEY",
     accent: "#7c5cff",
+    logo: "./assets/provider-icons/openrouter.svg",
     popularModels: [
       { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4" },
       { id: "openai/gpt-4o", name: "GPT-4o" },
@@ -107,6 +110,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     apiBackend: "chat_completions",
     envKey: "GROQ_API_KEY",
     accent: "#f55036",
+    logo: "./assets/provider-icons/groq.svg",
     popularModels: [
       { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B" },
       { id: "qwen/qwen3-32b", name: "Qwen3 32B" },
@@ -121,6 +125,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     apiBackend: "chat_completions",
     envKey: "TOGETHER_API_KEY",
     accent: "#0fb5ba",
+    logo: "./assets/provider-icons/together.svg",
   },
   {
     id: "gemini",
@@ -131,6 +136,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     apiBackend: "chat_completions",
     envKey: "GEMINI_API_KEY",
     accent: "#4285f4",
+    logo: "./assets/provider-icons/gemini.svg",
     popularModels: [
       { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
       { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
@@ -156,6 +162,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     modelsListBaseUrl: "https://api.deepseek.com/v1",
     envKey: "DEEPSEEK_API_KEY",
     accent: "#4d8aff",
+    logo: "./assets/provider-icons/deepseek.png",
     popularModels: [
       { id: "deepseek-chat", name: "DeepSeek Chat (V3)" },
       { id: "deepseek-reasoner", name: "DeepSeek Reasoner (R1)" },
@@ -170,6 +177,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     apiBackend: "chat_completions",
     envKey: "MOONSHOT_API_KEY",
     accent: "#1a1a2e",
+    logo: "./assets/provider-icons/moonshot.svg",
     popularModels: [
       { id: "kimi-k2-turbo-preview", name: "Kimi K2 Turbo" },
       { id: "moonshot-v1-128k", name: "Moonshot v1 128K" },
@@ -185,6 +193,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     apiBackend: "chat_completions",
     envKey: "DASHSCOPE_API_KEY",
     accent: "#ff6a00",
+    logo: "./assets/provider-icons/qwen.svg",
     popularModels: [
       { id: "qwen-max", name: "Qwen Max" },
       { id: "qwen-plus", name: "Qwen Plus" },
@@ -201,6 +210,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     apiBackend: "chat_completions",
     envKey: "ZHIPU_API_KEY",
     accent: "#3859ff",
+    logo: "./assets/provider-icons/zhipu.svg",
     popularModels: [
       { id: "glm-4.5", name: "GLM-4.5" },
       { id: "glm-4.5-air", name: "GLM-4.5 Air" },
@@ -216,6 +226,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     apiBackend: "chat_completions",
     envKey: "SILICONFLOW_API_KEY",
     accent: "#7c3aed",
+    logo: "./assets/provider-icons/siliconflow.png",
     popularModels: [
       { id: "deepseek-ai/DeepSeek-V3", name: "DeepSeek V3" },
       { id: "Qwen/Qwen3-235B-A22B", name: "Qwen3 235B" },
@@ -231,6 +242,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     apiBackend: "chat_completions",
     envKey: "ARK_API_KEY",
     accent: "#3b82f6",
+    logo: "./assets/provider-icons/volcengine.svg",
     popularModels: [
       { id: "doubao-seed-1-6-250615", name: "Doubao Seed 1.6" },
       { id: "doubao-1-5-pro-32k-250115", name: "Doubao 1.5 Pro" },
@@ -254,6 +266,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     modelsListBaseUrl: "https://api.minimaxi.com/v1",
     envKey: "MINIMAX_API_KEY",
     accent: "#ff4d4f",
+    logo: "./assets/provider-icons/minimax.svg",
     popularModels: [
       { id: "MiniMax-M3", name: "MiniMax M3" },
       { id: "MiniMax-M2.7", name: "MiniMax M2.7" },
@@ -269,6 +282,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     apiBackend: "chat_completions",
     envKey: "STEPFUN_API_KEY",
     accent: "#5b21b6",
+    logo: "./assets/provider-icons/stepfun.svg",
     popularModels: [
       { id: "step-2-16k", name: "Step 2 16K" },
       { id: "step-1-flash", name: "Step 1 Flash" },
@@ -282,6 +296,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "http://localhost:11434/v1",
     apiBackend: "chat_completions",
     accent: "#1a1a1a",
+    logo: "./assets/provider-icons/ollama.svg",
     popularModels: [
       { id: "llama3.2", name: "Llama 3.2" },
       { id: "qwen2.5-coder", name: "Qwen2.5 Coder" },
@@ -296,6 +311,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "http://localhost:1234/v1",
     apiBackend: "chat_completions",
     accent: "#0f172a",
+    logo: "./assets/provider-icons/lmstudio.svg",
   },
   {
     id: "custom",

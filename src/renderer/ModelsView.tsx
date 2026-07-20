@@ -964,8 +964,19 @@ export function ModelsView({
                             data-slot={avatarColor(preset.id)}
                             style={avatarStyle(preset.accent)}
                           >
-                            {avatarChar(
-                              zh ? preset.nameZh || preset.name : preset.name,
+                            {preset.logo ? (
+                              <img
+                                src={preset.logo}
+                                alt=""
+                                className="models-preset-logo"
+                                draggable={false}
+                              />
+                            ) : (
+                              avatarChar(
+                                zh
+                                  ? preset.nameZh || preset.name
+                                  : preset.name,
+                              )
                             )}
                           </span>
                           <span className="models-preset-body">
@@ -1027,7 +1038,16 @@ export function ModelsView({
                   )}
                   style={avatarStyle(editorPreset?.accent)}
                 >
-                  {avatarChar(editor.name)}
+                  {editorPreset?.logo ? (
+                    <img
+                      src={editorPreset.logo}
+                      alt=""
+                      className="models-preset-logo"
+                      draggable={false}
+                    />
+                  ) : (
+                    avatarChar(editor.name)
+                  )}
                 </span>
                 <div>
                   <h2>
@@ -1426,7 +1446,16 @@ export function ModelsView({
                           data-slot={avatarColor(p.presetId || p.id)}
                           style={avatarStyle(preset?.accent)}
                         >
-                          {avatarChar(p.name)}
+                          {preset?.logo ? (
+                            <img
+                              src={preset.logo}
+                              alt=""
+                              className="models-preset-logo"
+                              draggable={false}
+                            />
+                          ) : (
+                            avatarChar(p.name)
+                          )}
                         </span>
                         <div className="models-provider-title-wrap">
                           <h3 className="models-provider-title">{p.name}</h3>
