@@ -190,12 +190,14 @@ const ProviderUsageStrip = memo(function ProviderUsageStrip({
       <span className="models-usage-loading">{m.modelsUsageLoading}</span>
     );
   } else if (!result.success || !quota) {
+    const errMsg = result.error || m.modelsUsageErrorShort;
+    // Truncate long error noise (raw body snippets) but keep the first
+    // 60 chars so the user sees the actual reason (HTTP code, key error, etc).
+    const shown =
+      errMsg.length > 60 ? `${errMsg.slice(0, 60)}…` : errMsg;
     body = (
-      <span
-        className="models-usage-error"
-        title={result.error || m.modelsUsageErrorShort}
-      >
-        {m.modelsUsageErrorShort}
+      <span className="models-usage-error" title={errMsg}>
+        {shown}
       </span>
     );
   } else {
