@@ -577,6 +577,10 @@ export interface Messages {
   modelsUsageLoading: string;
   modelsUsageUnavailable: string;
   modelsUsageErrorShort: string;
+  /** Pay-as-you-go balance card label. */
+  modelsUsageBalanceLabel: string;
+  /** Tooltip breakdown, e.g. " · 5.00 grant + 261.87 topped-up" */
+  modelsUsageBalanceBreakdown: string;
   modelsReconnect: string;
   modelsReconnectHint: string;
   modelsReconnected: string;
@@ -1142,6 +1146,8 @@ const en: Messages = {
   modelsUsageLoading: "Loading…",
   modelsUsageUnavailable: "—",
   modelsUsageErrorShort: "Usage unavailable",
+  modelsUsageBalanceLabel: "Remaining",
+  modelsUsageBalanceBreakdown: " · {g} grant + {t} topped-up",
   modelsReconnect: "Reconnect agent",
   modelsReconnectHint:
     "Reload agent so newly saved models appear in the picker",
@@ -1695,6 +1701,8 @@ const zh: Messages = {
   modelsUsageLoading: "加载中…",
   modelsUsageUnavailable: "—",
   modelsUsageErrorShort: "暂无法获取用量",
+  modelsUsageBalanceLabel: "剩余",
+  modelsUsageBalanceBreakdown: " · {g} 赠送 + {t} 充值",
   modelsReconnect: "重连 Agent",
   modelsReconnectHint: "重载 agent 后，新保存的模型会出现在选择器中",
   modelsReconnected: "Agent 已重连",

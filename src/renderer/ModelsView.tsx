@@ -79,14 +79,16 @@ function avatarColor(name: string): number {
   return Math.abs(h) % 6;
 }
 
-/** True when a provider supports coding-plan usage queries (currently MiniMax). */
+/** True when a provider supports usage / balance queries (MiniMax, DeepSeek). */
 function providerSupportsUsage(p: ModelProviderConfig): boolean {
   const id = (p.presetId || "").toLowerCase();
   const url = (p.baseUrl || "").toLowerCase();
   return (
     id === "minimax" ||
+    id === "deepseek" ||
     url.includes("api.minimaxi.com") ||
-    url.includes("api.minimax.io")
+    url.includes("api.minimax.io") ||
+    url.includes("api.deepseek.com")
   );
 }
 
@@ -103,6 +105,24 @@ function formatResetCountdown(resetMs: number | undefined): string {
   if (days > 0) return `${days}d${hours}h`;
   if (hours > 0) return `${hours}h${minutes}m`;
   return `${minutes}m`;
+}
+
+/** Render a money amount compactly (≤2 decimals, drop trailing zeros). */
+function formatBalanceAmount(
+  amount: number,
+  unit: string,
+  short = false,
+): string {
+  const fixed = Math.abs(amount) >= 100 ? amount.toFixed(2) : amount.toFixed(2);
+  // Trim trailing zeros after the decimal point: "266.87" / "12.50" → "12.5".
+  const trimmed = fixed.replace(/\.?0+$/, "");
+  if (short && unit === "CNY") {
+    return `¥${trimmed}`;
+  }
+  if (short && unit === "USD") {
+    return `$${trimmed}`;
+  }
+  return trimmed;
 }
 
 /** Human-friendly relative timestamp for the strip footer. */
@@ -179,7 +199,6 @@ const ProviderUsageStrip = memo(function ProviderUsageStrip({
     return () => clearInterval(t);
   }, []);
 
-  const quota = result?.quota;
   const fetchedAt = result?.fetchedAt;
   const ago = formatFetchedAgo(fetchedAt, m);
 
@@ -189,7 +208,7 @@ const ProviderUsageStrip = memo(function ProviderUsageStrip({
     body = (
       <span className="models-usage-loading">{m.modelsUsageLoading}</span>
     );
-  } else if (!result.success || !quota) {
+  } else if (!result.success || (!result.quota && !result.balance)) {
     const errMsg = result.error || m.modelsUsageErrorShort;
     // Truncate long error noise (raw body snippets) but keep the first
     // 60 chars so the user sees the actual reason (HTTP code, key error, etc).
@@ -200,41 +219,72 @@ const ProviderUsageStrip = memo(function ProviderUsageStrip({
         {shown}
       </span>
     );
-  } else {
+  } else if (result.balance) {
+    const bal = result.balance;
+    const tone = bal.available === false ? "usage-high" : "usage-low";
     body = (
-      <>
-        {typeof quota.fiveHourPct === "number" ? (
-          <span
-            className={`models-usage-cell ${usageClass(quota.fiveHourPct)}`}
-          >
-            <span className="models-usage-label">
-              {m.modelsUsageFiveHour}
-            </span>
-            <span className="models-usage-value">
-              {Math.round(quota.fiveHourPct)}%
-            </span>
-            <span className="models-usage-reset">
-              ⏱ {formatResetCountdown(quota.fiveHourResetMs)}
-            </span>
-          </span>
-        ) : null}
-        {typeof quota.sevenDayPct === "number" ? (
-          <span
-            className={`models-usage-cell ${usageClass(quota.sevenDayPct)}`}
-          >
-            <span className="models-usage-label">
-              {m.modelsUsageSevenDay}
-            </span>
-            <span className="models-usage-value">
-              {Math.round(quota.sevenDayPct)}%
-            </span>
-            <span className="models-usage-reset">
-              ⏱ {formatResetCountdown(quota.sevenDayResetMs)}
-            </span>
-          </span>
-        ) : null}
-      </>
+      <span className="models-usage-balance">
+        <span className="models-usage-balance-label">
+          {m.modelsUsageBalanceLabel}
+        </span>
+        <span className={`models-usage-value ${tone}`}>
+          {formatBalanceAmount(bal.remaining, bal.unit)}
+        </span>
+        <span className="models-usage-reset">
+          {bal.unit}
+          {bal.grantedBalance !== undefined && bal.toppedUpBalance !== undefined
+            ? ` · ${m.modelsUsageBalanceBreakdown
+                .replace("{g}", formatBalanceAmount(bal.grantedBalance, bal.unit, true))
+                .replace("{t}", formatBalanceAmount(bal.toppedUpBalance, bal.unit, true))}`
+            : ""}
+        </span>
+      </span>
     );
+  } else {
+    // Coding-plan quota branch (MiniMax 5h / 7d).
+    const quota = result.quota;
+    if (!quota) {
+      body = (
+        <span className="models-usage-error">
+          {m.modelsUsageErrorShort}
+        </span>
+      );
+    } else {
+      body = (
+        <>
+          {typeof quota.fiveHourPct === "number" ? (
+            <span
+              className={`models-usage-cell ${usageClass(quota.fiveHourPct)}`}
+            >
+              <span className="models-usage-label">
+                {m.modelsUsageFiveHour}
+              </span>
+              <span className="models-usage-value">
+                {Math.round(quota.fiveHourPct)}%
+              </span>
+              <span className="models-usage-reset">
+                ⏱ {formatResetCountdown(quota.fiveHourResetMs)}
+              </span>
+            </span>
+          ) : null}
+          {typeof quota.sevenDayPct === "number" ? (
+            <span
+              className={`models-usage-cell ${usageClass(quota.sevenDayPct)}`}
+            >
+              <span className="models-usage-label">
+                {m.modelsUsageSevenDay}
+              </span>
+              <span className="models-usage-value">
+                {Math.round(quota.sevenDayPct)}%
+              </span>
+              <span className="models-usage-reset">
+                ⏱ {formatResetCountdown(quota.sevenDayResetMs)}
+              </span>
+            </span>
+          ) : null}
+        </>
+      );
+    }
   }
 
   return (

@@ -7550,6 +7550,26 @@ html[data-theme="light"] {
   font-style: italic;
 }
 
+/* Pay-as-you-go balance layout (DeepSeek etc): single inline pill, less
+   crowded than the 5h/7d two-cell form. */
+.models-usage-balance {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.models-usage-balance-label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.models-usage-balance .models-usage-value {
+  font-weight: 700;
+  font-size: 13px;
+}
+
 .models-usage-meta {
   display: inline-flex;
   align-items: center;

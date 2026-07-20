@@ -687,11 +687,32 @@ export interface ProviderUsageQuota {
   sevenDayResetMs?: number;
 }
 
+/**
+ * Account balance for pay-as-you-go providers (DeepSeek etc).
+ * Display: 剩余: <remaining> <unit>.
+ */
+export interface ProviderUsageBalance {
+  /** Remaining balance. */
+  remaining: number;
+  /** Currency code (CNY, USD, …) — used as the unit label. */
+  unit: string;
+  /** Optional granted/free quota (for tooltip). */
+  grantedBalance?: number;
+  /** Optional topped-up balance. */
+  toppedUpBalance?: number;
+  /** False when account is in arrears / frozen. */
+  available?: boolean;
+}
+
 /** Result of `models:queryProviderUsage` IPC. */
 export interface ProviderUsageResult {
   success: boolean;
   fetchedAt: string;
+  /** Coding-plan quota (MiniMax etc). Either `quota` or `balance` is set. */
   quota?: ProviderUsageQuota;
+  /** Pay-as-you-go balance (DeepSeek etc). */
+  balance?: ProviderUsageBalance;
+  /** User-facing error when success=false. */
   error?: string;
 }
 
