@@ -70,13 +70,31 @@ function avatarChar(name: string): string {
   return ch.toUpperCase();
 }
 
-/** Stable color slot for the avatar based on name (so it doesn't change). */
+/**
+ * Stable color slot for the avatar when no brand accent is set. Hashes the
+ * preset / provider id into one of a small palette so visually similar ids
+ * don't collide too often. Used as a fallback only — real presets carry an
+ * `accent` hex that overrides this.
+ */
 function avatarColor(name: string): number {
   let h = 0;
   for (let i = 0; i < name.length; i++) {
     h = (h * 31 + name.charCodeAt(i)) | 0;
   }
   return Math.abs(h) % 6;
+}
+
+/**
+ * Inline style: brand accent if defined, else undefined (so the CSS slot
+ * gradients from `.models-preset-avatar[data-slot="N"]` keep painting).
+ */
+function avatarStyle(
+  accent: string | undefined,
+): React.CSSProperties | undefined {
+  if (accent) {
+    return { background: accent, color: "#fff" };
+  }
+  return undefined;
 }
 
 /** True when a provider supports usage / balance queries (MiniMax, DeepSeek). */
@@ -944,6 +962,7 @@ export function ModelsView({
                           <span
                             className="models-preset-avatar"
                             data-slot={avatarColor(preset.id)}
+                            style={avatarStyle(preset.accent)}
                           >
                             {avatarChar(
                               zh ? preset.nameZh || preset.name : preset.name,
@@ -1006,6 +1025,7 @@ export function ModelsView({
                   data-slot={avatarColor(
                     editorPreset?.id || editor.name || "x",
                   )}
+                  style={avatarStyle(editorPreset?.accent)}
                 >
                   {avatarChar(editor.name)}
                 </span>
@@ -1404,6 +1424,7 @@ export function ModelsView({
                         <span
                           className="models-preset-avatar models-provider-avatar"
                           data-slot={avatarColor(p.presetId || p.id)}
+                          style={avatarStyle(preset?.accent)}
                         >
                           {avatarChar(p.name)}
                         </span>

@@ -57,6 +57,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "https://api.openai.com/v1",
     apiBackend: "chat_completions",
     envKey: "OPENAI_API_KEY",
+    accent: "#10a37f",
     popularModels: [
       { id: "gpt-4.1", name: "GPT-4.1" },
       { id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
@@ -75,6 +76,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     envKey: "ANTHROPIC_API_KEY",
     authStyle: "x-api-key",
     extraHeaders: { "anthropic-version": "2023-06-01" },
+    accent: "#d97757",
     popularModels: [
       { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
       { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
@@ -89,6 +91,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "https://openrouter.ai/api/v1",
     apiBackend: "chat_completions",
     envKey: "OPENROUTER_API_KEY",
+    accent: "#7c5cff",
     popularModels: [
       { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4" },
       { id: "openai/gpt-4o", name: "GPT-4o" },
@@ -103,6 +106,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "https://api.groq.com/openai/v1",
     apiBackend: "chat_completions",
     envKey: "GROQ_API_KEY",
+    accent: "#f55036",
     popularModels: [
       { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B" },
       { id: "qwen/qwen3-32b", name: "Qwen3 32B" },
@@ -116,6 +120,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "https://api.together.xyz/v1",
     apiBackend: "chat_completions",
     envKey: "TOGETHER_API_KEY",
+    accent: "#0fb5ba",
   },
   {
     id: "gemini",
@@ -125,6 +130,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     apiBackend: "chat_completions",
     envKey: "GEMINI_API_KEY",
+    accent: "#4285f4",
     popularModels: [
       { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
       { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
@@ -135,9 +141,21 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     name: "DeepSeek",
     nameZh: "DeepSeek 深度求索",
     region: "cn",
-    baseUrl: "https://api.deepseek.com/v1",
-    apiBackend: "chat_completions",
+    // Official docs (https://api-docs.deepseek.com/guides/anthropic_api/):
+    //   OpenAI-compatible: POST https://api.deepseek.com/v1/chat/completions
+    //   Anthropic-compatible: POST https://api.deepseek.com/anthropic/v1/messages
+    // Anthropic path uses `x-api-key` header (same convention as Anthropic).
+    baseUrl: "https://api.deepseek.com/anthropic/v1",
+    apiBackend: "messages",
+    protocolEndpoints: {
+      messages: "https://api.deepseek.com/anthropic/v1",
+      chat_completions: "https://api.deepseek.com/v1",
+    },
+    authStyle: "x-api-key",
+    // List models via OpenAI-compatible host (Anthropic path has no /models).
+    modelsListBaseUrl: "https://api.deepseek.com/v1",
     envKey: "DEEPSEEK_API_KEY",
+    accent: "#4d8aff",
     popularModels: [
       { id: "deepseek-chat", name: "DeepSeek Chat (V3)" },
       { id: "deepseek-reasoner", name: "DeepSeek Reasoner (R1)" },
@@ -151,6 +169,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "https://api.moonshot.cn/v1",
     apiBackend: "chat_completions",
     envKey: "MOONSHOT_API_KEY",
+    accent: "#1a1a2e",
     popularModels: [
       { id: "kimi-k2-turbo-preview", name: "Kimi K2 Turbo" },
       { id: "moonshot-v1-128k", name: "Moonshot v1 128K" },
@@ -165,6 +184,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     apiBackend: "chat_completions",
     envKey: "DASHSCOPE_API_KEY",
+    accent: "#ff6a00",
     popularModels: [
       { id: "qwen-max", name: "Qwen Max" },
       { id: "qwen-plus", name: "Qwen Plus" },
@@ -180,6 +200,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",
     apiBackend: "chat_completions",
     envKey: "ZHIPU_API_KEY",
+    accent: "#3859ff",
     popularModels: [
       { id: "glm-4.5", name: "GLM-4.5" },
       { id: "glm-4.5-air", name: "GLM-4.5 Air" },
@@ -194,6 +215,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "https://api.siliconflow.cn/v1",
     apiBackend: "chat_completions",
     envKey: "SILICONFLOW_API_KEY",
+    accent: "#7c3aed",
     popularModels: [
       { id: "deepseek-ai/DeepSeek-V3", name: "DeepSeek V3" },
       { id: "Qwen/Qwen3-235B-A22B", name: "Qwen3 235B" },
@@ -208,6 +230,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
     apiBackend: "chat_completions",
     envKey: "ARK_API_KEY",
+    accent: "#3b82f6",
     popularModels: [
       { id: "doubao-seed-1-6-250615", name: "Doubao Seed 1.6" },
       { id: "doubao-1-5-pro-32k-250115", name: "Doubao 1.5 Pro" },
@@ -230,6 +253,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     // List models via OpenAI-compatible host (Anthropic path has no /models).
     modelsListBaseUrl: "https://api.minimaxi.com/v1",
     envKey: "MINIMAX_API_KEY",
+    accent: "#ff4d4f",
     popularModels: [
       { id: "MiniMax-M3", name: "MiniMax M3" },
       { id: "MiniMax-M2.7", name: "MiniMax M2.7" },
@@ -244,6 +268,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     baseUrl: "https://api.stepfun.com/v1",
     apiBackend: "chat_completions",
     envKey: "STEPFUN_API_KEY",
+    accent: "#5b21b6",
     popularModels: [
       { id: "step-2-16k", name: "Step 2 16K" },
       { id: "step-1-flash", name: "Step 1 Flash" },
@@ -256,6 +281,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     region: "local",
     baseUrl: "http://localhost:11434/v1",
     apiBackend: "chat_completions",
+    accent: "#1a1a1a",
     popularModels: [
       { id: "llama3.2", name: "Llama 3.2" },
       { id: "qwen2.5-coder", name: "Qwen2.5 Coder" },
@@ -269,6 +295,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     region: "local",
     baseUrl: "http://localhost:1234/v1",
     apiBackend: "chat_completions",
+    accent: "#0f172a",
   },
   {
     id: "custom",
@@ -277,6 +304,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     region: "local",
     baseUrl: "",
     apiBackend: "chat_completions",
+    accent: "#64748b",
   },
 ];
 

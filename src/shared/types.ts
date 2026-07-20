@@ -617,6 +617,12 @@ export interface ModelProviderPreset {
   authStyle?: ModelProviderAuthStyle;
   extraHeaders?: Record<string, string>;
   popularModels?: { id: string; name: string }[];
+  /**
+   * Optional brand accent (hex `#RRGGBB`) for the avatar + provider card.
+   * Falls back to a hash-derived colour when unset so every provider still
+   * gets a stable visual identity.
+   */
+  accent?: string;
 }
 
 /** One model enabled (or listed) under a provider. */
