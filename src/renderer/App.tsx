@@ -6344,7 +6344,15 @@ export function App() {
                     } else if (tab.kind === "plan") {
                       label = m.sidePanelPlan;
                     } else {
-                      label = m.sidePanelTerminal;
+                      // Number multiple terminal chips when several are open.
+                      const termTabs = rightPanelTabs.filter(
+                        (t) => t.kind === "terminal",
+                      );
+                      const idx = termTabs.findIndex((t) => t.id === tab.id);
+                      label =
+                        termTabs.length > 1
+                          ? `${m.sidePanelTerminal} ${idx + 1}`
+                          : m.sidePanelTerminal;
                     }
                     return (
                       <div
@@ -6491,13 +6499,8 @@ export function App() {
                     <TerminalPanel
                       key={activeTab.id}
                       workspace={snap.workspace}
-                      active={rightOpen}
+                      active={rightOpen && activeTab.kind === "terminal"}
                       m={m}
-                      onLastTabClosed={() => closeRightTab(activeTab.id)}
-                      onOpenFile={() => {
-                        setFileTreeCollapsed(false);
-                        openFile("");
-                      }}
                     />
                   ) : null}
                 </div>

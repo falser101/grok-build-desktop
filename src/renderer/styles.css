@@ -6080,6 +6080,40 @@ html[data-theme="light"] .icon-btn.send {
   background: #141414;
 }
 
+/* Single-session terminal (no internal multi-tab strip). */
+.term-toolbar-single .term-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+.term-toolbar-single .term-shell {
+  color: #d4d4d4;
+  font-weight: 550;
+}
+.term-toolbar-single .term-cwd {
+  color: #8a8a8a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.term-status-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #0dbc79;
+}
+.term-status-dot.exited {
+  background: #cd3131;
+}
+
 
 .term-title {
   font-size: 0.72rem;
