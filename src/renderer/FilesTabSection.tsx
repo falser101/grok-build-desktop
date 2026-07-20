@@ -7,7 +7,9 @@ import { FileViewer } from "./FileViewer";
 interface FilesTabSectionProps {
   workspace: string | undefined;
   m: Messages;
-  /** Absolute path of the file currently displayed in the editor pane. */
+  /** Absolute path of the file currently displayed in the editor pane.
+   *  An empty string means "no file selected yet — show the empty
+   *  state alongside the file tree so the user can pick one". */
   activeFilePath: string;
   /** True when the inline file-tree pane is folded to its narrow rail. */
   treeCollapsed: boolean;
@@ -216,13 +218,34 @@ function FilesTabSectionInner({
       {/* Body: editor + (optional) collapsible tree. */}
       <div className="files-section-body">
         <div className="files-section-editor">
-          <FileViewer
-            key={activeFilePath}
-            path={activeFilePath}
-            m={m}
-            onClose={onClose}
-            onInsertMention={onInsertMention}
-          />
+          {activeFilePath ? (
+            <FileViewer
+              key={activeFilePath}
+              path={activeFilePath}
+              m={m}
+              onClose={onClose}
+              onInsertMention={onInsertMention}
+            />
+          ) : (
+            <div className="file-viewer-empty-state">
+              <div className="file-viewer-empty-icon" aria-hidden>
+                <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+                  <path
+                    d="M8 12.5A3 3 0 0 1 11 9.5h6l2.5 3H29a3 3 0 0 1 3 3V28a3 3 0 0 1-3 3H11a3 3 0 0 1-3-3V12.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <div className="file-viewer-empty-title">
+                {m.openFileEmpty}
+              </div>
+              <div className="file-viewer-empty-hint">
+                {m.openFileEmptyHint}
+              </div>
+            </div>
+          )}
         </div>
 
         {treeCollapsed ? (

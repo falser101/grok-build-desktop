@@ -4095,24 +4095,7 @@ export function App() {
     : -1;
 
   const toggleRightPanel = useCallback(() => {
-    setRightPanelOpen((open) => {
-      if (open) return false;
-      // Opening: keep any existing tabs in place; if none are open yet,
-      // land on the Plan tab (matches the old `rightPanelTab = menu`
-      // behaviour by giving the user something concrete to interact
-      // with).
-      setActiveTabId((curr) => {
-        if (curr) return curr;
-        const existing = rightPanelTabsRef.current;
-        if (existing.length === 0) {
-          const id = newRightTabId();
-          setRightPanelTabs([{ id, kind: "plan" }]);
-          return id;
-        }
-        return existing[existing.length - 1].id;
-      });
-      return true;
-    });
+    setRightPanelOpen((open) => !open);
   }, []);
 
   const toggleSidebar = useCallback(() => {
@@ -6174,147 +6157,204 @@ export function App() {
             onDoubleClick={() => setRightPanelOpen(false)}
           />
           <div className="right-panel-body">
-            {/* Unified top tab bar — files, plan, terminal as one row. */}
-            <div
-              className="right-panel-tabs"
-              role="tablist"
-              aria-label={m.sidePanelToggle}
-            >
-              {/* File tabs first. */}
-              {rightPanelTabs
-                .filter((t) => t.kind === "files")
-                .map((tab) => {
-                  if (tab.kind !== "files") return null;
-                  const isActive = tab.id === activeTabId;
-                  const label = tab.path.split(/[/\\]/).pop() || tab.path;
-                  return renderTab(
-                    m,
-                    tab,
-                    label,
-                    isActive,
-                    () => setActiveTabId(tab.id),
-                    () => closeRightTab(tab.id),
-                  );
-                })}
-
-              {/* Then a separator and the tool tabs (Plan / Terminal). */}
-              {rightPanelTabs.some((t) => t.kind !== "files") ? (
-                <span className="right-panel-tab-sep" aria-hidden />
-              ) : null}
-              {rightPanelTabs
-                .filter((t) => t.kind !== "files")
-                .map((tab) => {
-                  const isActive = tab.id === activeTabId;
-                  const label =
-                    tab.kind === "plan" ? m.sidePanelPlan : m.sidePanelTerminal;
-                  return renderTab(
-                    m,
-                    tab,
-                    label,
-                    isActive,
-                    () => setActiveTabId(tab.id),
-                    () => closeRightTab(tab.id),
-                  );
-                })}
-
-              {/* `+` menu opens a fresh tab — file / plan / terminal. */}
-              <RightPanelPlusMenu
-                m={m}
-                onPickFiles={() => {
-                  setFileTreeCollapsed(false);
-                  requestAnimationFrame(() => {
-                    const input =
-                      document.querySelector<HTMLInputElement>(
-                        ".files-section-tree .file-tree-filter input",
-                      );
-                    input?.focus();
-                  });
-                }}
-                onPickPlan={openPlanTab}
-                onPickTerminal={() => openTerminalTab()}
-              />
-            </div>
-
-            {/* Body: render content based on the active tab. */}
-            <div className="right-panel-content">
-              {activeTab?.kind === "files" ? (
-                <FilesTabSection
-                  workspace={snap.workspace}
-                  m={m}
-                  activeFilePath={activeTab.path}
-                  treeCollapsed={fileTreeCollapsed}
-                  fileTreeWidth={panelLayout.fileTreeWidth}
-                  onClose={() => closeRightTab(activeTab.id)}
-                  onNewFile={openFile}
-                  onSetFileTreeCollapsed={setFileTreeCollapsed}
-                  onResizePointerDown={onResizePointerDown("filesTree")}
-                  onInsertMention={insertFileMention}
-                />
-              ) : null}
-              {activeTab?.kind === "plan" ? (
-                <PlanPanel
-                  todos={snap.todos ?? []}
-                  planContent={snap.planContent}
-                  pendingApproval={snap.pendingPlanApproval}
-                  sessionMode={snap.sessionMode}
-                  m={m}
-                  onClose={() => closeRightTab(activeTab.id)}
-                  onRespondApproval={respondPlanApproval}
-                  onRefreshPlan={refreshPlanContent}
-                />
-              ) : null}
-              {activeTab?.kind === "terminal" ? (
-                <TerminalPanel
-                  key={activeTab.id}
-                  workspace={snap.workspace}
-                  active={rightOpen}
-                  m={m}
-                  onLastTabClosed={() => closeRightTab(activeTab.id)}
-                  onOpenFile={() => openFile("")}
-                />
-              ) : null}
-              {/* No tab open — show the right-panel welcome. */}
-              {!activeTab ? (
-                <div className="right-panel-empty">
-                  <button
-                    type="button"
-                    className="right-panel-empty-cta"
-                    onClick={openPlanTab}
-                  >
-                    <span className="right-panel-empty-icon" aria-hidden>
-                      <svg width="22" height="22" viewBox="0 0 16 16" fill="none">
-                        <path
-                          d="M3.5 2.5h9A.5.5 0 0 1 13 3v10a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13V3a.5.5 0 0 1 .5-.5Z"
-                          stroke="currentColor"
-                          strokeWidth="1.2"
-                        />
-                      </svg>
-                    </span>
-                    <span>{m.sidePanelPlan}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="right-panel-empty-cta"
-                    onClick={() => openTerminalTab()}
-                  >
-                    <span className="right-panel-empty-icon" aria-hidden>
-                      <svg width="22" height="22" viewBox="0 0 16 16" fill="none">
-                        <rect
-                          x="2.5"
-                          y="3"
-                          width="11"
-                          height="10"
-                          rx="1.5"
-                          stroke="currentColor"
-                          strokeWidth="1.2"
-                        />
-                      </svg>
-                    </span>
-                    <span>{m.sidePanelTerminal}</span>
-                  </button>
+            {rightPanelTabs.length === 0 ? (
+              // Landing view: three entry cards. Picking one promotes
+              // the chosen tab into the unified bar above.
+              <div className="right-panel-landing" aria-label={m.sidePanelToggle}>
+                <div className="right-panel-landing-title">
+                  {m.sidePanelToggle}
                 </div>
-              ) : null}
-            </div>
+                <button
+                  type="button"
+                  className="right-panel-landing-cta"
+                  onClick={() => {
+                    // Promote a brand-new "files" tab into the bar with
+                    // an empty path. FilesTabSection renders the empty
+                    // state next to the file tree so the user can pick
+                    // a file immediately.
+                    openFile("");
+                    setFileTreeCollapsed(false);
+                  }}
+                >
+                  <span className="right-panel-landing-icon" aria-hidden>
+                    <svg width="22" height="22" viewBox="0 0 16 16" fill="none">
+                      <path
+                        d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.1 1.3h5.1A1.2 1.2 0 0 1 13.5 5.5v6.3a1.2 1.2 0 0 1-1.2 1.2H3.7a1.2 1.2 0 0 1-1.2-1.2V4.2Z"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="right-panel-landing-label">
+                    {m.sidePanelFiles}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="right-panel-landing-cta"
+                  onClick={() => {
+                    openPlanTab();
+                  }}
+                >
+                  <span className="right-panel-landing-icon" aria-hidden>
+                    <svg width="22" height="22" viewBox="0 0 16 16" fill="none">
+                      <path
+                        d="M3.5 2.5h9A.5.5 0 0 1 13 3v10a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 13V3a.5.5 0 0 1 .5-.5Z"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                      />
+                      <path
+                        d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="right-panel-landing-label">
+                    {m.sidePanelPlan}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="right-panel-landing-cta"
+                  onClick={() => {
+                    openTerminalTab();
+                  }}
+                >
+                  <span className="right-panel-landing-icon" aria-hidden>
+                    <svg width="22" height="22" viewBox="0 0 16 16" fill="none">
+                      <rect
+                        x="2.5"
+                        y="3"
+                        width="11"
+                        height="10"
+                        rx="1.5"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                      />
+                      <path
+                        d="M5 7.2 6.6 8.5 5 9.8M8.2 10.2h2.6"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="right-panel-landing-label">
+                    {m.sidePanelTerminal}
+                  </span>
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Tabbed view: top bar + content. */}
+                <div
+                  className="right-panel-tabs"
+                  role="tablist"
+                  aria-label={m.sidePanelToggle}
+                >
+                  {/* File tabs first. */}
+                  {rightPanelTabs
+                    .filter((t) => t.kind === "files")
+                    .map((tab) => {
+                      if (tab.kind !== "files") return null;
+                      const isActive = tab.id === activeTabId;
+                      const label = tab.path
+                        ? tab.path.split(/[/\\]/).pop() || tab.path
+                        : m.openFileTitle;
+                      return renderTab(
+                        m,
+                        tab,
+                        label,
+                        isActive,
+                        () => setActiveTabId(tab.id),
+                        () => closeRightTab(tab.id),
+                      );
+                    })}
+
+                  {/* Then a separator and the tool tabs (Plan / Terminal). */}
+                  {rightPanelTabs.some((t) => t.kind !== "files") ? (
+                    <span className="right-panel-tab-sep" aria-hidden />
+                  ) : null}
+                  {rightPanelTabs
+                    .filter((t) => t.kind !== "files")
+                    .map((tab) => {
+                      const isActive = tab.id === activeTabId;
+                      const label =
+                        tab.kind === "plan"
+                          ? m.sidePanelPlan
+                          : m.sidePanelTerminal;
+                      return renderTab(
+                        m,
+                        tab,
+                        label,
+                        isActive,
+                        () => setActiveTabId(tab.id),
+                        () => closeRightTab(tab.id),
+                      );
+                    })}
+
+                  {/* `+` menu opens a fresh tab — file / plan / terminal. */}
+                  <RightPanelPlusMenu
+                    m={m}
+                    onPickFiles={() => {
+                      setFileTreeCollapsed(false);
+                      requestAnimationFrame(() => {
+                        const input =
+                          document.querySelector<HTMLInputElement>(
+                            ".files-section-tree .file-tree-filter input",
+                          );
+                        input?.focus();
+                      });
+                    }}
+                    onPickPlan={openPlanTab}
+                    onPickTerminal={() => openTerminalTab()}
+                  />
+                </div>
+
+                <div className="right-panel-content">
+                  {activeTab?.kind === "files" ? (
+                    <FilesTabSection
+                      workspace={snap.workspace}
+                      m={m}
+                      activeFilePath={activeTab.path}
+                      treeCollapsed={fileTreeCollapsed}
+                      fileTreeWidth={panelLayout.fileTreeWidth}
+                      onClose={() => closeRightTab(activeTab.id)}
+                      onNewFile={openFile}
+                      onSetFileTreeCollapsed={setFileTreeCollapsed}
+                      onResizePointerDown={onResizePointerDown("filesTree")}
+                      onInsertMention={insertFileMention}
+                    />
+                  ) : null}
+                  {activeTab?.kind === "plan" ? (
+                    <PlanPanel
+                      todos={snap.todos ?? []}
+                      planContent={snap.planContent}
+                      pendingApproval={snap.pendingPlanApproval}
+                      sessionMode={snap.sessionMode}
+                      m={m}
+                      onClose={() => closeRightTab(activeTab.id)}
+                      onRespondApproval={respondPlanApproval}
+                      onRefreshPlan={refreshPlanContent}
+                    />
+                  ) : null}
+                  {activeTab?.kind === "terminal" ? (
+                    <TerminalPanel
+                      key={activeTab.id}
+                      workspace={snap.workspace}
+                      active={rightOpen}
+                      m={m}
+                      onLastTabClosed={() => closeRightTab(activeTab.id)}
+                      onOpenFile={() => openFile("")}
+                    />
+                  ) : null}
+                </div>
+              </>
+            )}
           </div>
         </aside>
       ) : null}
