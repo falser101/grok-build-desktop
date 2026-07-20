@@ -5339,33 +5339,60 @@ html[data-theme="light"] .icon-btn.send {
   background: var(--bg);
 }
 
-/* Empty-state hint shown when the right panel has no active tab. */
-.right-panel-empty-hint {
+/* Landing — shown when the right panel has no tabs yet. */
+.right-panel-landing {
   flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 32px 20px;
-  color: var(--text-dim);
-  text-align: center;
+  gap: 10px;
+  padding: 16px 14px;
+  background: var(--bg);
+  overflow: auto;
 }
-.right-panel-empty-icon {
+.right-panel-landing-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--text-dim);
-  opacity: 0.7;
-  margin-bottom: 4px;
+  padding: 4px 8px 6px;
 }
-.right-panel-empty-title {
+.right-panel-landing-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  color: var(--text);
   font-size: 14px;
-  font-weight: 560;
-  color: var(--text-muted);
+  font-weight: 550;
+  cursor: pointer;
+  text-align: left;
 }
-.right-panel-empty-hint-text {
-  font-size: 12.5px;
+.right-panel-landing-cta:hover {
+  background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--accent, #5b8def) 35%, var(--border));
+}
+.right-panel-landing-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent, #5b8def);
+  margin-bottom: 2px;
+}
+.right-panel-landing-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.right-panel-landing-hint {
+  font-size: 12px;
+  font-weight: 400;
   color: var(--text-dim);
-  line-height: 1.45;
-  max-width: 240px;
+  line-height: 1.35;
 }
 
 .right-panel-placeholder {
@@ -6824,15 +6851,15 @@ html[data-theme="light"] .icon-btn.send {
 
 .files-section-tree {
   flex: 0 0 auto;
-  min-width: 0;
+  /* Width is set inline as % of the files body; keep a readable floor. */
+  min-width: 160px;
+  max-width: 70%;
   display: flex;
   flex-direction: column;
+  height: 100%;
   background: var(--bg-sidebar);
   border-left: 1px solid var(--border);
-  /* Override inline width passed by App via JS. */
-  width: var(--files-tree-w, 38%) !important;
-  /* But keep a floor — never collapse the filter input. */
-  min-width: 180px;
+  overflow: hidden;
 }
 
 .files-section-tree .file-tree {

@@ -108,7 +108,11 @@ function FilesTabSectionInner({
             />
             <div
               className="files-section-tree"
-              style={{ width: `calc(${fileTreeWidth}% - 6px)` }}
+              style={{
+                // % of the files body width (parent flex row).
+                flex: `0 0 ${Math.max(fileTreeWidth, 28)}%`,
+                width: `${Math.max(fileTreeWidth, 28)}%`,
+              }}
             >
               <FileTree
                 workspace={workspace}
