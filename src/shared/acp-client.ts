@@ -17,6 +17,24 @@ export type JsonRpcMessage = {
   error?: { code: number; message: string; data?: JsonValue };
 };
 
+/**
+ * Sentinel returned by `request()` when a long-running call (e.g.
+ * `session/prompt`) hits its client-side timeout but the server has already
+ * started streaming `session/update` notifications for the same session.
+ *
+ * Without this, callers would treat a benign timing artefact as a real
+ * RPC failure and surface it as a red error banner — even though the
+ * turn is still progressing via the notification stream.
+ */
+export const ABSORBED_BY_STREAM = Symbol.for(
+  "grok-desktop/acp/absorbed-by-stream",
+);
+export type AbsorbedByStream = typeof ABSORBED_BY_STREAM;
+
+export function isAbsorbedByStream(value: unknown): boolean {
+  return value === ABSORBED_BY_STREAM;
+}
+
 export type AcpClientHandlers = {
   onNotification?: (method: string, params: JsonValue | undefined) => void;
   onRequest?: (
@@ -72,10 +90,16 @@ export class AcpClient {
   private pending = new Map<
     number | string,
     {
-      resolve: (value: JsonValue) => void;
+      resolve: (value: JsonValue | AbsorbedByStream) => void;
       reject: (err: Error) => void;
+      /** sessionId extracted from request params, if any — used to detect
+       *  "stream already in progress" before timing out. */
+      sessionId?: string;
     }
   >();
+  /** Session ids for which we have already seen at least one
+   *  `session/update` notification since the WS was opened. */
+  private activeStreamSessions = new Set<string>();
   private handlers: AcpClientHandlers;
 
   constructor(handlers: AcpClientHandlers = {}) {
@@ -84,6 +108,19 @@ export class AcpClient {
 
   get connected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  /** Has a `session/update` notification already arrived for this session?
+   *  Used by long-running RPCs (e.g. `session/prompt`) to avoid reporting
+   *  a client-side timeout as a real error when the agent is still streaming. */
+  hasStreamStarted(sessionId: string | undefined): boolean {
+    if (!sessionId) return false;
+    return this.activeStreamSessions.has(sessionId);
+  }
+
+  /** Forget all "stream has started" markers — typically called on WS close. */
+  resetStreamTracker(): void {
+    this.activeStreamSessions.clear();
   }
 
   connect(url: string): Promise<void> {
@@ -122,6 +159,7 @@ export class AcpClient {
           p.reject(new Error(`WebSocket closed (${code}): ${reason}`));
         }
         this.pending.clear();
+        this.activeStreamSessions.clear();
         this.handlers.onClose?.(code, reason);
       });
     });
@@ -142,11 +180,15 @@ export class AcpClient {
     method: string,
     params?: JsonValue,
     timeoutMs = 120_000,
-  ): Promise<JsonValue> {
+  ): Promise<JsonValue | AbsorbedByStream> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("ACP client is not connected");
     }
     const id = this.nextId++;
+    // Best-effort sessionId extraction. Only JSON-object params with a
+    // string `sessionId` field are considered; everything else is treated
+    // as "no stream context" and times out the normal way.
+    const sessionId = extractSessionId(params);
     const payload = {
       jsonrpc: "2.0" as const,
       id,
@@ -154,9 +196,16 @@ export class AcpClient {
       params: params ?? {},
     };
 
-    return new Promise((resolve, reject) => {
+    return new Promise<JsonValue | AbsorbedByStream>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        // If a `session/update` stream for this session has already started
+        // (typical for long-running `session/prompt`), the agent is alive
+        // and still working — don't surface this as an error.
+        if (this.hasStreamStarted(sessionId)) {
+          resolve(ABSORBED_BY_STREAM);
+          return;
+        }
         reject(new Error(`ACP request timed out: ${method}`));
       }, timeoutMs);
 
@@ -169,6 +218,7 @@ export class AcpClient {
           clearTimeout(timer);
           reject(err);
         },
+        sessionId,
       });
 
       this.ws!.send(JSON.stringify(payload));
@@ -258,7 +308,19 @@ export class AcpClient {
 
     // Notification (method, no id)
     if (msg.method) {
+      if (msg.method === "session/update") {
+        const sid = extractSessionId(msg.params);
+        if (sid) this.activeStreamSessions.add(sid);
+      }
       this.handlers.onNotification?.(msg.method, msg.params);
     }
   }
+}
+
+function extractSessionId(params: JsonValue | undefined): string | undefined {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return undefined;
+  }
+  const v = (params as Record<string, JsonValue>).sessionId;
+  return typeof v === "string" && v.length > 0 ? v : undefined;
 }

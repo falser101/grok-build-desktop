@@ -5,7 +5,11 @@ import { access, readFile, readdir, stat } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { basename, relative, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
-import { AcpClient, type JsonValue } from "../shared/acp-client";
+import {
+  AcpClient,
+  isAbsorbedByStream,
+  type JsonValue,
+} from "../shared/acp-client";
 import {
   readAlwaysApproveFromConfig,
   readAutoTrustNewSessionsFromConfig,
@@ -199,7 +203,7 @@ function parsePlanEntries(raw: JsonValue | undefined): TodoItemUi[] {
   return out;
 }
 
-function asRecord(v: JsonValue | undefined): Record<string, JsonValue> | null {
+function asRecord(v: unknown): Record<string, JsonValue> | null {
   if (v && typeof v === "object" && !Array.isArray(v)) {
     return v as Record<string, JsonValue>;
   }
@@ -243,7 +247,7 @@ function usageLabelFromPeriodType(periodType?: string): string {
 }
 
 /** Map `x.ai/billing` response into UI-friendly UsageInfo. */
-function parseBillingUsage(raw: JsonValue): UsageInfo {
+function parseBillingUsage(raw: unknown): UsageInfo {
   const root = asRecord(raw) ?? {};
   // Some wires wrap as { result: {...} }
   const body = asRecord(root.result as JsonValue) ?? root;
@@ -336,7 +340,7 @@ function parseBillingUsage(raw: JsonValue): UsageInfo {
   };
 }
 
-function mergeAutoTopup(usage: UsageInfo, raw: JsonValue): UsageInfo {
+function mergeAutoTopup(usage: UsageInfo, raw: unknown): UsageInfo {
   const root = asRecord(raw) ?? {};
   const body = asRecord(root.result as JsonValue) ?? root;
   const rule = asRecord(body.rule as JsonValue);
@@ -588,7 +592,7 @@ function projectName(cwd: string): string {
 }
 
 function parseAvailableCommands(
-  val: JsonValue | undefined,
+  val: unknown,
 ): AvailableCommand[] {
   if (!Array.isArray(val)) return [];
   const out: AvailableCommand[] = [];
@@ -2471,7 +2475,7 @@ export class AgentBackend {
     path: string,
     params: Record<string, JsonValue> = {},
     timeoutMs = 60_000,
-  ): Promise<JsonValue> {
+  ): Promise<JsonValue | typeof import("../shared/acp-client").ABSORBED_BY_STREAM> {
     const client = this.requireClient();
     const methods = [`_x.ai/${path}`, `x.ai/${path}`] as const;
     let lastErr: Error | undefined;
@@ -4158,21 +4162,36 @@ export class AgentBackend {
     }
 
     try {
-      const promptResult = asRecord(
-        await client.request(
-          "session/prompt",
-          {
-            sessionId: promptSessionId,
-            prompt,
-          },
-          600_000,
-        ),
+      const promptResult = await client.request(
+        "session/prompt",
+        {
+          sessionId: promptSessionId,
+          prompt,
+        },
+        600_000,
       );
+      // Client-side timeout fired but the agent is already streaming
+      // `session/update` for this session — the RPC is still in flight
+      // and the turn is progressing. Treat as a successful no-result
+      // response: do nothing visible, just log so we can spot bad agents.
+      if (isAbsorbedByStream(promptResult)) {
+        applyToPromptSession(() => {
+          if (isManualCompact && this.compacting) {
+            this.finishCompact("completed", { mode: "manual" });
+          }
+        });
+        this.log(
+          "info",
+          `session/prompt result not received in time; absorbed by stream for ${promptSessionId}`,
+        );
+        return;
+      }
+      const promptResultRecord = asRecord(promptResult);
       applyToPromptSession(() => {
         // Some agents stamp final context usage on the prompt response `_meta`.
         this.noteTokensFromMeta(
-          asRecord(promptResult?._meta as JsonValue) ??
-            asRecord(promptResult?.meta as JsonValue),
+          asRecord(promptResultRecord?._meta as JsonValue) ??
+            asRecord(promptResultRecord?.meta as JsonValue),
         );
         // If agent finished compact without a completion event, close the card.
         if (isManualCompact && this.compacting) {
