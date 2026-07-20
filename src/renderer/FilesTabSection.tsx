@@ -4,99 +4,85 @@ import type { Messages } from "./i18n";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
 
-/**
- * One tab in the file tab bar.
- */
-export interface OpenFileTab {
-  /** Stable React key + IPC identity. */
-  id: string;
-  /** Absolute path on disk. */
-  path: string;
-}
-
 interface FilesTabSectionProps {
   workspace: string | undefined;
   m: Messages;
-  openFiles: OpenFileTab[];
-  activeFileId: string | null;
-  /** Derived — absolute path of the active tab, or null when no tab is open. */
-  activeFilePath: string | null;
+  /** Absolute path of the file currently displayed in the editor pane. */
+  activeFilePath: string;
   /** True when the inline file-tree pane is folded to its narrow rail. */
   treeCollapsed: boolean;
   /** Width of the tree pane in % of the right panel's inner width. */
   fileTreeWidth: number;
-  onActivate: (id: string) => void;
-  onClose: (id: string) => void;
-  /** Open (or activate) a path; called by `<FileTree>` and the "+" picker. */
+  /** Notify the host that the user wants to dismiss this file tab. */
+  onClose: () => void;
+  /** Called when the user picks a different path from the file tree. */
   onNewFile: (path: string) => void;
   onSetFileTreeCollapsed: (collapsed: boolean) => void;
   /** Drag-handle callback wired to the host's `onResizePointerDown`. */
-  onResizePointerDown: (
-    e: React.PointerEvent<HTMLDivElement>,
-  ) => void;
+  onResizePointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   onInsertMention?: (path: string) => void;
 }
 
 /**
- * Right-panel "files" tab body.
+ * Right-panel files section body — editor + tree layout.
  *
- * Layout (matches the user's reference screenshot):
+ * The top tab bar (file tabs + Plan + Terminal + `+`) is owned by the
+ * shell because tab state is unified across files/plan/terminal. This
+ * component only renders whichever file the active tab points at and
+ * the inline collapsible file tree next to it.
  *
- *  ┌─ toolbar row ───────────────────────────────────────────────┐
- *  │ [Open file]  · breadcrumb · tabs · [+ ▾]  [open-in-editor▾] │
- *  └─────────────────────────────────────────────────────────────┘
- *  ┌─ editor pane ────────────────┬─ tree pane (collapsible) ───┐
- *  │ <FileViewer> or empty state  │ <FileTree> or rail icon   │
- *  └─────────────────────────────┴─────────────────────────────┘
- *
- * Resize handle between the two inner panes; tree can fold to a thin
- * vertical rail (single toggle button) when the user wants the file
- * previews to take the full right-panel width.
+ *   ┌─ editor pane ────────────┬─ tree pane (collapsible) ─┐
+ *   │ <FileViewer>             │ <FileTree>              │
+ *   └──────────────────────────┴─────────────────────────┘
  */
 function FilesTabSectionInner({
   workspace,
   m,
-  openFiles,
-  activeFileId,
   activeFilePath,
   treeCollapsed,
   fileTreeWidth,
-  onActivate,
   onClose,
   onNewFile,
   onSetFileTreeCollapsed,
   onResizePointerDown,
   onInsertMention,
 }: FilesTabSectionProps) {
-  /** True when the open-in-editor dropdown is open. */
-  const [editorMenuOpen, setEditorMenuOpen] = useState(false);
-  /** True when the "+" menu is open (Pick from workspace / New file / Close panel). */
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const editorMenuRef = useRef<HTMLDivElement | null>(null);
-  const addMenuRef = useRef<HTMLDivElement | null>(null);
-
-  /**
-   * Available editors. Cached for the lifetime of this component —
-   * Phase 1 has the main side report every editor as `available: true`
-   * so we just sort by a fixed display order.
-   */
+  /** Available editors — fetched once on mount. */
   const [editors, setEditors] = useState<ExternalEditorDescriptor[]>([]);
+  const [editorMenuOpen, setEditorMenuOpen] = useState(false);
+  const editorMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void window.desktop.listExternalEditors().then((list) => {
-      if (!cancelled) {
-        setEditors(list);
-      }
+      if (!cancelled) setEditors(list);
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Map editor id → i18n label key. We do the translation in the renderer
-  // because the i18n table already lives here, even though the editor
-  // catalogue itself ships from the main process.
+  useEffect(() => {
+    if (!editorMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (
+        editorMenuRef.current &&
+        !editorMenuRef.current.contains(e.target as Node)
+      ) {
+        setEditorMenuOpen(false);
+      }
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setEditorMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [editorMenuOpen]);
+
   const editorLabel = useCallback(
     (id: string): string => {
       switch (id) {
@@ -121,44 +107,12 @@ function FilesTabSectionInner({
     [m],
   );
 
-  // Outside-click + Escape close for both dropdowns.
-  useEffect(() => {
-    if (!editorMenuOpen && !addMenuOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (
-        editorMenuOpen &&
-        editorMenuRef.current &&
-        !editorMenuRef.current.contains(t)
-      ) {
-        setEditorMenuOpen(false);
-      }
-      if (
-        addMenuOpen &&
-        addMenuRef.current &&
-        !addMenuRef.current.contains(t)
-      ) {
-        setAddMenuOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (editorMenuOpen) setEditorMenuOpen(false);
-        if (addMenuOpen) setAddMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [editorMenuOpen, addMenuOpen]);
-
   const breadcrumb = useMemo(() => {
-    if (!activeFilePath) return "";
-    if (workspace && activeFilePath.startsWith(workspace)) {
-      const tail = activeFilePath.slice(workspace.length).replace(/^[/\\]/, "");
+    if (!workspace) return activeFilePath;
+    if (activeFilePath.startsWith(workspace)) {
+      const tail = activeFilePath
+        .slice(workspace.length)
+        .replace(/^[/\\]/, "");
       if (tail) return tail;
     }
     return activeFilePath;
@@ -168,153 +122,26 @@ function FilesTabSectionInner({
     (id: string) => {
       setEditorMenuOpen(false);
       if (!activeFilePath) return;
-      void window.desktop.openInEditor(id, activeFilePath).catch((err) => {
-        // eslint-disable-next-line no-console
-        console.error("[files] openInEditor failed:", err);
-      });
+      void window.desktop
+        .openInEditor(id, activeFilePath)
+        .catch((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.error("[files] openInEditor failed:", err);
+        });
     },
     [activeFilePath],
   );
 
   return (
     <div className="files-section-root">
-      {/* Top toolbar row: file-open button · breadcrumb · tabs · [+ ▾] · open-in-editor ▾ · tree-toggle */}
+      {/* Toolbar: breadcrumb · open-in-editor · tree toggle */}
       <header className="files-section-toolbar">
-        <button
-          type="button"
-          className="files-section-open-btn"
-          title={m.filesOpenFileTooltip}
-          aria-label={m.filesOpenFileTooltip}
-          onClick={() => {
-            // Clicking the "open file" affordance opens the "+" menu —
-            // the underlying picker either opens the tree or the new-file
-            // input, depending on which entry the user picks.
-            setAddMenuOpen((v) => !v);
-          }}
-        >
-          <span className="files-section-open-icon" aria-hidden>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.1 1.3h5.1A1.2 1.2 0 0 1 13.5 5.5v6.3a1.2 1.2 0 0 1-1.2 1.2H3.7a1.2 1.2 0 0 1-1.2-1.2V4.2Z"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
-          <span className="files-section-open-label">
-            {m.openFileTitle}
-          </span>
-        </button>
-
-        <span className="files-section-breadcrumb" title={activeFilePath ?? ""}>
+        <span className="files-section-breadcrumb" title={activeFilePath}>
           {breadcrumb}
         </span>
-
-        <div className="files-section-tabs">
-          {openFiles.map((f) => {
-            const isActive = f.id === activeFileId;
-            const name = f.path.split(/[/\\]/).pop() || f.path;
-            return (
-              <div
-                key={f.id}
-                className={"files-tab" + (isActive ? " active" : "")}
-                onClick={() => onActivate(f.id)}
-                role="tab"
-                aria-selected={isActive}
-                title={f.path}
-              >
-                <span className="files-tab-name">{name}</span>
-                <button
-                  type="button"
-                  className="files-tab-close"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onClose(f.id);
-                  }}
-                  title={m.filesCloseTabTooltip}
-                  aria-label={m.filesCloseTabTooltip}
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="files-section-add-wrap" ref={addMenuRef}>
-          <button
-            type="button"
-            className="files-section-add"
-            onClick={() => setAddMenuOpen((v) => !v)}
-            title={m.termNewTab}
-            aria-haspopup="menu"
-            aria-expanded={addMenuOpen}
-          >
-            +
-          </button>
-          {addMenuOpen ? (
-            <div className="dropdown" role="menu">
-              <button
-                type="button"
-                className="dropdown-item"
-                role="menuitem"
-                onClick={() => {
-                  setAddMenuOpen(false);
-                  // The user already has the file tree visible on the
-                  // right side of this section — focus the filter input
-                  // so they can start typing a path right away.
-                  const input = document.querySelector<HTMLInputElement>(
-                    ".files-section-tree .file-tree-filter input",
-                  );
-                  input?.focus();
-                }}
-              >
-                {m.filesPickFromWorkspace}
-              </button>
-              <button
-                type="button"
-                className="dropdown-item"
-                role="menuitem"
-                onClick={() => {
-                  setAddMenuOpen(false);
-                  // Phase 1: defer the "new file" flow to the next patch —
-                  // for now the user can use the tree picker above. We
-                  // still wire the menu entry so the affordance exists.
-                  const input =
-                    document.querySelector<HTMLInputElement>(
-                      ".files-section-tree .file-tree-filter input",
-                    );
-                  input?.focus();
-                }}
-              >
-                {m.filesNewFile}
-              </button>
-              <button
-                type="button"
-                className="dropdown-item"
-                role="menuitem"
-                onClick={() => {
-                  setAddMenuOpen(false);
-                  // Close the entire right panel.
-                  const rightBtn = document.querySelector<HTMLButtonElement>(
-                    ".shell > .chat-side-toggle",
-                  );
-                  rightBtn?.click();
-                }}
-              >
-                {m.filesClosePanel}
-              </button>
-            </div>
-          ) : null}
-        </div>
-
         <div className="files-section-divider" aria-hidden />
 
-        <div
-          className="files-section-editor-wrap"
-          ref={editorMenuRef}
-        >
+        <div className="files-section-editor-wrap" ref={editorMenuRef}>
           <button
             type="button"
             className="files-section-editor-btn"
@@ -325,21 +152,23 @@ function FilesTabSectionInner({
             aria-expanded={editorMenuOpen}
             disabled={!activeFilePath}
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-              <path
-                d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.1 1.3h5.1A1.2 1.2 0 0 1 13.5 5.5v6.3a1.2 1.2 0 0 1-1.2 1.2H3.7a1.2 1.2 0 0 1-1.2-1.2V4.2Z"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinejoin="round"
-              />
-              <path
-                d="m6 8.5 1.2 1.2L6 10.9"
-                stroke="currentColor"
-                strokeWidth="1.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <span className="files-section-editor-icon" aria-hidden>
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M2.5 4.2A1.2 1.2 0 0 1 3.7 3h2.4l1.1 1.3h5.1A1.2 1.2 0 0 1 13.5 5.5v6.3a1.2 1.2 0 0 1-1.2 1.2H3.7a1.2 1.2 0 0 1-1.2-1.2V4.2Z"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="m6 8.5 1.2 1.2L6 10.9"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
             <span>open</span>
           </button>
           {editorMenuOpen ? (
@@ -356,7 +185,9 @@ function FilesTabSectionInner({
                 </button>
               ))}
               {editors.length === 0 ? (
-                <div className="dropdown-empty">{m.filesOpenInEditorTooltip}</div>
+                <div className="dropdown-empty">
+                  {m.filesOpenInEditorTooltip}
+                </div>
               ) : null}
             </div>
           ) : null}
@@ -381,36 +212,16 @@ function FilesTabSectionInner({
         </button>
       </header>
 
-      {/* Body: editor pane (flex) + tree pane (fixed-width; min 28px when collapsed) */}
+      {/* Body: editor + (optional) collapsible tree. */}
       <div className="files-section-body">
         <div className="files-section-editor">
-          {activeFilePath ? (
-            <FileViewer
-              key={activeFilePath}
-              path={activeFilePath}
-              m={m}
-              onClose={() => {
-                const active = openFiles.find((f) => f.id === activeFileId);
-                if (active) onClose(active.id);
-              }}
-              onInsertMention={onInsertMention}
-            />
-          ) : (
-            <div className="file-viewer-empty-state">
-              <div className="file-viewer-empty-icon" aria-hidden>
-                <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-                  <path
-                    d="M8 12.5A3 3 0 0 1 11 9.5h6l2.5 3H29a3 3 0 0 1 3 3V28a3 3 0 0 1-3 3H11a3 3 0 0 1-3-3V12.5Z"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              <div className="file-viewer-empty-title">{m.openFileEmpty}</div>
-              <div className="file-viewer-empty-hint">{m.openFileEmptyHint}</div>
-            </div>
-          )}
+          <FileViewer
+            key={activeFilePath}
+            path={activeFilePath}
+            m={m}
+            onClose={onClose}
+            onInsertMention={onInsertMention}
+          />
         </div>
 
         {treeCollapsed ? (
@@ -444,7 +255,7 @@ function FilesTabSectionInner({
             />
             <div
               className="files-section-tree"
-              style={{ width: `${Math.max(fileTreeWidth, FILE_TREE_MIN_VIEW)}%` }}
+              style={{ width: `calc(${fileTreeWidth}% - 6px)` }}
             >
               <FileTree
                 workspace={workspace}
@@ -462,10 +273,9 @@ function FilesTabSectionInner({
 }
 
 /**
- * Minimum visual width of the tree pane when fully expanded. We don't
- * block the underlying drag below this — the layout effect still updates
- * `fileTreeWidth` even when it dips, but the CSS floor keeps the column
- * from collapsing so low that the user loses the filter input.
+ * Visual floor for the tree pane — sized in % of the right-panel inner
+ * width so the user can never drag the split handle all the way through
+ * the filter input. The JS state still records the actual drag value.
  */
 const FILE_TREE_MIN_VIEW = 22;
 
