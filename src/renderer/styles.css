@@ -260,12 +260,17 @@ body.is-resizing-panels .file-tree {
 }
 
 /* ── Resize handles ────────────────────────────────── */
+/*
+ * The visible divider line (::after) must sit on the same pixel as the
+ * panel border. The hit area is a wider transparent strip centered on
+ * that line (half inside the panel so overflow:hidden still leaves a
+ * grab zone).
+ */
 
 .resize-handle {
   position: absolute;
   top: 0;
   bottom: 0;
-  /* Wide hit target so the edge is easy to grab. */
   width: 10px;
   z-index: 20;
   cursor: col-resize;
@@ -278,9 +283,7 @@ body.is-resizing-panels .file-tree {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 50%;
   width: 1px;
-  transform: translateX(-50%);
   background: transparent;
   transition: background 0.12s, box-shadow 0.12s;
 }
@@ -291,17 +294,27 @@ body.is-resizing-panels .file-tree {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
-/*
- * Keep handles fully inside their panel so `overflow: hidden` on
- * `.sidebar` / `.right-panel` does not clip them (the old right:-3px /
- * left:-3px placement was half outside and often unhittable).
- */
+/* Sidebar right edge = border-right of .sidebar */
 .resize-handle-left {
   right: 0;
+  /* Hit strip mostly inside the sidebar */
+  width: 10px;
+}
+.resize-handle-left::after {
+  /* Overlay the sidebar's border-right */
+  right: 0;
+  left: auto;
 }
 
+/* Right panel left edge = border-left of .right-panel */
 .resize-handle-right {
   left: 0;
+  width: 10px;
+}
+.resize-handle-right::after {
+  /* Overlay the right-panel's border-left */
+  left: 0;
+  right: auto;
 }
 
 /* ── Sidebar ───────────────────────────────────────── */
@@ -6807,24 +6820,32 @@ html[data-theme="light"] .icon-btn.send {
   min-height: 0;
 }
 
+/* Editor | tree split: the handle IS the divider (no second border on tree). */
 .resize-handle-files-tree {
   position: relative;
-  flex: 0 0 6px;
-  width: 6px;
+  flex: 0 0 10px;
+  width: 10px;
+  margin-right: -5px; /* straddle into the tree so the line centers on the join */
+  z-index: 5;
   cursor: col-resize;
+  touch-action: none;
   background: transparent;
 }
 .resize-handle-files-tree::after {
   content: "";
   position: absolute;
-  left: 2.5px;
+  left: 50%;
   top: 0;
   bottom: 0;
   width: 1px;
+  transform: translateX(-50%);
   background: var(--border);
+  transition: background 0.12s, box-shadow 0.12s;
 }
-.resize-handle-files-tree:hover::after {
-  background: var(--accent, #5b8def);
+.resize-handle-files-tree:hover::after,
+.shell-resizing-filesTree .resize-handle-files-tree::after {
+  background: color-mix(in srgb, var(--accent, #5b8def) 70%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #5b8def) 25%, transparent);
 }
 
 .files-section-tree {
@@ -6836,7 +6857,8 @@ html[data-theme="light"] .icon-btn.send {
   flex-direction: column;
   height: 100%;
   background: var(--bg-sidebar);
-  border-left: 1px solid var(--border);
+  /* Divider is the resize handle, not a second border. */
+  border-left: none;
   overflow: hidden;
 }
 
