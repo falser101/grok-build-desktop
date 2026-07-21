@@ -18,6 +18,7 @@ import type {
   ModelProviderModel,
   ModelProviderPreset,
   ModelProviderRegion,
+  ReasoningEffortOption,
   UpsertProviderInput,
 } from "../shared/types";
 
@@ -396,8 +397,27 @@ function normalizeModel(
       typeof raw.contextWindow === "number" && raw.contextWindow > 0
         ? raw.contextWindow
         : undefined,
+    // Default every custom model to the 4 standard reasoning-effort
+    // levels (xhigh / high / medium / low). Users can opt out by
+    // setting this to an empty array from the editor.
+    reasoningEfforts:
+      raw.reasoningEfforts && Array.isArray(raw.reasoningEfforts)
+        ? raw.reasoningEfforts
+        : DEFAULT_REASONING_EFFORTS,
   };
 }
+
+/**
+ * Default reasoning-effort levels applied to every custom model when
+ * the user hasn't overridden them. Mirrors the DeepSeek V4 Pro
+ * (and most Chinese model APIs') standard menu.
+ */
+const DEFAULT_REASONING_EFFORTS: ReasoningEffortOption[] = [
+  { id: "xhigh", label: "Extra high", description: "Maximum reasoning" },
+  { id: "high", label: "High", description: "Heavy reasoning" },
+  { id: "medium", label: "Medium", description: "Balanced reasoning" },
+  { id: "low", label: "Low", description: "Faster, lighter reasoning" },
+];
 
 function normalizeProvider(raw: Partial<ModelProviderConfig>): ModelProviderConfig {
   const id = (raw.id || randomUUID()).trim();
@@ -497,6 +517,26 @@ function tomlInlineTable(obj: Record<string, string>): string {
   return `{ ${parts.join(", ")} }`;
 }
 
+/**
+ * Format one reasoning-effort entry as a TOML inline table for the
+ * `reasoning_efforts = [...]` array. Matches the CLI parser in
+ * `xai-grok-shell/src/agent/config.rs`:
+ *   - `value` is required (low / medium / high / xhigh / auto / off)
+ *   - `id`, `label`, `description`, `default` are optional
+ */
+function tomlReasoningEffort(opt: ReasoningEffortOption): string {
+  const parts: string[] = [`value = ${tomlString(opt.id)}`];
+  if (opt.id) parts.push(`id = ${tomlString(opt.id)}`);
+  parts.push(`label = ${tomlString(opt.label)}`);
+  if (opt.description) {
+    parts.push(`description = ${tomlString(opt.description)}`);
+  }
+  if ((opt as { default?: boolean }).default) {
+    parts.push(`default = true`);
+  }
+  return `{ ${parts.join(", ")} }`;
+}
+
 function buildModelSection(provider: ModelProviderConfig, model: ModelProviderModel): string {
   const lines: string[] = [];
   lines.push(`[model.${model.configKey}]`);
@@ -527,6 +567,16 @@ function buildModelSection(provider: ModelProviderConfig, model: ModelProviderMo
   }
   if (Object.keys(headers).length > 0) {
     lines.push(`extra_headers = ${tomlInlineTable(headers)}`);
+  }
+  // Reasoning-effort menu. Only emit when the model has an explicit
+  // list (the default fills all 4 standard levels for every custom
+  // model; users can override per-model or set to [] to hide the
+  // chip entirely).
+  if (Array.isArray(model.reasoningEfforts) && model.reasoningEfforts.length > 0) {
+    const items = model.reasoningEfforts
+      .map((e) => tomlReasoningEffort(e))
+      .join(", ");
+    lines.push(`reasoning_efforts = [${items}]`);
   }
   return lines.join("\n");
 }
@@ -572,7 +622,13 @@ export async function syncConfigToml(providers: ModelProviderConfig[]): Promise<
     if (!p.enabled) continue;
     for (const m of p.models) {
       if (!m.enabled) continue;
-      sections.push(buildModelSection(p, m));
+      // Apply reasoning-effort defaults at write time so every
+      // custom-model section in config.toml picks up the 4-level
+      // menu even when the store file predates this feature.
+      const model = m.reasoningEfforts !== undefined
+        ? m
+        : { ...m, reasoningEfforts: DEFAULT_REASONING_EFFORTS };
+      sections.push(buildModelSection(p, model));
     }
   }
 
@@ -600,7 +656,29 @@ export async function syncConfigToml(providers: ModelProviderConfig[]): Promise<
 
 export async function listProviders(): Promise<ModelProviderConfig[]> {
   const store = await readStore();
-  return store.providers;
+  // Backfill reasoningEfforts on models loaded from older store files
+  // so the UI composer always shows the reasoning-effort chip menu
+  // for every custom model (4 standard levels by default).
+  return store.providers.map(applyProviderReasoningDefaults);
+}
+
+/**
+ * Ensure every model in a provider carries the 4 standard reasoning-
+ * effort levels when no explicit list was persisted. Models that
+ * already have a list (even empty) are left unchanged so users can
+ * opt out by setting `reasoningEfforts: []`.
+ */
+function applyProviderReasoningDefaults(
+  p: ModelProviderConfig,
+): ModelProviderConfig {
+  return {
+    ...p,
+    models: p.models.map((m) =>
+      m.reasoningEfforts !== undefined
+        ? m
+        : { ...m, reasoningEfforts: DEFAULT_REASONING_EFFORTS },
+    ),
+  };
 }
 
 export async function getProvider(id: string): Promise<ModelProviderConfig | null> {

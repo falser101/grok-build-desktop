@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   type RefObject,
 } from "react";
 import type {
@@ -732,6 +733,36 @@ function msgDomId(id: string): string {
   return `msg-${id}`;
 }
 
+/** Split text on `@path` mentions and render them as clickable pills. */
+function renderAtMentions(
+  text: string,
+  onOpenAtFile?: (path: string) => void,
+): ReactNode {
+  const parts = text.split(/((?:^|\s)@[^\s@]+)/g);
+  return parts.map((part, i) => {
+    const m = part.match(/^(\s*)@(\S+)$/);
+    if (m) {
+      const [, space, path] = m;
+      return (
+        <span key={i}>
+          {space}
+          <span
+            className="at-file-link"
+            onClick={() => onOpenAtFile?.(path)}
+            title={path}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter") onOpenAtFile?.(path); }}
+          >
+            @{path}
+          </span>
+        </span>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
 /**
  * History Timeline layout constants. Ticks are short horizontal dashes
  * stacked at `MIN_STEP` pixels apart along the rail. When the resulting
@@ -866,10 +897,12 @@ const TimelineRow = memo(function TimelineRow({
   item,
   m,
   highlight,
+  onOpenAtFile,
 }: {
   item: TimelineItem;
   m: Messages;
   highlight?: boolean;
+  onOpenAtFile?: (path: string) => void;
 }) {
   if (item.kind === "system") {
     return <div className="system-line">{item.text}</div>;
@@ -883,7 +916,9 @@ const TimelineRow = memo(function TimelineRow({
         <div className="msg-bubble">
           {/* User messages skip the role label — the right-aligned bubble
              shape + accent color already identifies the speaker. */}
-          <div className="msg-body">{item.text}</div>
+          <div className="msg-body">
+            {renderAtMentions(item.text, onOpenAtFile)}
+          </div>
           <div className="msg-actions">
             <MsgCopyButton item={item} m={m} />
           </div>
@@ -903,6 +938,7 @@ const TimelineRow = memo(function TimelineRow({
             className="msg-body"
             text={item.text}
             streaming={item.streaming}
+            onOpenAtFile={onOpenAtFile}
           />
         </div>
       </div>
@@ -923,6 +959,7 @@ const TimelineRow = memo(function TimelineRow({
           className="thought-body"
           text={item.text}
           streaming={item.streaming}
+          onOpenAtFile={onOpenAtFile}
         />
       </details>
     );
@@ -1039,10 +1076,12 @@ const TurnGroupView = memo(function TurnGroupView({
   turn,
   m,
   highlight,
+  onOpenAtFile,
 }: {
   turn: TurnGroup;
   m: Messages;
   highlight: boolean;
+  onOpenAtFile?: (path: string) => void;
 }) {
   const isStreaming = Boolean(turn.assistant?.streaming);
   // Default: collapsed once the turn has settled. While streaming we keep
@@ -1105,6 +1144,7 @@ const TurnGroupView = memo(function TurnGroupView({
                     item={it}
                     m={m}
                     highlight={false}
+                    onOpenAtFile={onOpenAtFile}
                   />
                 ))}
               </div>
@@ -1150,7 +1190,7 @@ const TurnGroupView = memo(function TurnGroupView({
         {hasExtras && open ? (
           <div className="turn-group-extras-list">
             {turn.extras.map((it) => (
-              <TimelineRow key={it.id} item={it} m={m} highlight={false} />
+              <TimelineRow key={it.id} item={it} m={m} highlight={false} onOpenAtFile={onOpenAtFile} />
             ))}
           </div>
         ) : null}
@@ -1173,6 +1213,7 @@ const ChatTimeline = memo(function ChatTimeline({
   busy,
   m,
   bottomRef,
+  onOpenAtFile,
 }: {
   timeline: TimelineItem[];
   replaying: boolean;
@@ -1180,6 +1221,7 @@ const ChatTimeline = memo(function ChatTimeline({
   busy: boolean;
   m: Messages;
   bottomRef: RefObject<HTMLDivElement | null>;
+  onOpenAtFile?: (path: string) => void;
 }) {
   // During cold session load, skip mounting partial history (avoids N× markdown
   // re-parses). Backend holds emits until replay finishes; this is a safety net.
@@ -1208,6 +1250,7 @@ const ChatTimeline = memo(function ChatTimeline({
             item={seg.item}
             m={m}
             highlight={flashMsgId === seg.item.id}
+            onOpenAtFile={onOpenAtFile}
           />
         ) : (
           <TurnGroupView
@@ -1215,6 +1258,7 @@ const ChatTimeline = memo(function ChatTimeline({
             turn={seg.turn}
             m={m}
             highlight={flashMsgId === seg.turn.id}
+            onOpenAtFile={onOpenAtFile}
           />
         ),
       )}
@@ -1487,6 +1531,46 @@ function useGlobalMenuAccelerators(opts: {
   }, []);
 }
 
+/** A detected @-mention span in the composer text. */
+interface AtMentionSpan {
+  start: number;
+  end: number;
+  path: string;
+}
+
+function findAtMentionSpans(text: string): AtMentionSpan[] {
+  const spans: AtMentionSpan[] = [];
+  const re = /(?:^|[\s\n])@([^\s@]+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    spans.push({
+      start: m.index + (m[0].startsWith("@") ? 0 : 1),
+      end: m.index + m[0].length,
+      path: m[1],
+    });
+  }
+  return spans;
+}
+
+/** Split text into segments, wrapping @-mentions in styled pills. */
+function renderComposerOverlay(text: string): ReactNode {
+  const spans = findAtMentionSpans(text);
+  if (spans.length === 0) return text;
+  const parts: ReactNode[] = [];
+  let last = 0;
+  for (const s of spans) {
+    if (s.start > last) parts.push(text.slice(last, s.start));
+    parts.push(
+      <span key={s.start} className="composer-at-pill" data-path={s.path}>
+        @{s.path}
+      </span>,
+    );
+    last = s.end;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
 export function App() {
   const { messages: m } = usePrefs();
   const [snap, setSnap] = useState<AppSnapshot>(initial);
@@ -1665,6 +1749,7 @@ export function App() {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const prevSessionIdRef = useRef<string | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const contentEditableRef = useRef<HTMLDivElement | null>(null);
   const selectsRef = useRef<HTMLDivElement | null>(null);
   const wsMenuRef = useRef<HTMLDivElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
@@ -1722,30 +1807,34 @@ export function App() {
   const openFilePathRef = useRef(openFilePath);
   openFilePathRef.current = openFilePath;
 
+  const handleOpenAtFile = useCallback(
+    (path: string) => {
+      const existing =
+        path
+          ? rightPanelTabsRef.current.find(
+              (t) => t.kind === "files" && t.path === path,
+            )
+          : undefined;
+      if (existing) {
+        setActiveTabId(existing.id);
+      } else {
+        const id = newRightTabId();
+        setRightPanelTabs((prev) => [...prev, { id, kind: "files", path }]);
+        setActiveTabId(id);
+      }
+      setRightPanelOpen(true);
+      setFileTreeCollapsed(false);
+    },
+    [],
+  );
+
   /**
    * Open a brand-new files tab (used by the `+` menu). Always selects
    * the resulting tab. Does NOT replace the active tab's path in place.
    */
   const openFile = useCallback((path: string) => {
-    // Resolve id first so we can activate outside of the setState updater
-    // (calling setActiveTabId inside a setRightPanelTabs updater is racy
-    // and can leave the previous tab selected).
-    const existing =
-      path
-        ? rightPanelTabsRef.current.find(
-            (t) => t.kind === "files" && t.path === path,
-          )
-        : undefined;
-    if (existing) {
-      setActiveTabId(existing.id);
-    } else {
-      const id = newRightTabId();
-      setRightPanelTabs((prev) => [...prev, { id, kind: "files", path }]);
-      setActiveTabId(id);
-    }
-    setRightPanelOpen(true);
-    setFileTreeCollapsed(false);
-  }, []);
+    handleOpenAtFile(path);
+  }, [handleOpenAtFile]);
 
   /**
    * Select a file inside the currently active files tab — updates that
@@ -2676,6 +2765,29 @@ export function App() {
     };
   }, [wsMenuOpen]);
 
+  // Close @-mention dropdown on outside click or Escape.
+  useEffect(() => {
+    if (!atSuggest || atSuggest.length === 0) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (atListRef.current && !atListRef.current.contains(t)) {
+        setAtSuggest(null);
+      }
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setAtSuggest(null);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [atSuggest]);
+
   // Close the top-of-chat overflow menu on outside click or Escape.
   // Capture-phase pointerdown so nested stopPropagation (composer, timeline
   // rail, etc.) cannot swallow the event; defer attach so the opening click
@@ -2844,7 +2956,7 @@ export function App() {
     });
     try {
       await window.desktop.prepareNewChat();
-      textareaRef.current?.focus();
+      contentEditableRef.current?.focus();
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
@@ -2945,7 +3057,7 @@ export function App() {
     setWsMenuOpen(false);
     try {
       await window.desktop.newSession(cwd);
-      textareaRef.current?.focus();
+      contentEditableRef.current?.focus();
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
@@ -2957,7 +3069,7 @@ export function App() {
     setWsMenuOpen(false);
     try {
       await window.desktop.newSession(cwd);
-      textareaRef.current?.focus();
+      contentEditableRef.current?.focus();
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
@@ -3040,7 +3152,7 @@ export function App() {
     setView("chat");
     try {
       await window.desktop.forkSession(session.sessionId, session.cwd);
-      textareaRef.current?.focus();
+      contentEditableRef.current?.focus();
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
@@ -3136,6 +3248,8 @@ export function App() {
       el.value = "";
       el.style.height = "auto";
     }
+    const ce = contentEditableRef.current;
+    if (ce) ce.textContent = "";
   }, []);
 
   const setComposerText = useCallback((next: string) => {
@@ -3147,6 +3261,69 @@ export function App() {
       el.style.height = "auto";
       el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     }
+    // Also update the visible contenteditable with pill rendering.
+    const ce = contentEditableRef.current;
+    if (ce) renderContentEditable(ce, next);
+  }, []);
+
+  /** Render text into a contenteditable div, replacing @mentions with
+   *  styled `<span contenteditable="false">` pills. */
+  function renderContentEditable(el: HTMLElement, text: string) {
+    const spans = findAtMentionSpans(text);
+    if (spans.length === 0) {
+      el.textContent = text;
+      return;
+    }
+    el.innerHTML = "";
+    let last = 0;
+    for (const s of spans) {
+      if (s.start > last) {
+        el.appendChild(document.createTextNode(text.slice(last, s.start)));
+      }
+      const pill = document.createElement("span");
+      pill.className = "composer-at-pill";
+      pill.contentEditable = "false";
+      pill.textContent = `@${s.path}`;
+      pill.setAttribute("data-path", s.path);
+      el.appendChild(pill);
+      last = s.end;
+    }
+    if (last < text.length) {
+      el.appendChild(document.createTextNode(text.slice(last)));
+    }
+  }
+
+  /** Read the contenteditable's text (pills → @path) and sync to the
+   *  hidden textarea, then trigger the normal onChange flow. */
+  function syncContentEditable() {
+    const ce = contentEditableRef.current;
+    const ta = textareaRef.current;
+    if (!ce || !ta) return;
+    let text = "";
+    const walk = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        text += node.textContent ?? "";
+      } else if (node instanceof HTMLElement && node.classList.contains("composer-at-pill")) {
+        const path = node.getAttribute("data-path") ?? "";
+        text += `@${path}`;
+      } else {
+        for (const child of Array.from(node.childNodes)) walk(child);
+      }
+    };
+    walk(ce);
+    ta.value = text;
+    draftRef.current = text;
+    // Trigger resize + suggestion re-evaluation
+    resizeTextarea(ta);
+    const nonEmpty = text.trim().length > 0;
+    setHasDraft((prev) => prev === nonEmpty ? prev : nonEmpty);
+    if (text.startsWith("/") || text.includes("@") || slashSuggest != null || atSuggest != null) {
+      scheduleSuggest(text, text.length);
+    }
+  }
+
+  const handleContentEditableInput = useCallback(() => {
+    syncContentEditable();
   }, []);
 
   const rememberPrompt = useCallback((text: string) => {
@@ -3192,7 +3369,7 @@ export function App() {
     setHistorySearchOpen(false);
     setHistorySearchQuery("");
     setHistorySearchIndex(0);
-    requestAnimationFrame(() => textareaRef.current?.focus());
+    requestAnimationFrame(() => contentEditableRef.current?.focus());
   }, []);
 
   const pickHistoryEntry = useCallback(
@@ -4081,10 +4258,19 @@ export function App() {
 
   const insertAtPath = useCallback(
     (path: string, isDir: boolean) => {
-      const el = textareaRef.current;
-      if (!el) return;
-      const value = el.value;
-      const cursor = el.selectionStart ?? value.length;
+      const value = draftRef.current;
+      if (!value) return;
+      // Get cursor position from the visible contenteditable div
+      let cursor = value.length;
+      const ce = contentEditableRef.current;
+      if (ce) {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && ce.contains(sel.anchorNode)) {
+          // Count text offset (treating pills as their @path text length)
+          const range = sel.getRangeAt(0);
+          cursor = getTextOffset(ce, range.startContainer, range.startOffset);
+        }
+      }
       const before = value.slice(0, cursor);
       const after = value.slice(cursor);
       const match = before.match(/(?:^|[\s\n])@([^\s@]*)$/);
@@ -4097,14 +4283,58 @@ export function App() {
       setComposerText(next);
       setAtSuggest(isDir ? atSuggest : null);
       requestAnimationFrame(() => {
-        const pos = start + insert.length;
-        el.focus();
-        el.setSelectionRange(pos, pos);
-        if (isDir) void updateAtSuggest(next, pos);
+        const newCe = contentEditableRef.current;
+        if (!newCe) return;
+        newCe.focus();
+        const sel = window.getSelection();
+        if (!sel) return;
+        const pills = newCe.querySelectorAll(".composer-at-pill");
+        const lastPill = pills[pills.length - 1];
+        if (lastPill) {
+          const range = document.createRange();
+          range.setStartAfter(lastPill);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } else {
+          const range = document.createRange();
+          range.selectNodeContents(newCe);
+          range.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        if (isDir) void updateAtSuggest(next, start + insert.length);
       });
     },
     [atSuggest, setComposerText, updateAtSuggest],
   );
+
+  /** Walk contenteditable DOM and count the text offset at a given
+   *  node+offset, treating pills as their `@path` representation. */
+  function getTextOffset(root: Node, targetNode: Node, targetOffset: number): number {
+    let offset = 0;
+    const walk = (node: Node): boolean => {
+      if (node === targetNode) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          offset += targetOffset;
+        }
+        return true;
+      }
+      if (node.nodeType === Node.TEXT_NODE) {
+        offset += (node.textContent ?? "").length;
+      } else if (node instanceof HTMLElement && node.classList.contains("composer-at-pill")) {
+        const path = node.getAttribute("data-path") ?? "";
+        offset += path.length + 1; // +1 for @
+      } else {
+        for (const child of Array.from(node.childNodes)) {
+          if (walk(child)) return true;
+        }
+      }
+      return false;
+    };
+    walk(root);
+    return offset;
+  }
 
   const onPaste = useCallback(
     async (e: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -4190,6 +4420,39 @@ export function App() {
       if (e.key === "Escape") {
         e.preventDefault();
         setAtSuggest(null);
+        return;
+      }
+    }
+    // Backspace / Delete on an @-mention pill in the contenteditable:
+    // remove the whole pill atomically.
+    if (e.key === "Backspace" || e.key === "Delete") {
+      const ce = contentEditableRef.current;
+      if (!ce) return;
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      // Check if the cursor is adjacent to (or inside) a pill.
+      let pill: HTMLElement | null = null;
+      if (e.key === "Backspace") {
+        // Look at node before cursor
+        const node = range.startContainer;
+        if (node.previousSibling instanceof HTMLElement && node.previousSibling.classList.contains("composer-at-pill")) {
+          pill = node.previousSibling;
+        } else if (node instanceof HTMLElement && node.classList.contains("composer-at-pill") && range.startOffset === 0) {
+          // Cursor at start of a text node right after a pill
+          pill = node.previousElementSibling as HTMLElement | null;
+        }
+      } else {
+        // Delete: look at node after cursor
+        const node = range.startContainer;
+        if (node.nextSibling instanceof HTMLElement && node.nextSibling.classList.contains("composer-at-pill")) {
+          pill = node.nextSibling;
+        }
+      }
+      if (pill?.classList.contains("composer-at-pill")) {
+        e.preventDefault();
+        pill.remove();
+        syncContentEditable();
         return;
       }
     }
@@ -4403,7 +4666,7 @@ export function App() {
           ? `${d}${mention} `
           : `${d} ${mention} `;
       setComposerText(next);
-      textareaRef.current?.focus();
+      contentEditableRef.current?.focus();
     },
     [setComposerText],
   );
@@ -5508,6 +5771,7 @@ export function App() {
                     busy={Boolean(snap.busy)}
                     m={m}
                     bottomRef={bottomRef}
+                    onOpenAtFile={handleOpenAtFile}
                   />
                 )}
               </div>
@@ -5996,7 +6260,22 @@ export function App() {
                       <textarea
                         ref={textareaRef}
                         defaultValue=""
-                        placeholder={
+                        style={{ display: "none" }}
+                      />
+                      <div
+                        ref={contentEditableRef}
+                        className="composer-contenteditable"
+                        contentEditable={
+                          canCompose &&
+                          !snap.replaying &&
+                          !Boolean(snap.pendingPermission) &&
+                          !snap.busy
+                        }
+                        suppressContentEditableWarning
+                        onInput={handleContentEditableInput}
+                        onKeyDown={(e) => onKeyDown(e as any)}
+                        onPaste={(e) => { e.preventDefault(); void onPaste(e as any); }}
+                        data-placeholder={
                           !connectionReady
                             ? m.placeholderWaiting
                             : !hasWorkspace
@@ -6005,75 +6284,6 @@ export function App() {
                                 ? m.placeholderBusy
                                 : m.placeholderReady
                         }
-                        disabled={
-                          !canCompose ||
-                          snap.replaying ||
-                          Boolean(snap.pendingPermission)
-                        }
-                        rows={1}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          draftRef.current = v;
-                          const nonEmpty = v.trim().length > 0;
-                          setHasDraft((prev) =>
-                            prev === nonEmpty ? prev : nonEmpty,
-                          );
-                          // Typing while browsing history = edit in place, leave browse mode.
-                          if (historyBrowse) exitHistoryBrowse();
-                          resizeTextarea(e.target);
-                          // Only schedule @ / slash work when relevant.
-                          if (
-                            v.startsWith("/") ||
-                            v.includes("@") ||
-                            slashSuggest != null ||
-                            atSuggest != null
-                          ) {
-                            scheduleSuggest(
-                              v,
-                              e.target.selectionStart ?? v.length,
-                            );
-                          }
-                        }}
-                        onClick={(e) => {
-                          const t = e.currentTarget;
-                          if (
-                            t.value.startsWith("/") ||
-                            t.value.includes("@")
-                          ) {
-                            scheduleSuggest(
-                              t.value,
-                              t.selectionStart ?? t.value.length,
-                            );
-                          }
-                        }}
-                        onKeyUp={(e) => {
-                          // Navigation / accept / dismiss are handled in
-                          // onKeyDown. Re-filtering here would reset the
-                          // highlight index even when the draft did not change.
-                          if (
-                            e.key === "ArrowDown" ||
-                            e.key === "ArrowUp" ||
-                            e.key === "Enter" ||
-                            e.key === "Tab" ||
-                            e.key === "Escape"
-                          ) {
-                            return;
-                          }
-                          const t = e.currentTarget;
-                          if (
-                            t.value.startsWith("/") ||
-                            t.value.includes("@") ||
-                            slashSuggest != null ||
-                            atSuggest != null
-                          ) {
-                            scheduleSuggest(
-                              t.value,
-                              t.selectionStart ?? t.value.length,
-                            );
-                          }
-                        }}
-                        onKeyDown={onKeyDown}
-                        onPaste={(e) => void onPaste(e)}
                       />
                       {slashSuggest && slashSuggest.length > 0 ? (
                         <div

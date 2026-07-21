@@ -643,6 +643,13 @@ export interface ModelProviderModel {
   enabled: boolean;
   /** Override context window in tokens (e.g. 1000000 for DeepSeek V4). */
   contextWindow?: number;
+  /**
+   * Optional reasoning-effort levels for the model. Written to
+   * `[model.<configKey>] reasoning_efforts` in config.toml so the CLI
+   * surfaces them in the composer chip menu. When undefined, the model
+   * has no reasoning-effort menu.
+   */
+  reasoningEfforts?: ReasoningEffortOption[];
 }
 
 /** User-configured provider instance (may have multiple models). */

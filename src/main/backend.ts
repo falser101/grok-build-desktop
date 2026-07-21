@@ -104,6 +104,7 @@ interface SessionRuntime {
   compactTimelineId: string | null;
   streamingAssistantId: string | null;
   streamingThoughtId: string | null;
+  suppressStreamingAfterCancel: boolean;
   tokensUsed?: number;
   contextWindow?: number;
   modelId?: string;
@@ -129,6 +130,7 @@ function emptyRuntime(sessionId: string, cwd: string): SessionRuntime {
     compactTimelineId: null,
     streamingAssistantId: null,
     streamingThoughtId: null,
+    suppressStreamingAfterCancel: false,
     sessionMode: "default",
     availableModels: [],
     toolIndex: new Map(),
@@ -761,6 +763,14 @@ export class AgentBackend {
   private streamingAssistantId: string | null = null;
   private streamingThoughtId: string | null = null;
   /**
+   * When true, suppress agent_message_chunk / agent_thought_chunk
+   * from reaching the timeline. Armed by cancel() / cancelSession()
+   * so that in-flight model chunks arriving after the user clicks
+   * "stop" don't keep appending to the conversation UI. Reset when
+   * the next user prompt starts (busy flips to true).
+   */
+  private suppressStreamingAfterCancel = false;
+  /**
    * Some custom models (DeepSeek R1, Qwen QwQ, MiniMax, …) emit
    * `<think>...</think>` inline in the assistant content instead of using
    * a separate thought channel. Track state across chunks so we can split
@@ -994,6 +1004,7 @@ export class AgentBackend {
       compactTimelineId: this.compactTimelineId,
       streamingAssistantId: this.streamingAssistantId,
       streamingThoughtId: this.streamingThoughtId,
+      suppressStreamingAfterCancel: this.suppressStreamingAfterCancel,
       tokensUsed: this.tokensUsed,
       contextWindow: this.contextWindow,
       modelId: this.modelId,
@@ -1094,6 +1105,7 @@ export class AgentBackend {
     this.compactTimelineId = rt.compactTimelineId;
     this.streamingAssistantId = rt.streamingAssistantId;
     this.streamingThoughtId = rt.streamingThoughtId;
+    this.suppressStreamingAfterCancel = rt.suppressStreamingAfterCancel;
     this.tokensUsed = rt.tokensUsed;
     this.contextWindow = rt.contextWindow ?? this.contextWindow;
     this.modelId = rt.modelId ?? this.modelId;
@@ -1132,6 +1144,7 @@ export class AgentBackend {
           compactTimelineId: this.compactTimelineId,
           streamingAssistantId: this.streamingAssistantId,
           streamingThoughtId: this.streamingThoughtId,
+          suppressStreamingAfterCancel: this.suppressStreamingAfterCancel,
           tokensUsed: this.tokensUsed,
           contextWindow: this.contextWindow,
           modelId: this.modelId,
@@ -3071,34 +3084,172 @@ export class AgentBackend {
     this.log("info", `Mode set to ${modeId}`);
   }
 
+  /**
+   * Resolve file/directory path suggestions for @-mention in the composer.
+   *
+   * Delegates to the CLI's `x.ai/suggest` endpoint which provides nucleo
+   * fuzzy matching (exact-prefix → CI-prefix → fuzzy), shell escaping /
+   * `~` / `$VAR` expansion, and scans up to 1000 entries per directory.
+   */
   async pathSuggest(query: string): Promise<PathSuggestion[]> {
     const cwd = this.workspace;
     if (!cwd) return [];
-    const q = query.replace(/^\//, "");
-    const lastSlash = q.lastIndexOf("/");
-    const dirPart = lastSlash >= 0 ? q.slice(0, lastSlash) : "";
-    const filePart = lastSlash >= 0 ? q.slice(lastSlash + 1) : q;
-    const absDir = dirPart ? resolve(cwd, dirPart) : cwd;
+    if (!this.client?.connected || this.connection !== "ready") return [];
 
     try {
-      const entries = await readdir(absDir, { withFileTypes: true });
-      const out: PathSuggestion[] = [];
-      for (const ent of entries) {
-        if (ent.name.startsWith(".") && !filePart.startsWith(".")) continue;
-        if (filePart && !ent.name.toLowerCase().startsWith(filePart.toLowerCase())) {
-          continue;
+      const results = await this.pathSuggestViaCli(query, cwd);
+
+      // When the query has no '/' (user is typing a bare name),
+      // also walk the full tree so matches in nested directories
+      // show up (e.g. "@docs" finds "yak/docs/").
+      if (!query.includes("/")) {
+        const deep = await this.pathSuggestRecursive(query, cwd);
+        if (deep.length > 0) {
+          results.push(...deep);
         }
-        const rel = dirPart ? `${dirPart}/${ent.name}` : ent.name;
-        out.push({
-          path: rel.split("\\").join("/"),
-          isDir: ent.isDirectory(),
-        });
-        if (out.length >= 40) break;
       }
-      out.sort((a, b) => {
-        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-        return a.path.localeCompare(b.path);
+
+      return results;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Use `find` to list the full project tree (excluding heavy dirs),
+   * then fuzzy-match filenames against the query. Returns both files
+   * and directories. Cached for 30 s.
+   */
+  private async pathSuggestRecursive(
+    query: string,
+    cwd: string,
+  ): Promise<PathSuggestion[]> {
+    if (!query) return [];
+    const cacheKey = cwd;
+    const now = Date.now();
+    const cached = this.fileListCache?.get(cacheKey);
+    let entries: string[];
+
+    if (cached && now - cached.at < FILE_LIST_CACHE_TTL) {
+      entries = cached.entries;
+    } else {
+      entries = await this.listProjectEntries(cwd);
+      if (!this.fileListCache) this.fileListCache = new Map();
+      this.fileListCache.set(cacheKey, { entries, at: now });
+    }
+
+    const out: PathSuggestion[] = [];
+    const max = 50;
+    // Rank: exact prefix > case-insensitive prefix > fuzzy subsequence
+    const scored: { path: string; isDir: boolean; score: number }[] = [];
+    const qLower = query.toLowerCase();
+
+    for (const rel of entries) {
+      const clean = rel.endsWith("/") ? rel.slice(0, -1) : rel;
+      const name = clean.split("/").pop() ?? clean;
+      const nameLower = name.toLowerCase();
+      const isDir = rel.endsWith("/");
+
+      let score = 0;
+      if (nameLower.startsWith(qLower)) {
+        score = 300;
+      } else if (nameLower.includes(qLower)) {
+        score = 200;
+      } else if (clean.toLowerCase().includes(qLower)) {
+        score = 100;  // path contains query but filename doesn't
+      } else if (matchesPath(rel, query)) {
+        score = 50;   // fuzzy subsequence match
+      } else {
+        continue;
+      }
+
+      // Prefer shorter paths (closer to root)
+      score -= rel.split("/").length;
+      scored.push({ path: isDir ? rel.slice(0, -1) : rel, isDir, score });
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    for (const s of scored) {
+      if (out.length >= max) break;
+      out.push({ path: s.path, isDir: s.isDir });
+    }
+    return out;
+  }
+
+  /**
+   * List all files and directories under `cwd` using the system `find`.
+   * Excludes common heavy directories. Directories have trailing `/`.
+   */
+  private listProjectEntries(cwd: string): Promise<string[]> {
+    const excludeArgs = [
+      "(", "-name", "node_modules", "-o", "-name", ".git", "-o",
+      "-name", "target", "-o", "-name", "dist", "-o",
+      "-name", "build", "-o", "-name", ".next", "-o",
+      "-name", ".nuxt", "-o", "-name", "__pycache__", "-o",
+      "-name", ".cache", "-o", "-name", "out",
+      ")", "-prune", "-o",
+    ];
+
+    const runFind = (typeArgs: string[], suffix: string): Promise<string[]> =>
+      new Promise((resolve) => {
+        const child = spawn("find", [cwd, ...excludeArgs, ...typeArgs], {
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 15_000,
+        });
+        let stdout = "";
+        child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+        child.on("close", () => {
+          const prefix = cwd.endsWith("/") ? cwd : cwd + "/";
+          resolve(
+            stdout
+              .split("\n")
+              .filter((l) => l.startsWith(prefix))
+              .map((l) => l.slice(prefix.length) + suffix)
+              .filter(Boolean),
+          );
+        });
+        child.on("error", () => resolve([]));
       });
+
+    return Promise.all([
+      runFind(["-type", "f", "-print"], ""),    // files: no suffix
+      runFind(["-type", "d", "-print"], "/"),   // dirs: trailing /
+    ]).then(([files, dirs]) => [...files, ...dirs]);
+  }
+
+  private fileListCache?: Map<string, { entries: string[]; at: number }>;
+
+  /** Call the CLI `x.ai/suggest` endpoint for fuzzy file completions. */
+  private async pathSuggestViaCli(
+    query: string,
+    cwd: string,
+  ): Promise<PathSuggestion[]> {
+    const text = `cat ${query}`;
+
+    try {
+      const raw = await this.requestExt(
+        "suggest",
+        { text, cursor: text.length, cwd, limit: 50, generation: 0, tokenOnly: true },
+        5000,
+      );
+      const obj = asRecord(raw);
+      if (!obj) return [];
+      const completions = Array.isArray(obj.completions) ? obj.completions : [];
+
+      const out: PathSuggestion[] = [];
+      for (const c of completions) {
+        const comp = asRecord(c as JsonValue);
+        if (!comp) continue;
+        if (asString(comp.source) !== "file") continue;
+        const token =
+          asString(comp.tokenText) ?? asString(comp.token_text);
+        if (!token) continue;
+
+        const isDir = token.endsWith("/");
+        const rawPath = isDir ? token.slice(0, -1) : token;
+        const path = rawPath.replace(/\\(.)/g, "$1");
+        out.push({ path, isDir });
+      }
       return out;
     } catch {
       return [];
@@ -3216,6 +3367,7 @@ export class AgentBackend {
     }
 
     if (kind === "agent_message_chunk") {
+      if (this.suppressStreamingAfterCancel) return;
       const content = asRecord(update.content);
       const text = asString(content?.text) ?? "";
       if (!text) return;
@@ -3279,6 +3431,7 @@ export class AgentBackend {
     }
 
     if (kind === "agent_thought_chunk") {
+      if (this.suppressStreamingAfterCancel) return;
       // Keep thoughts, but they'll be collapsible in UI
       const content = asRecord(update.content);
       const text = asString(content?.text) ?? "";
@@ -3308,6 +3461,7 @@ export class AgentBackend {
     }
 
     if (kind === "tool_call") {
+      if (this.suppressStreamingAfterCancel) return;
       const toolCallId = asString(update.toolCallId) ?? newId("tool");
       const title = asString(update.title) ?? "tool";
       const status = asString(update.status) ?? "pending";
@@ -3336,6 +3490,7 @@ export class AgentBackend {
     }
 
     if (kind === "tool_call_update") {
+      if (this.suppressStreamingAfterCancel) return;
       const toolCallId = asString(update.toolCallId);
       if (!toolCallId) return;
       const content = toolContentFields(update);
@@ -4120,6 +4275,10 @@ export class AgentBackend {
     };
 
     this.busy = true;
+    // Re-enable streaming chunks for the new turn. Cancel arms this
+    // guard so in-flight model chunks don't keep appending to the
+    // timeline after the user clicks stop.
+    this.suppressStreamingAfterCancel = false;
     this.finalizeStreaming();
 
     // Drop any todos / plan body left over from the previous turn. They
@@ -4327,6 +4486,10 @@ export class AgentBackend {
     }
     // Only cancel the focused session — other concurrent turns keep running.
     const sid = this.sessionId;
+    // Suppress any in-flight model chunks arriving after the user
+    // clicked stop so the timeline doesn't keep growing. Reset when
+    // the next user prompt starts (busy → true in sendPrompt).
+    this.suppressStreamingAfterCancel = true;
     this.cancelPermissionsForSession(sid, "session cancel");
     this.cancelQuestionsForSession(sid, "session cancel");
     this.cancelTrustPromptsForSession(sid, "session cancel");
@@ -4400,6 +4563,7 @@ export class AgentBackend {
           compactTimelineId: this.compactTimelineId,
           streamingAssistantId: this.streamingAssistantId,
           streamingThoughtId: this.streamingThoughtId,
+          suppressStreamingAfterCancel: this.suppressStreamingAfterCancel,
           tokensUsed: this.tokensUsed,
           contextWindow: this.contextWindow,
           modelId: this.modelId,
@@ -4742,4 +4906,37 @@ export class AgentBackend {
     );
     return false;
   }
+}
+
+/** Cache project file list for 30 s — avoids re-running `find`
+ *  on every keystroke of the @-mention query. */
+const FILE_LIST_CACHE_TTL = 30_000;
+
+/**
+ * Check whether a relative path matches the query. Used for deep-tree
+ * file search: any path segment that contains `query` as a substring
+ * (case-insensitive) is a match. Also does fuzzy subsequence matching
+ * on the filename. E.g. "docs" matches "yak/docs/" (dir) and
+ * "any-agent/docs/readme.md" (file inside).
+ */
+function matchesPath(relPath: string, query: string): boolean {
+  const q = query.toLowerCase();
+  // Strip trailing / for directories
+  const clean = relPath.endsWith("/") ? relPath.slice(0, -1) : relPath;
+  const lower = clean.toLowerCase();
+
+  // Any segment contains the query as substring → match
+  if (lower.includes(q)) return true;
+
+  // Try fuzzy subsequence on filename
+  const name = clean.split("/").pop() ?? clean;
+  if (name.length > 0) {
+    let qi = 0;
+    for (let i = 0; i < name.length && qi < q.length; i++) {
+      if (name[i] === q[qi]) qi++;
+    }
+    if (qi === q.length) return true;
+  }
+
+  return false;
 }

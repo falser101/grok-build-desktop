@@ -2670,6 +2670,22 @@ body.is-resizing-files-tree * {
   color: var(--text);
 }
 
+/* @-mentioned file path pills in conversation messages */
+.at-file-link {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent, #5b8def) 15%, transparent);
+  color: var(--accent, #5b8def);
+  font-weight: 550;
+  font-size: 0.92em;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.at-file-link:hover {
+  background: color-mix(in srgb, var(--accent, #5b8def) 25%, transparent);
+}
+
 /* Plain user text still needs pre-wrap; markdown body handles its own spacing. */
 .msg-body:not(.md-body) {
   white-space: pre-wrap;
@@ -4182,6 +4198,16 @@ html[data-theme="light"] .workspace-bar {
   color: inherit;
 }
 
+/* Dropdown items that contain an icon (di-icon) stack the icon
+   and text in a row, matching term-tab-add-item. The base
+   .dropdown-item uses flex-direction: column for stacked
+   title + description layouts. */
+.dropdown-item:has(.di-icon) {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
 .dropdown-item .di-desc {
   font-size: 11px;
   color: var(--text-dim);
@@ -4512,6 +4538,41 @@ html[data-theme="light"] .workspace-bar {
   min-width: 0;
 }
 
+/* Visible contenteditable div styled like the textarea.
+   The original <textarea> is hidden (display:none) and synced
+   behind the scenes. */
+.composer-contenteditable {
+  width: 100%;
+  min-height: 48px;
+  max-height: 180px;
+  overflow-y: auto;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 4px 6px 2px;
+  line-height: 1.5;
+  font-size: 14.5px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  word-break: break-word;
+}
+.composer-contenteditable:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.composer-contenteditable .composer-at-pill {
+  display: inline;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent, #5b8def) 18%, transparent);
+  color: var(--accent, #8ab4f8);
+  font-weight: 550;
+  font-size: 0.92em;
+  user-select: all;
+}
+
 .at-suggest {
   position: absolute;
   left: 0;
@@ -4603,20 +4664,6 @@ html[data-theme="light"] .workspace-bar {
 .composer-row {
   display: block;
   min-width: 0;
-}
-
-.composer textarea {
-  width: 100%;
-  min-height: 48px;
-  max-height: 180px;
-  resize: none;
-  border: none;
-  outline: none;
-  background: transparent;
-  padding: 4px 6px 2px;
-  line-height: 1.5;
-  font-size: 14.5px;
-  color: var(--text);
 }
 
 .composer textarea::placeholder {
@@ -5622,7 +5669,7 @@ html[data-theme="light"] .icon-btn.send {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 8px;
+  padding: 6px 48px 6px 8px; /* right padding clears the close/pin button (28px + gap) */
   background: var(--bg-sidebar);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;

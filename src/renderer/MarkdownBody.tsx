@@ -19,6 +19,18 @@ import { copyText } from "./timelineMarkdown";
 
 const remarkPlugins = [remarkGfm];
 
+/** Convert `@relative/path` mentions in plain text to markdown links
+ *  so react-markdown renders them as clickable elements. The custom
+ *  `a` component below intercepts `at-file://` URLs to style them
+ *  as file pills. */
+function preprocessAtFiles(text: string): string {
+  return text.replace(
+    /(^|\s)@([^\s@]+)/g,
+    (_full, space: string, path: string) =>
+      `${space}[@${path}](at-file://${encodeURIComponent(path)})`,
+  );
+}
+
 type CopyState = "idle" | "ok" | "err";
 
 /** Walk any React tree and concatenate all string/number leaves. */
@@ -164,6 +176,8 @@ type Props = {
   text: string;
   className?: string;
   streaming?: boolean;
+  /** Called when the user clicks an @-mentioned file path. */
+  onOpenAtFile?: (path: string) => void;
 };
 
 /**
@@ -197,28 +211,58 @@ function useFrameThrottledValue<T>(value: T): T {
   return pending;
 }
 
-function MarkdownBodyInner({ text, className, streaming }: Props) {
+function MarkdownBodyInner({ text, className, streaming, onOpenAtFile }: Props) {
   const cls = [className, "md-body", streaming ? "streaming" : ""]
     .filter(Boolean)
     .join(" ");
 
-  // Stable empty fallback so streaming "" still shows caret via CSS.
-  const source = useMemo(() => text || "\u00a0", [text]);
+  const rawSource = useMemo(() => text || "\u00a0", [text]);
+  // Convert @-mention patterns to markdown links ahead of parsing.
+  const source = useMemo(
+    () => preprocessAtFiles(rawSource),
+    [rawSource],
+  );
 
-  // Cap per-frame work: limit ReactMarkdown re-parses to one per rAF.
-  // useDeferredValue alone can't keep up with sub-16ms token floods.
   const displaySource = useFrameThrottledValue(source);
-  // Belt-and-suspenders vs Sudden unmount on small bursts.
   const deferredSource = useDeferredValue(displaySource);
 
-  // Render ReactMarkdown the entire time — including during streaming — so
-  // bold/italic/code blocks/tables/etc. appear progressively as tokens arrive
-  // instead of "plain text → snap to rendered" when the turn ends. The
-  // rAF throttle + useDeferredValue keep re-parse work bounded to ≤ one
-  // pass per frame even under token storms.
+  const atFileComponents: Components = useMemo(
+    () => ({
+      ...components,
+      a: ({ href, children, ...props }: any) => {
+        if (typeof href === "string" && href.startsWith("at-file://")) {
+          const path = decodeURIComponent(href.slice("at-file://".length));
+          return (
+            <span
+              className="at-file-link"
+              onClick={(e) => {
+                e.preventDefault();
+                onOpenAtFile?.(path);
+              }}
+              title={path}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onOpenAtFile?.(path);
+              }}
+            >
+              {children}
+            </span>
+          );
+        }
+        return (
+          <a href={href} target="_blank" rel="noreferrer noopener" {...props}>
+            {children}
+          </a>
+        );
+      },
+    }),
+    [onOpenAtFile],
+  );
+
   return (
     <div className={cls}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={atFileComponents}>
         {deferredSource}
       </ReactMarkdown>
       {streaming ? <span className="md-streaming-caret" aria-hidden>▍</span> : null}
