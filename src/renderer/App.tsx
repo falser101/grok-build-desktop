@@ -2550,17 +2550,41 @@ export function App() {
   useEffect(() => {
     const root = slashListRef.current;
     if (!root || !slashSuggest?.length) return;
-    root
-      .querySelector<HTMLElement>(".at-item.active")
-      ?.scrollIntoView({ block: "nearest" });
+    // Manual scroll math (see the @-suggest effect above for rationale).
+    const active = root.querySelector<HTMLElement>(".at-item.active");
+    if (!active) return;
+    const rootRect = root.getBoundingClientRect();
+    const itemRect = active.getBoundingClientRect();
+    const overflowTop = rootRect.top - itemRect.top;
+    const overflowBottom = itemRect.bottom - rootRect.bottom;
+    if (overflowTop > 0) {
+      root.scrollTop -= overflowTop;
+    } else if (overflowBottom > 0) {
+      root.scrollTop += overflowBottom;
+    }
   }, [slashIndex, slashSuggest]);
 
   useEffect(() => {
     const root = atListRef.current;
     if (!root || !atSuggest?.length) return;
-    root
-      .querySelector<HTMLElement>(".at-item.active")
-      ?.scrollIntoView({ block: "nearest" });
+    // Manual scroll math: scrollIntoView({block:"nearest"}) is unreliable
+    // when the active item sits exactly on the boundary — the browser
+    // considers it "visible" and skips the scroll, leaving the thumb
+    // stuck on screen while the active item peeks. Compute the offset
+    // explicitly and only scroll the minimum needed, in either direction.
+    const active = root.querySelector<HTMLElement>(".at-item.active");
+    if (!active) return;
+    const rootRect = root.getBoundingClientRect();
+    const itemRect = active.getBoundingClientRect();
+    const overflowTop = rootRect.top - itemRect.top;
+    const overflowBottom = itemRect.bottom - rootRect.bottom;
+    if (overflowTop > 0) {
+      // Item is above the visible area — scroll up so its top aligns.
+      root.scrollTop -= overflowTop;
+    } else if (overflowBottom > 0) {
+      // Item is below the visible area — scroll down so its bottom aligns.
+      root.scrollTop += overflowBottom;
+    }
   }, [atIndex, atSuggest]);
 
   useEffect(() => {
