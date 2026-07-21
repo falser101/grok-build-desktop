@@ -3126,11 +3126,20 @@ export class AgentBackend {
       // The recursive matcher scores paths by substring / fuzzy against
       // both basename and full path, so trailing slashes are fine.
       const deep = await this.pathSuggestRecursive(query, cwd);
-      if (deep.length > 0) {
-        results.push(...deep);
-      }
 
-      return results;
+      // Merge CLI + recursive results into one list, deduplicating by
+      // canonicalized path so the same dir doesn't show up twice when
+      // both sources surface it (e.g. "@grok" → "grok-build/" from CLI
+      // and from `find`, leading to two identical entries otherwise).
+      const seen = new Set<string>();
+      const merged: PathSuggestion[] = [];
+      for (const item of [...results, ...deep]) {
+        const key = `${item.isDir ? "d:" : "f:"}${item.path}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(item);
+      }
+      return merged;
     } catch {
       return [];
     }
