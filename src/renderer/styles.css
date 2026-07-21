@@ -1848,16 +1848,14 @@ body.is-resizing-files-tree * {
 /* Inside the shared rail: no extra horizontal padding / max-width. */
 .chat-rail .main-scroll.chat-pane {
   padding: 16px 0 12px;
-  /* Always reserve classic scrollbar width (matches --chat-scrollbar). */
-  overflow-y: scroll;
 }
 
 .main-scroll::-webkit-scrollbar {
-  width: 10px;
+  width: 0;
+  height: 0;
 }
-.main-scroll::-webkit-scrollbar-thumb {
-  background: var(--scrollbar);
-  border-radius: 8px;
+.main-scroll {
+  scrollbar-width: none;
 }
 
 .center-stage {
