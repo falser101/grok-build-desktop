@@ -3221,12 +3221,22 @@ export class AgentBackend {
 
   private fileListCache?: Map<string, { entries: string[]; at: number }>;
 
-  /** Call the CLI `x.ai/suggest` endpoint for fuzzy file completions. */
+  /** Call the CLI `x.ai/suggest` endpoint for fuzzy file completions.
+   *  The CLI runs nucleo fuzzy matching which is too permissive for
+   *  directory prefixes (e.g. typing "docs" surfaces "docker", "docx",
+   *  "doc-paths"). We post-filter so the renderer only sees paths where
+   *  the query is an actual substring of either the basename or any
+   *  parent directory segment — exact-token matching, no fuzzy. */
   private async pathSuggestViaCli(
     query: string,
     cwd: string,
   ): Promise<PathSuggestion[]> {
     const text = `cat ${query}`;
+    const q = query.toLowerCase();
+    // Strip a trailing slash so the filter is identical for "@docs" and
+    // "@docs/" — the user is still typing the same prefix.
+    const qStripped = q.endsWith("/") ? q.slice(0, -1) : q;
+    if (!qStripped) return [];
 
     try {
       const raw = await this.requestExt(
@@ -3239,6 +3249,7 @@ export class AgentBackend {
       const completions = Array.isArray(obj.completions) ? obj.completions : [];
 
       const out: PathSuggestion[] = [];
+      const seen = new Set<string>();
       for (const c of completions) {
         const comp = asRecord(c as JsonValue);
         if (!comp) continue;
@@ -3250,6 +3261,15 @@ export class AgentBackend {
         const isDir = token.endsWith("/");
         const rawPath = isDir ? token.slice(0, -1) : token;
         const path = rawPath.replace(/\\(.)/g, "$1");
+
+        // Exact-token filter: every path segment must contain the query
+        // as a substring. Rejects CLI-fuzzy noise like "docker" or
+        // "docx.svg" for the query "docs".
+        const segments = path.toLowerCase().split("/").filter(Boolean);
+        if (!segments.some((seg) => seg.includes(qStripped))) continue;
+
+        if (seen.has(path)) continue;
+        seen.add(path);
         out.push({ path, isDir });
       }
       return out;
@@ -4916,29 +4936,15 @@ const FILE_LIST_CACHE_TTL = 30_000;
 
 /**
  * Check whether a relative path matches the query. Used for deep-tree
- * file search: any path segment that contains `query` as a substring
- * (case-insensitive) is a match. Also does fuzzy subsequence matching
- * on the filename. E.g. "docs" matches "yak/docs/" (dir) and
- * "any-agent/docs/readme.md" (file inside).
+ * file search: at least one path segment must contain `query` as a
+ * substring (case-insensitive). E.g. "docs" matches "yak/docs/"
+ * (dir) and "any-agent/docs/readme.md" (file inside) but NOT
+ * "dify/web/assets/docx.svg" or "dify/api/docker/".
  */
 function matchesPath(relPath: string, query: string): boolean {
-  const q = query.toLowerCase();
-  // Strip trailing / for directories
+  const q = query.toLowerCase().replace(/\/$/, "");
+  if (!q) return true;
   const clean = relPath.endsWith("/") ? relPath.slice(0, -1) : relPath;
-  const lower = clean.toLowerCase();
-
-  // Any segment contains the query as substring → match
-  if (lower.includes(q)) return true;
-
-  // Try fuzzy subsequence on filename
-  const name = clean.split("/").pop() ?? clean;
-  if (name.length > 0) {
-    let qi = 0;
-    for (let i = 0; i < name.length && qi < q.length; i++) {
-      if (name[i] === q[qi]) qi++;
-    }
-    if (qi === q.length) return true;
-  }
-
-  return false;
+  const segments = clean.toLowerCase().split("/").filter(Boolean);
+  return segments.some((seg) => seg.includes(q));
 }
