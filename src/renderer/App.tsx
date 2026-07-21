@@ -4200,19 +4200,21 @@ export function App() {
     }
     try {
       const raw = await window.desktop.pathSuggest(q);
-      // Defensive client-side filter: at least one path segment must
-      // literally contain the query (case-insensitive substring).
-      // Strips fuzzy noise from any source — backend CLI / recursive
-      // walker / future agents — so the user only sees real matches.
+      // Defensive client-side filter: a suggestion survives iff the
+      // query is a substring of the path as a whole, or of any path
+      // segment. The first branch handles path-shaped queries
+      // ("@yak/docs" → "yak/docs"); the second handles bare names
+      // ("@docs" → "yak/docs/readme.md"). This rules out fuzzy noise
+      // ("@docs" should not surface "docker" / "docx.svg") without
+      // rejecting legitimate nested matches.
       const qLower = q.toLowerCase().replace(/\/$/, "");
       const list = qLower
-        ? raw.filter((s) =>
-            s.path
-              .toLowerCase()
-              .split("/")
-              .filter(Boolean)
-              .some((seg) => seg.includes(qLower)),
-          )
+        ? raw.filter((s) => {
+            const p = s.path.toLowerCase();
+            if (p.includes(qLower)) return true;
+            const segs = p.split("/").filter(Boolean);
+            return segs.some((seg) => seg.includes(qLower));
+          })
         : raw;
       setAtSuggest(list);
       if (!queryChanged) {

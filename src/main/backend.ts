@@ -3262,11 +3262,16 @@ export class AgentBackend {
         const rawPath = isDir ? token.slice(0, -1) : token;
         const path = rawPath.replace(/\\(.)/g, "$1");
 
-        // Exact-token filter: every path segment must contain the query
-        // as a substring. Rejects CLI-fuzzy noise like "docker" or
-        // "docx.svg" for the query "docs".
-        const segments = path.toLowerCase().split("/").filter(Boolean);
-        if (!segments.some((seg) => seg.includes(qStripped))) continue;
+        // Exact-token filter: the query must be a substring of the
+        // path as a whole, or of any path segment. The first branch
+        // handles path-shaped queries ("yak/docs" → "yak/docs"); the
+        // second handles bare names ("docs" → "yak/docs/readme.md").
+        // Rejects CLI-fuzzy noise like "docker" / "docx.svg" for "docs".
+        const pLower = path.toLowerCase();
+        if (!pLower.includes(qStripped)) {
+          const segments = pLower.split("/").filter(Boolean);
+          if (!segments.some((seg) => seg.includes(qStripped))) continue;
+        }
 
         if (seen.has(path)) continue;
         seen.add(path);
@@ -4936,15 +4941,18 @@ const FILE_LIST_CACHE_TTL = 30_000;
 
 /**
  * Check whether a relative path matches the query. Used for deep-tree
- * file search: at least one path segment must contain `query` as a
- * substring (case-insensitive). E.g. "docs" matches "yak/docs/"
- * (dir) and "any-agent/docs/readme.md" (file inside) but NOT
- * "dify/web/assets/docx.svg" or "dify/api/docker/".
+ * file search: the query must be a substring of the path as a whole
+ * (handles path-shaped queries like "yak/docs") OR of any path segment
+ * (handles bare names like "docs"). E.g. "docs" matches
+ * "yak/docs/" (dir) and "any-agent/docs/readme.md" (file inside) but
+ * NOT "dify/web/assets/docx.svg" or "dify/api/docker/".
  */
 function matchesPath(relPath: string, query: string): boolean {
   const q = query.toLowerCase().replace(/\/$/, "");
   if (!q) return true;
   const clean = relPath.endsWith("/") ? relPath.slice(0, -1) : relPath;
-  const segments = clean.toLowerCase().split("/").filter(Boolean);
+  const lower = clean.toLowerCase();
+  if (lower.includes(q)) return true;
+  const segments = lower.split("/").filter(Boolean);
   return segments.some((seg) => seg.includes(q));
 }
