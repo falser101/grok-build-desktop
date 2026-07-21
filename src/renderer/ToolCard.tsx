@@ -13,69 +13,12 @@ function statusClass(status: string): string {
   return "idle";
 }
 
-function kindLabel(m: Messages, kind: string | undefined): string {
-  const k = (kind || "").toLowerCase();
-  switch (k) {
-    case "edit":
-    case "apply_patch":
-    case "search_replace":
-      return m.toolKindEdit;
-    case "write":
-    case "create":
-    case "patch":
-      return m.toolKindWrite;
-    case "search":
-    case "search_tool":
-    case "grep":
-    case "find":
-    case "query":
-      return m.toolKindSearch;
-    case "think":
-    case "reasoning":
-      return m.toolKindThink;
-    case "read":
-    case "view":
-    case "fetch":
-    case "load":
-      return m.toolKindRead;
-    case "execute":
-    case "run":
-    case "bash":
-    case "shell":
-    case "command":
-    case "cmd":
-      return m.toolKindRun;
-    case "web":
-    case "browser":
-    case "http":
-    case "fetch_url":
-    case "url":
-    case "web_fetch":
-    case "web_search":
-      return m.toolKindWeb;
-    case "list":
-    case "list_dir":
-    case "ls":
-      return m.toolKindRead;
-    case "ask_user":
-    case "ask_user_question":
-      return m.toolKindThink;
-    case "plan":
-    case "enter_plan":
-    case "exit_plan":
-      return m.toolKindThink;
-    case "task":
-    case "background_task_action":
-    case "kill_task_action":
-      return m.toolKindRun;
-    case "other":
-      // The agent emits "Other" as a placeholder before the real kind
-      // arrives in a follow-up update. Backend now prefers the real
-      // kind from `_meta.x.ai.tool.kind` so this branch is rare.
-      return m.toolKindTool;
-    default:
-      return kind || m.toolKindTool;
-  }
+function kindLabel(_m: Messages, kind: string | undefined): string {
+  // No mapping — display whatever the agent sent. Backend prefers
+  // _meta.x.ai.tool.kind (e.g. "read", "edit", "list", "ask_user", …)
+  // so the badge reflects the real tool category, not the placeholder
+  // "Other" that the agent uses until a follow-up update lands.
+  return kind || "";
 }
 
 function statusLabel(m: Messages, status: string): string {

@@ -630,15 +630,9 @@ export interface Messages {
   /** Composer: switch provider tab */
   modelsAllProviders: string;
 
-  // Tool card (timeline) labels — translate agent-side kind/status ids.
-  toolKindEdit: string;
-  toolKindSearch: string;
-  toolKindThink: string;
-  toolKindRead: string;
-  toolKindWrite: string;
-  toolKindRun: string;
-  toolKindWeb: string;
-  toolKindTool: string;
+  // Tool card (timeline) labels — translate agent-side status ids.
+  // Tool kind itself is shown verbatim from the agent; no translation
+  // table is needed (the kind is a programmatic identifier, not prose).
   toolStatusPending: string;
   toolStatusRunning: string;
   toolStatusCompleted: string;
@@ -1232,14 +1226,6 @@ const en: Messages = {
   modelsNoModelsInProvider: "No models in this provider",
   modelsAllProviders: "All",
 
-  toolKindEdit: "edit",
-  toolKindSearch: "search",
-  toolKindThink: "think",
-  toolKindRead: "read",
-  toolKindWrite: "write",
-  toolKindRun: "run",
-  toolKindWeb: "web",
-  toolKindTool: "tool",
   toolStatusPending: "pending",
   toolStatusRunning: "running",
   toolStatusCompleted: "completed",
@@ -1820,14 +1806,6 @@ const zh: Messages = {
   modelsNoModelsInProvider: "此提供商下暂无模型",
   modelsAllProviders: "全部",
 
-  toolKindEdit: "编辑",
-  toolKindSearch: "搜索",
-  toolKindThink: "思考",
-  toolKindRead: "读取",
-  toolKindWrite: "写入",
-  toolKindRun: "执行",
-  toolKindWeb: "联网",
-  toolKindTool: "工具",
   toolStatusPending: "等待",
   toolStatusRunning: "运行中",
   toolStatusCompleted: "已完成",
