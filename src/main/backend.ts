@@ -3116,138 +3116,16 @@ export class AgentBackend {
     if (!this.client?.connected || this.connection !== "ready") return [];
 
     try {
-      const results = await this.pathSuggestViaCli(query, cwd);
-
-      // Always run the recursive walk as well, so nested matches show up
-      // regardless of whether the query has a slash:
-      //   "@docs"   finds "yak/docs/"
-      //   "@docs/"  finds "yak/docs/", "dify/docs/", ...
-      //   "@dify/d" finds anything under dify/ starting with "d"
-      // The recursive matcher scores paths by substring / fuzzy against
-      // both basename and full path, so trailing slashes are fine.
-      const deep = await this.pathSuggestRecursive(query, cwd);
-
-      // Merge CLI + recursive results into one list, deduplicating by
-      // canonicalized path so the same dir doesn't show up twice when
-      // both sources surface it (e.g. "@grok" → "grok-build/" from CLI
-      // and from `find`, leading to two identical entries otherwise).
-      const seen = new Set<string>();
-      const merged: PathSuggestion[] = [];
-      for (const item of [...results, ...deep]) {
-        const key = `${item.isDir ? "d:" : "f:"}${item.path}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        merged.push(item);
-      }
-      return merged;
+      // CLI x.ai/suggest is the only source — the recursive find-based
+      // walker was dropped: it surfaced duplicates of CLI hits (e.g.
+      // "@grok" → "grok-build/" twice), added fuzzy noise (docker /
+      // docx for "@docs"), and tried to second-guess the agent's own
+      // fuzzy matcher with a weaker one.
+      return await this.pathSuggestViaCli(query, cwd);
     } catch {
       return [];
     }
   }
-
-  /**
-   * Use `find` to list the full project tree (excluding heavy dirs),
-   * then fuzzy-match filenames against the query. Returns both files
-   * and directories. Cached for 30 s.
-   */
-  private async pathSuggestRecursive(
-    query: string,
-    cwd: string,
-  ): Promise<PathSuggestion[]> {
-    if (!query) return [];
-    const cacheKey = cwd;
-    const now = Date.now();
-    const cached = this.fileListCache?.get(cacheKey);
-    let entries: string[];
-
-    if (cached && now - cached.at < FILE_LIST_CACHE_TTL) {
-      entries = cached.entries;
-    } else {
-      entries = await this.listProjectEntries(cwd);
-      if (!this.fileListCache) this.fileListCache = new Map();
-      this.fileListCache.set(cacheKey, { entries, at: now });
-    }
-
-    const out: PathSuggestion[] = [];
-    const max = 50;
-    // Rank: exact prefix > case-insensitive prefix > fuzzy subsequence
-    const scored: { path: string; isDir: boolean; score: number }[] = [];
-    const qLower = query.toLowerCase();
-
-    for (const rel of entries) {
-      const clean = rel.endsWith("/") ? rel.slice(0, -1) : rel;
-      const name = clean.split("/").pop() ?? clean;
-      const nameLower = name.toLowerCase();
-      const isDir = rel.endsWith("/");
-
-      let score = 0;
-      if (nameLower.startsWith(qLower)) {
-        score = 300;
-      } else if (nameLower.includes(qLower)) {
-        score = 200;
-      } else if (clean.toLowerCase().includes(qLower)) {
-        score = 100;  // path contains query but filename doesn't
-      } else if (matchesPath(rel, query)) {
-        score = 50;   // fuzzy subsequence match
-      } else {
-        continue;
-      }
-
-      // Prefer shorter paths (closer to root)
-      score -= rel.split("/").length;
-      scored.push({ path: isDir ? rel.slice(0, -1) : rel, isDir, score });
-    }
-
-    scored.sort((a, b) => b.score - a.score);
-    for (const s of scored) {
-      if (out.length >= max) break;
-      out.push({ path: s.path, isDir: s.isDir });
-    }
-    return out;
-  }
-
-  /**
-   * List all files and directories under `cwd` using the system `find`.
-   * Excludes common heavy directories. Directories have trailing `/`.
-   */
-  private listProjectEntries(cwd: string): Promise<string[]> {
-    const excludeArgs = [
-      "(", "-name", "node_modules", "-o", "-name", ".git", "-o",
-      "-name", "target", "-o", "-name", "dist", "-o",
-      "-name", "build", "-o", "-name", ".next", "-o",
-      "-name", ".nuxt", "-o", "-name", "__pycache__", "-o",
-      "-name", ".cache", "-o", "-name", "out",
-      ")", "-prune", "-o",
-    ];
-
-    const runFind = (typeArgs: string[], suffix: string): Promise<string[]> =>
-      new Promise((resolve) => {
-        const child = spawn("find", [cwd, ...excludeArgs, ...typeArgs], {
-          stdio: ["ignore", "pipe", "ignore"],
-          timeout: 15_000,
-        });
-        let stdout = "";
-        child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-        child.on("close", () => {
-          const prefix = cwd.endsWith("/") ? cwd : cwd + "/";
-          resolve(
-            stdout
-              .split("\n")
-              .filter((l) => l.startsWith(prefix))
-              .map((l) => l.slice(prefix.length) + suffix)
-              .filter(Boolean),
-          );
-        });
-        child.on("error", () => resolve([]));
-      });
-
-    return Promise.all([
-      runFind(["-type", "f", "-print"], ""),    // files: no suffix
-      runFind(["-type", "d", "-print"], "/"),   // dirs: trailing /
-    ]).then(([files, dirs]) => [...files, ...dirs]);
-  }
-
-  private fileListCache?: Map<string, { entries: string[]; at: number }>;
 
   /** Call the CLI `x.ai/suggest` endpoint for fuzzy file completions.
    *  The CLI runs nucleo fuzzy matching which is too permissive for
@@ -4969,26 +4847,4 @@ export class AgentBackend {
     );
     return false;
   }
-}
-
-/** Cache project file list for 30 s — avoids re-running `find`
- *  on every keystroke of the @-mention query. */
-const FILE_LIST_CACHE_TTL = 30_000;
-
-/**
- * Check whether a relative path matches the query. Used for deep-tree
- * file search: the query must be a substring of the path as a whole
- * (handles path-shaped queries like "yak/docs") OR of any path segment
- * (handles bare names like "docs"). E.g. "docs" matches
- * "yak/docs/" (dir) and "any-agent/docs/readme.md" (file inside) but
- * NOT "dify/web/assets/docx.svg" or "dify/api/docker/".
- */
-function matchesPath(relPath: string, query: string): boolean {
-  const q = query.toLowerCase().replace(/\/$/, "");
-  if (!q) return true;
-  const clean = relPath.endsWith("/") ? relPath.slice(0, -1) : relPath;
-  const lower = clean.toLowerCase();
-  if (lower.includes(q)) return true;
-  const segments = lower.split("/").filter(Boolean);
-  return segments.some((seg) => seg.includes(q));
 }
