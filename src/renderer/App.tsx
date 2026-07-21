@@ -909,11 +909,17 @@ const TimelineRow = memo(function TimelineRow({
   }
   if (item.kind === "user") {
     const atts = item.attachments ?? [];
-    const images = atts.filter(
-      (a) => a.kind === "image" && a.dataBase64 && a.mimeType,
+    // An attachment is "previewable" when we have inline base64 + a
+    // mime type. Default the mime to image/png if missing (paste/drop
+    // sometimes leaves it blank for screenshots). Everything else
+    // (oversized image that was downgraded on the backend, file
+    // attachment, model that doesn't accept images) renders as a file
+    // chip so the user always sees what they sent.
+    const previewableImages = atts.filter(
+      (a) => a.kind === "image" && a.dataBase64,
     );
-    const files = atts.filter(
-      (a) => !(a.kind === "image" && a.dataBase64 && a.mimeType),
+    const fileChips = atts.filter(
+      (a) => !(a.kind === "image" && a.dataBase64),
     );
     return (
       <div
@@ -921,22 +927,25 @@ const TimelineRow = memo(function TimelineRow({
         id={msgDomId(item.id)}
       >
         <div className="msg-bubble">
-          {images.length > 0 ? (
+          {previewableImages.length > 0 ? (
             <div className="msg-attachments">
-              {images.map((a) => (
-                <img
-                  key={a.id}
-                  className="msg-attachment-image"
-                  src={`data:${a.mimeType};base64,${a.dataBase64}`}
-                  alt={a.name}
-                  title={a.displayPath || a.name}
-                />
-              ))}
+              {previewableImages.map((a) => {
+                const mime = a.mimeType || "image/png";
+                return (
+                  <img
+                    key={a.id}
+                    className="msg-attachment-image"
+                    src={`data:${mime};base64,${a.dataBase64}`}
+                    alt={a.name}
+                    title={a.displayPath || a.name}
+                  />
+                );
+              })}
             </div>
           ) : null}
-          {files.length > 0 ? (
+          {fileChips.length > 0 ? (
             <div className="msg-attachments msg-attachments-files">
-              {files.map((a) => (
+              {fileChips.map((a) => (
                 <span
                   key={a.id}
                   className="msg-attachment-file"
@@ -6220,7 +6229,7 @@ export function App() {
                   {attachments.length > 0 ? (
                     <div className="attach-bar">
                       {attachments.map((a) => {
-                        const isImage = a.kind === "image" && a.dataBase64 && a.mimeType;
+                        const isImage = a.kind === "image" && a.dataBase64;
                         return (
                           <span
                             className={`attach-chip${isImage ? " attach-chip-image" : ""}`}
@@ -6230,7 +6239,7 @@ export function App() {
                             {isImage ? (
                               <img
                                 className="attach-chip-thumb"
-                                src={`data:${a.mimeType};base64,${a.dataBase64}`}
+                                src={`data:${a.mimeType || "image/png"};base64,${a.dataBase64}`}
                                 alt={a.name}
                               />
                             ) : (

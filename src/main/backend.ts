@@ -66,8 +66,9 @@ const ENABLE_ALWAYS_APPROVE_OPTION_ID = "enable-always-approve";
 /** Max base64 payload size we mirror back onto a timeline user item.
  *  Larger images are stored as file-kind without dataBase64 — the user
  *  bubble will render a file chip instead of an inline preview, but
- *  the timeline snapshot stays reasonable. ~768 KB decoded ≈ 1 MB raw. */
-const TIMELINE_ATTACHMENT_DATA_B64_MAX = 1_000_000;
+ *  the timeline snapshot stays reasonable. ~3 MB base64 ≈ 2.25 MB raw
+ *  — covers most desktop screenshots. */
+const TIMELINE_ATTACHMENT_DATA_B64_MAX = 3_000_000;
 
 /** Strip / downscale attachment payloads before stamping them on a
  *  TimelineItem. The agent has already received the full payload via
