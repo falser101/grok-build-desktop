@@ -4151,6 +4151,10 @@ export function App() {
 
   const slashQueryRef = useRef<string | null>(null);
   const atQueryRef = useRef<string | null>(null);
+  // Monotonic counter incremented on every keystroke that mutates the
+  // @-mention query. Each pathSuggest() call captures its generation
+  // and drops its result if a newer call has been issued meanwhile.
+  const atGenRef = useRef(0);
 
   const updateSlashSuggest = useCallback(
     (value: string, cursor: number) => {
@@ -4198,8 +4202,17 @@ export function App() {
       atQueryRef.current = q;
       setAtIndex(0);
     }
+    // Generation counter: bumped on every keystroke that mutates q.
+    // When the async pathSuggest resolves we compare against the
+    // current ref and drop the result if a newer query is in flight —
+    // otherwise stale results from a previous query would overwrite
+    // the menu state mid-typing (e.g. user types "@doc" then
+    // backspaces to "@do" but the "doc" reply arrives later).
+    const myGen = ++atGenRef.current;
     try {
       const raw = await window.desktop.pathSuggest(q);
+      // Bail if a newer query has been requested since we started.
+      if (myGen !== atGenRef.current) return;
       // Defensive client-side filter: a suggestion survives iff the
       // query is a substring of the path as a whole, or of any path
       // segment. The first branch handles path-shaped queries
@@ -4223,6 +4236,7 @@ export function App() {
         );
       }
     } catch {
+      if (myGen !== atGenRef.current) return;
       setAtSuggest(null);
     }
   }, []);
