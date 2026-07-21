@@ -4440,29 +4440,56 @@ export function App() {
       }
     }
     // Backspace / Delete on an @-mention pill in the contenteditable:
-    // remove the whole pill atomically.
+    // remove the whole pill atomically — but ONLY when the cursor is
+    // touching the pill (no characters in between). Otherwise the
+    // user is editing text and Backspace should delete a character.
     if (e.key === "Backspace" || e.key === "Delete") {
       const ce = contentEditableRef.current;
       if (!ce) return;
       const sel = window.getSelection();
       if (!sel || !sel.rangeCount) return;
       const range = sel.getRangeAt(0);
-      // Check if the cursor is adjacent to (or inside) a pill.
+      // Bail if there's a non-collapsed selection — let the default
+      // delete handle the selection (which may or may not include a pill).
+      if (!range.collapsed) return;
       let pill: HTMLElement | null = null;
       if (e.key === "Backspace") {
-        // Look at node before cursor
+        // Delete the pill only when the cursor sits at the very start
+        // of the text node immediately following the pill (i.e. zero
+        // characters between cursor and pill).
         const node = range.startContainer;
-        if (node.previousSibling instanceof HTMLElement && node.previousSibling.classList.contains("composer-at-pill")) {
+        if (
+          node.nodeType === Node.TEXT_NODE &&
+          range.startOffset === 0 &&
+          node.previousSibling instanceof HTMLElement &&
+          node.previousSibling.classList.contains("composer-at-pill")
+        ) {
           pill = node.previousSibling;
-        } else if (node instanceof HTMLElement && node.classList.contains("composer-at-pill") && range.startOffset === 0) {
-          // Cursor at start of a text node right after a pill
-          pill = node.previousElementSibling as HTMLElement | null;
+        } else if (
+          node instanceof HTMLElement &&
+          node.classList.contains("composer-at-pill") &&
+          range.startOffset === 0
+        ) {
+          // Cursor at the start of a pill itself: delete that pill.
+          pill = node;
         }
       } else {
-        // Delete: look at node after cursor
+        // Delete: cursor must be at the very end of the text node
+        // immediately preceding the pill to swallow the pill whole.
         const node = range.startContainer;
-        if (node.nextSibling instanceof HTMLElement && node.nextSibling.classList.contains("composer-at-pill")) {
+        if (
+          node.nodeType === Node.TEXT_NODE &&
+          range.startOffset === node.textContent?.length &&
+          node.nextSibling instanceof HTMLElement &&
+          node.nextSibling.classList.contains("composer-at-pill")
+        ) {
           pill = node.nextSibling;
+        } else if (
+          node instanceof HTMLElement &&
+          node.classList.contains("composer-at-pill") &&
+          range.startOffset === node.childNodes.length
+        ) {
+          pill = node;
         }
       }
       if (pill?.classList.contains("composer-at-pill")) {
