@@ -4122,6 +4122,17 @@ export class AgentBackend {
     this.busy = true;
     this.finalizeStreaming();
 
+    // Drop any todos / plan body left over from the previous turn. They
+    // are turn-scoped UI artifacts: the snapshot guard (`busy ? todos :
+    // []`) only hides them between turns, but a fresh prompt emits a
+    // snapshot before the agent publishes its own todo_write — if we
+    // don't clear here, the renderer briefly shows the previous turn's
+    // (or a stale cross-session) checklist as if it belonged to the new
+    // turn. Clearing now keeps the panel clean until the agent emits.
+    this.todos = [];
+    this.planContent = undefined;
+    this.syncActiveIntoRuntimes();
+
     const displayText =
       trimmed ||
       (imageBlocks.length > 0

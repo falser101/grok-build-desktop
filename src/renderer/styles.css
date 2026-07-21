@@ -9031,6 +9031,7 @@ html[data-theme="light"] {
   width: min(520px, 100%);
   max-height: min(86vh, 720px);
   overflow: auto;
+  scrollbar-width: none;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -9040,6 +9041,11 @@ html[data-theme="light"] {
   flex-direction: column;
   gap: 12px;
   outline: none;
+}
+
+.askq-modal::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .askq-modal:focus-visible {
