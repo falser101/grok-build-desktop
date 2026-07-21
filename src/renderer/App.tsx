@@ -827,6 +827,56 @@ function resolveScrollPinnedUser(
   return active;
 }
 
+/**
+ * Fullscreen image viewer used by the user bubble thumbnail click.
+ * Backdrop click + Esc both dismiss; the inner image is the only
+ * interactive surface so accidental outside clicks can't double-handle.
+ */
+function ImageLightbox({
+  src,
+  name,
+  onClose,
+}: {
+  src: string;
+  name: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="image-lightbox-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={name}
+      onClick={onClose}
+    >
+      <button
+        type="button"
+        className="image-lightbox-close"
+        aria-label="Close"
+        onClick={onClose}
+      >
+        ×
+      </button>
+      <img
+        className="image-lightbox-img"
+        src={src}
+        alt={name}
+        // Stop propagation so clicking the image itself doesn't dismiss.
+        onClick={(e) => e.stopPropagation()}
+      />
+      <div className="image-lightbox-caption">{name}</div>
+    </div>
+  );
+}
+
 function MsgCopyButton({
   item,
   m,
@@ -898,11 +948,13 @@ const TimelineRow = memo(function TimelineRow({
   m,
   highlight,
   onOpenAtFile,
+  onOpenLightbox,
 }: {
   item: TimelineItem;
   m: Messages;
   highlight?: boolean;
   onOpenAtFile?: (path: string) => void;
+  onOpenLightbox?: (img: { src: string; mime: string; name: string }) => void;
 }) {
   if (item.kind === "system") {
     return <div className="system-line">{item.text}</div>;
@@ -934,13 +986,25 @@ const TimelineRow = memo(function TimelineRow({
             <div className="msg-attachments">
               {previewableImages.map((a) => {
                 const mime = a.mimeType || "image/png";
+                const src = `data:${mime};base64,${a.dataBase64}`;
                 return (
                   <img
                     key={a.id}
                     className="msg-attachment-image"
-                    src={`data:${mime};base64,${a.dataBase64}`}
+                    src={src}
                     alt={a.name}
                     title={a.displayPath || a.name}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() =>
+                      onOpenLightbox?.({ src, mime, name: a.name })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onOpenLightbox?.({ src, mime, name: a.name });
+                      }
+                    }}
                   />
                 );
               })}
@@ -1125,11 +1189,13 @@ const TurnGroupView = memo(function TurnGroupView({
   m,
   highlight,
   onOpenAtFile,
+  onOpenLightbox,
 }: {
   turn: TurnGroup;
   m: Messages;
   highlight: boolean;
   onOpenAtFile?: (path: string) => void;
+  onOpenLightbox?: (img: { src: string; mime: string; name: string }) => void;
 }) {
   const isStreaming = Boolean(turn.assistant?.streaming);
   // Default: collapsed once the turn has settled. While streaming we keep
@@ -1193,6 +1259,7 @@ const TurnGroupView = memo(function TurnGroupView({
                     m={m}
                     highlight={false}
                     onOpenAtFile={onOpenAtFile}
+                    onOpenLightbox={onOpenLightbox}
                   />
                 ))}
               </div>
@@ -1238,7 +1305,7 @@ const TurnGroupView = memo(function TurnGroupView({
         {hasExtras && open ? (
           <div className="turn-group-extras-list">
             {turn.extras.map((it) => (
-              <TimelineRow key={it.id} item={it} m={m} highlight={false} onOpenAtFile={onOpenAtFile} />
+              <TimelineRow key={it.id} item={it} m={m} highlight={false} onOpenAtFile={onOpenAtFile} onOpenLightbox={onOpenLightbox} />
             ))}
           </div>
         ) : null}
@@ -1262,6 +1329,7 @@ const ChatTimeline = memo(function ChatTimeline({
   m,
   bottomRef,
   onOpenAtFile,
+  onOpenLightbox,
 }: {
   timeline: TimelineItem[];
   replaying: boolean;
@@ -1270,6 +1338,7 @@ const ChatTimeline = memo(function ChatTimeline({
   m: Messages;
   bottomRef: RefObject<HTMLDivElement | null>;
   onOpenAtFile?: (path: string) => void;
+  onOpenLightbox?: (img: { src: string; mime: string; name: string }) => void;
 }) {
   // During cold session load, skip mounting partial history (avoids N× markdown
   // re-parses). Backend holds emits until replay finishes; this is a safety net.
@@ -1299,6 +1368,7 @@ const ChatTimeline = memo(function ChatTimeline({
             m={m}
             highlight={flashMsgId === seg.item.id}
             onOpenAtFile={onOpenAtFile}
+            onOpenLightbox={onOpenLightbox}
           />
         ) : (
           <TurnGroupView
@@ -1307,6 +1377,7 @@ const ChatTimeline = memo(function ChatTimeline({
             m={m}
             highlight={flashMsgId === seg.turn.id}
             onOpenAtFile={onOpenAtFile}
+            onOpenLightbox={onOpenLightbox}
           />
         ),
       )}
@@ -1752,6 +1823,15 @@ export function App() {
   const [flashMsgId, setFlashMsgId] = useState<string | null>(null);
   /** Brief status after export / download. */
   const [exportToast, setExportToast] = useState<string | null>(null);
+  /**
+   * Lightbox: when set, the user bubble image is shown full-size in an
+   * overlay modal. Carries the data URL, mime, and original filename so
+   * the modal can show a caption and close cleanly. Cleared on Esc /
+   * backdrop click / close button.
+   */
+  const [lightbox, setLightbox] = useState<
+    { src: string; mime: string; name: string } | null
+  >(null);
   /**
    * User message that owns the current scroll position (drives the
    * highlighted tick on the left-edge History Timeline rail). Updates as
@@ -5877,6 +5957,7 @@ export function App() {
                     m={m}
                     bottomRef={bottomRef}
                     onOpenAtFile={handleOpenAtFile}
+                    onOpenLightbox={setLightbox}
                   />
                 )}
               </div>
@@ -7153,6 +7234,14 @@ export function App() {
             )}
           </div>
         </aside>
+      ) : null}
+
+      {lightbox ? (
+        <ImageLightbox
+          src={lightbox.src}
+          name={lightbox.name}
+          onClose={() => setLightbox(null)}
+        />
       ) : null}
     </div>
   );

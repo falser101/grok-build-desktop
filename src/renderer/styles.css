@@ -4564,13 +4564,24 @@ html[data-theme="light"] .workspace-bar {
 }
 
 .msg-attachment-image {
-  max-width: 220px;
-  max-height: 220px;
-  border-radius: 10px;
+  /* Compressed thumbnail — keeps the user bubble compact. Click opens
+     a full-size lightbox overlay. */
+  max-width: 96px;
+  max-height: 96px;
+  border-radius: 8px;
   object-fit: cover;
   display: block;
   background: var(--bg);
   border: 1px solid var(--border-soft, var(--border));
+  cursor: zoom-in;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.msg-attachment-image:hover,
+.msg-attachment-image:focus-visible {
+  transform: scale(1.04);
+  box-shadow: 0 4px 16px var(--shadow);
+  outline: none;
 }
 
 .msg-attachments-files {
@@ -9792,6 +9803,83 @@ html[data-theme="light"] {
 .askq-hint {
   font-size: 11.5px;
   color: var(--text-dim);
+}
+
+/* ── Image lightbox (click-to-expand user bubble thumbnails) ───────── */
+
+.image-lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: color-mix(in srgb, #000 78%, transparent);
+  backdrop-filter: blur(4px);
+  animation: image-lightbox-fade-in 0.12s ease;
+}
+
+@keyframes image-lightbox-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.image-lightbox-img {
+  max-width: min(96vw, 1600px);
+  max-height: 86vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px var(--shadow);
+  background: var(--bg);
+  /* Allow keyboard focus on the image itself (after click) so Esc still
+     bubbles to the window-level handler. */
+  cursor: default;
+  user-select: none;
+}
+
+.image-lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease;
+}
+
+.image-lightbox-close:hover {
+  background: var(--bg-hover);
+}
+
+.image-lightbox-caption {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  border: 1px solid var(--border-soft, var(--border));
+  font-size: 12px;
+  color: var(--text);
+  max-width: min(80vw, 600px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Trusted folders panel (Extensions → Trusted folders) ──────────── */
