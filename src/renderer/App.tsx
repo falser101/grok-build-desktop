@@ -4199,7 +4199,21 @@ export function App() {
       setAtIndex(0);
     }
     try {
-      const list = await window.desktop.pathSuggest(q);
+      const raw = await window.desktop.pathSuggest(q);
+      // Defensive client-side filter: at least one path segment must
+      // literally contain the query (case-insensitive substring).
+      // Strips fuzzy noise from any source — backend CLI / recursive
+      // walker / future agents — so the user only sees real matches.
+      const qLower = q.toLowerCase().replace(/\/$/, "");
+      const list = qLower
+        ? raw.filter((s) =>
+            s.path
+              .toLowerCase()
+              .split("/")
+              .filter(Boolean)
+              .some((seg) => seg.includes(qLower)),
+          )
+        : raw;
       setAtSuggest(list);
       if (!queryChanged) {
         setAtIndex((i) =>
