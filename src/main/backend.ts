@@ -231,6 +231,20 @@ function asRecord(v: unknown): Record<string, JsonValue> | null {
   return null;
 }
 
+/**
+ * Resolve the semantic tool kind for a tool_call / tool_call_update.
+ * The top-level `update.kind` is mostly a placeholder ("Other" until
+ * a follow-up update lands), but `_meta.x.ai.tool.kind` carries the
+ * real value ("read", "edit", "search", "list", …) that the desktop
+ * UI maps to badges / icons. Prefer `_meta` and fall back to `kind`.
+ */
+function semanticToolKind(update: Record<string, JsonValue>): string | undefined {
+  const meta = asRecord(update._meta);
+  const tool = meta ? asRecord(meta["x.ai/tool"]) : null;
+  const metaKind = tool ? asString(tool.kind) : undefined;
+  return metaKind ?? asString(update.kind);
+}
+
 function centVal(v: JsonValue | undefined): number | undefined {
   const rec = asRecord(v);
   if (!rec) return undefined;
@@ -3398,7 +3412,7 @@ export class AgentBackend {
       const toolCallId = asString(update.toolCallId) ?? newId("tool");
       const title = asString(update.title) ?? "tool";
       const status = asString(update.status) ?? "pending";
-      const toolKind = asString(update.kind);
+      const toolKind = semanticToolKind(update);
       const content = toolContentFields(update);
       const id = newId("tool");
       this.toolIndex.set(toolCallId, id);
@@ -3439,7 +3453,7 @@ export class AgentBackend {
           toolCallId,
           title: asString(update.title) ?? toolCallId,
           status: asString(update.status) ?? "in_progress",
-          toolKind: asString(update.kind),
+          toolKind: semanticToolKind(update),
           ...(content.hasContent
             ? {
                 diffs: content.diffs,
@@ -3457,7 +3471,7 @@ export class AgentBackend {
           ...item,
           title: asString(update.title) ?? item.title,
           status: asString(update.status) ?? item.status,
-          toolKind: asString(update.kind) ?? item.toolKind,
+          toolKind: semanticToolKind(update) ?? item.toolKind,
         };
         if (content.hasContent) {
           next.diffs = content.diffs;

@@ -25,6 +25,7 @@ function kindLabel(m: Messages, kind: string | undefined): string {
     case "patch":
       return m.toolKindWrite;
     case "search":
+    case "search_tool":
     case "grep":
     case "find":
     case "query":
@@ -49,7 +50,29 @@ function kindLabel(m: Messages, kind: string | undefined): string {
     case "http":
     case "fetch_url":
     case "url":
+    case "web_fetch":
+    case "web_search":
       return m.toolKindWeb;
+    case "list":
+    case "list_dir":
+    case "ls":
+      return m.toolKindRead;
+    case "ask_user":
+    case "ask_user_question":
+      return m.toolKindThink;
+    case "plan":
+    case "enter_plan":
+    case "exit_plan":
+      return m.toolKindThink;
+    case "task":
+    case "background_task_action":
+    case "kill_task_action":
+      return m.toolKindRun;
+    case "other":
+      // The agent emits "Other" as a placeholder before the real kind
+      // arrives in a follow-up update. Backend now prefers the real
+      // kind from `_meta.x.ai.tool.kind` so this branch is rare.
+      return m.toolKindTool;
     default:
       return kind || m.toolKindTool;
   }
