@@ -6479,8 +6479,7 @@ export function App() {
                         contentEditable={
                           canCompose &&
                           !snap.replaying &&
-                          !Boolean(snap.pendingPermission) &&
-                          !snap.busy
+                          !Boolean(snap.pendingPermission)
                         }
                         suppressContentEditableWarning
                         onInput={handleContentEditableInput}
