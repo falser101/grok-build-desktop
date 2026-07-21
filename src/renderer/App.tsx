@@ -114,9 +114,11 @@ const FILE_TREE_DEFAULT = 38;
 const FILE_TREE_MIN = 18;
 const FILE_TREE_MAX = 62;
 const FILE_TREE_COLLAPSE = 12;
-const LAYOUT_STORAGE_KEY = "grok-desktop-layout-v2";
-/** Legacy px-based key — migrate once then drop. */
-const LAYOUT_STORAGE_KEY_LEGACY = "grok-desktop-layout";
+const LAYOUT_STORAGE_KEY = "grok-desktop-layout-v3";
+/** v2 was the px-percent unified layout; v3 flips the sidebar default
+ *  to collapsed (rail-only) for fresh installs while honoring any
+ *  user-pinned choice persisted in v2. v1 was px-based — drop it. */
+const LAYOUT_STORAGE_KEY_LEGACY = "grok-desktop-layout-v2";
 
 /**
  * Sidebar toggle icons matching the right-panel toggle style:
@@ -466,7 +468,10 @@ const newRightTabId = () =>
 function defaultPanelLayout(): PanelLayout {
   return {
     sidebarWidth: SIDEBAR_DEFAULT,
-    sidebarCollapsed: false,
+    // Workspace list defaults to collapsed (rail visible) — fewer
+    // distractions when jumping back into a session. Click the rail
+    // button to expand; the choice is persisted afterwards.
+    sidebarCollapsed: true,
     sidebarPinned: true,
     rightPanelWidth: RIGHT_DEFAULT,
     fileTreeWidth: FILE_TREE_DEFAULT,
