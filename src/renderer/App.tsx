@@ -46,6 +46,7 @@ import { PlanPanel } from "./PlanPanel";
 import { PlanApprovalCard } from "./PlanApprovalCard";
 import { PlanProgressBubble } from "./PlanProgressBubble";
 import { WaitingSessionsBanner } from "./WaitingSessionsBanner";
+import { WindowTitleBar } from "./WindowTitleBar";
 import { usePrefs } from "./PrefsContext";
 import { SettingsView, type SettingsSectionId } from "./SettingsView";
 import { TerminalPanel } from "./TerminalPanel";
@@ -91,6 +92,14 @@ const SIDEBAR_DEFAULT = 18;
 const SIDEBAR_MIN = 12;
 const SIDEBAR_MAX = 32;
 const SIDEBAR_COLLAPSE = 7;
+/**
+ * Absolute minimum width (in pixels) the sidebar is allowed to
+ * occupy before the layout auto-collapses it into hover mode.
+ * Below this, the column would squeeze the "+ 新建会话 / MCP / 插件"
+ * nav rows into unreadable widths, so we hide the column entirely
+ * and let the user summon it via the left-edge hover affordance.
+ */
+const SIDEBAR_HOVER_MIN_PX = 200;
 /** Collapsed sidebar rail width (% of shell). */
 const SIDEBAR_RAIL = 2.5;
 const RIGHT_DEFAULT = 20;
@@ -1377,6 +1386,107 @@ function SessionStatusIcon({
   );
 }
 
+/**
+ * Global keyboard accelerators that mirror the File / Edit / View / Help
+ * menu items on Win/Linux, where we deliberately leave the platform
+ * menu blank (see `setupApplicationMenu` in the main process). On macOS
+ * these are registered by the system menu bar instead, so this hook is
+ * effectively a no-op there — the menu accelerators win the race and
+ * the dispatch hits the same renderer-side handlers.
+ *
+ * Implementation notes:
+ *  - Capture phase (`addEventListener(..., true)`) so we run before
+ *    xterm / textarea handlers and can `preventDefault` things like
+ *    Ctrl+R.
+ *  - We only block text-input fields from receiving our menu chords;
+ *    edit / clipboard chords (Ctrl+Z/X/C/V/A) are intentionally left
+ *    to the browser's default behavior to avoid stomping on normal
+ *    typing.
+ *  - Hotkeys are matched on a normalized key + modifier set, which is
+ *    portable across Cmd vs Ctrl without parsing Electron accelerator
+ *    strings ourselves.
+ */
+function isEditableTarget(t: EventTarget | null): boolean {
+  if (!t || !(t instanceof HTMLElement)) return false;
+  if (t.isContentEditable) return true;
+  const tag = t.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA";
+}
+
+function useGlobalMenuAccelerators(opts: {
+  onNewSession: () => void;
+  onOpenSettings: () => void;
+  onReload: () => void;
+  onToggleDevTools: () => void;
+  onAbout: () => void;
+  onFullscreen: () => void;
+}): void {
+  const optsRef = useRef(opts);
+  useEffect(() => {
+    optsRef.current = opts;
+  }, [opts]);
+
+  useEffect(() => {
+    // isMac is read once on mount; the platform doesn't change mid-life.
+    const isMac = /Mac|Darwin/i.test(navigator.userAgent || "");
+
+    const onKey = (e: globalThis.KeyboardEvent): void => {
+      // Modifier set: prefer meta on macOS, ctrl elsewhere — both work
+      // when the user swaps them, but matches what the menu accelerator
+      // says ("CmdOrCtrl+...").
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      // Avoid capturing AltGr / Shift+Ctrl combos that browsers reserve.
+      const plainMod = mod && !e.altKey;
+
+      // Always-available chords (work even inside text inputs).
+      if (plainMod && (e.key === "," || e.code === "Comma")) {
+        e.preventDefault();
+        optsRef.current.onOpenSettings();
+        return;
+      }
+      if (plainMod && (e.key.toLowerCase() === "n")) {
+        e.preventDefault();
+        optsRef.current.onNewSession();
+        return;
+      }
+      if (plainMod && e.shiftKey && (e.key === "I" || e.key === "i")) {
+        e.preventDefault();
+        optsRef.current.onToggleDevTools();
+        return;
+      }
+      if (plainMod && !e.shiftKey && (e.key === "r" || e.key === "R")) {
+        e.preventDefault();
+        optsRef.current.onReload();
+        return;
+      }
+      if (e.key === "F11") {
+        e.preventDefault();
+        optsRef.current.onFullscreen();
+        return;
+      }
+
+      // Outside-of-text-input chords only — never hijack a key the
+      // composer or filename input might want.
+      if (!isEditableTarget(e.target)) {
+        if (plainMod && e.shiftKey && (e.key === "r" || e.key === "R")) {
+          e.preventDefault();
+          optsRef.current.onReload();
+          return;
+        }
+        if (plainMod && (e.key === "?" || e.key === "/")) {
+          // Convention from many editors: Ctrl+/ opens the about page.
+          e.preventDefault();
+          optsRef.current.onAbout();
+          return;
+        }
+      }
+    };
+
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, []);
+}
+
 export function App() {
   const { messages: m } = usePrefs();
   const [snap, setSnap] = useState<AppSnapshot>(initial);
@@ -1577,6 +1687,13 @@ export function App() {
   const isResizingRef = useRef(false);
   const panelLayoutRef = useRef(panelLayout);
   panelLayoutRef.current = panelLayout;
+  /**
+   * Last sidebar width the user had pinned before the shell shrunk
+   * past `SIDEBAR_HOVER_MIN_PX`. Lets us rehydrate the same pinned
+   * width once the shell grows back, instead of snapping back to
+   * `SIDEBAR_DEFAULT`.
+   */
+  const lastShrinkPinnedWidthRef = useRef<number | null>(null);
   const rightPanelOpenRef = useRef(rightPanelOpen);
   rightPanelOpenRef.current = rightPanelOpen;
   const rightPanelTabsRef = useRef(rightPanelTabs);
@@ -1772,6 +1889,52 @@ export function App() {
 
   // Keep % layout correct when the window is resized (no drag in progress).
   useEffect(() => {
+    // When the shell shrinks past the per-pixel minimum width the
+    // sidebar can occupy without the nav rows collapsing into
+    // unreadable squalor, automatically retire the column into hover
+    // mode so the user can still summon it via the left-edge affordance.
+    const maybeAutoHover = () => {
+      if (isResizingRef.current || resizeDragRef.current) return;
+      const layout = panelLayoutRef.current;
+      if (!layout.sidebarPinned || layout.sidebarCollapsed) return;
+      const shellEl = shellRef.current;
+      if (!shellEl) return;
+      const shellWidth = shellEl.getBoundingClientRect().width;
+      if (shellWidth <= 0) return;
+      const sidebarPx = (shellWidth * layout.sidebarWidth) / 100;
+      if (sidebarPx < SIDEBAR_HOVER_MIN_PX) {
+        // Capture the current widths so a future resize-back can
+        // restore the user's pinned-mode preference. Until then we
+        // surface hover mode.
+        lastShrinkPinnedWidthRef.current = layout.sidebarWidth;
+        setPanelLayout((prev) => ({
+          ...prev,
+          sidebarPinned: false,
+          sidebarCollapsed: true,
+        }));
+      } else if (
+        !layout.sidebarPinned &&
+        layout.sidebarCollapsed &&
+        lastShrinkPinnedWidthRef.current != null &&
+        sidebarPx >= SIDEBAR_HOVER_MIN_PX + 24
+      ) {
+        // Shell regrew enough that the previously-stored pinned
+        // width fits with a little breathing room — auto-rehydrate.
+        const restoreWidth = clamp(
+          lastShrinkPinnedWidthRef.current,
+          SIDEBAR_MIN,
+          SIDEBAR_MAX,
+        );
+        lastShrinkPinnedWidthRef.current = null;
+        setPanelLayout((prev) => ({
+          ...prev,
+          sidebarPinned: true,
+          sidebarCollapsed: false,
+          sidebarWidth: restoreWidth,
+        }));
+      }
+    };
+
     const onResize = () => {
       if (isResizingRef.current || resizeDragRef.current) return;
       const layout = panelLayoutRef.current;
@@ -1782,8 +1945,13 @@ export function App() {
         : 0;
       const rightOpen = rightPanelOpenRef.current && viewRef.current === "chat";
       applyShellColumns(leftPct, rightOpen ? layout.rightPanelWidth : null);
+      maybeAutoHover();
     };
+
     window.addEventListener("resize", onResize);
+    // Run once on mount so a tiny initial shell (e.g. dev tools
+    // split-pane) still gets the auto-hover treatment.
+    maybeAutoHover();
     return () => window.removeEventListener("resize", onResize);
   }, [applyShellColumns]);
 
@@ -2127,9 +2295,23 @@ export function App() {
         );
       }
     });
+    const offUiOpenSettings = window.desktop.onUiOpenSettings(() => {
+      // Main-process menu accelerator (Ctrl/Cmd+,) requested settings.
+      // Reset the section to default so we always land on the top-level
+      // settings nav, mirroring clicking the account-menu Settings item.
+      setSettingsSection("general");
+      setView("settings");
+    });
+    const offUiNewSession = window.desktop.onUiNewSession(() => {
+      // Main-process menu File → New session (Ctrl/Cmd+N). Mirror the
+      // top-bar New chat handler so menu and button do the same thing.
+      void onNewSession();
+    });
     return () => {
       offAgent();
       offAccount();
+      offUiOpenSettings();
+      offUiNewSession();
     };
   }, []);
 
@@ -3691,6 +3873,35 @@ export function App() {
     setView("settings");
   }, []);
 
+  // File / Edit / View / Help keyboard chords. On Win/Linux we don't
+  // publish an Electron menu (see main `setupApplicationMenu`), so the
+  // renderer is the only place these shortcuts come from. On macOS
+  // the menu accelerators take precedence and trigger the same
+  // handlers via `ui:openSettings` / `ui:newSession` IPC, so this hook
+  // is a no-op there.
+  useGlobalMenuAccelerators({
+    onNewSession: () => {
+      void onNewSession();
+    },
+    onOpenSettings: () => {
+      setSettingsSection("general");
+      setView("settings");
+    },
+    onReload: () => {
+      void window.desktop.requestReload();
+    },
+    onToggleDevTools: () => {
+      void window.desktop.requestToggleDevTools();
+    },
+    onAbout: () => {
+      void window.desktop.requestAbout();
+    },
+    onFullscreen: () => {
+      if (document.fullscreenElement) void document.exitFullscreen();
+      else void document.documentElement.requestFullscreen();
+    },
+  });
+
   const refreshModelIndex = useCallback(async () => {
     try {
       const idx = await window.desktop.getModelConfigKeyIndex();
@@ -4249,6 +4460,23 @@ export function App() {
     }));
   }, []);
 
+  /**
+   * Promote the hover-mode sidebar overlay into a pinned column
+   * (used by the 📌 button inside the overlay — mirrors the right
+   * panel's `pinRightPanel` affordance). Records the current hover
+   * width so the pinned column opens at a sensible size when the
+   * user has dragged the floating sidebar earlier.
+   */
+  const pinSidebar = useCallback(() => {
+    sidebarHoverActiveRef.current = false;
+    setSidebarHoverOpen(false);
+    setPanelLayout((p) => ({
+      ...p,
+      sidebarPinned: true,
+      sidebarCollapsed: false,
+    }));
+  }, []);
+
   // Shared body of the left sidebar. Used in two places:
   //   - "pinned"  → inside the grid column when sidebarPinned && !sidebarCollapsed.
   //   - "hover"   → inside the floating overlay revealed by left-edge hover.
@@ -4258,15 +4486,60 @@ export function App() {
     return (mode: "pinned" | "hover"): React.ReactNode => (
       <>
         <div className="sidebar-top">
-          <button
-            className="nav-btn primary"
-            onClick={() => void onNewSession()}
-            title={m.newSession}
-            aria-label={m.newSession}
-          >
-            <span className="icon">＋</span>
-            <span className="nav-label">{m.newSession}</span>
-          </button>
+          {/*
+            First row pairs the "新建会话" pill with an icon-only
+            toggle on its right edge:
+              - pinned+expanded  → "折叠侧栏" (collapse icon).
+              - hover            → "固定打开" (pin glyph).
+            Both buttons are title-tipped — no visible label, just an
+            icon — so the row reads as one primary action + one
+            secondary glyph. The MCP / 插件 rows follow below.
+          */}
+          <div className="sidebar-top-new">
+            <button
+              className="nav-btn primary sidebar-new-btn"
+              onClick={() => void onNewSession()}
+              title={m.newSession}
+              aria-label={m.newSession}
+            >
+              <span className="icon">＋</span>
+              <span className="nav-label">{m.newSession}</span>
+            </button>
+            {/*
+              Both modes render an icon-only toggle next to the new
+              session pill, so the row always has the same shape and
+              the user can either way reach the chrome control. CSS
+              hides whichever toggle isn't currently meaningful.
+            */}
+            <button
+              className={`sidebar-collapse-btn ${
+                mode === "pinned" && !panelLayout.sidebarCollapsed ? "" : "is-hidden"
+              }`}
+              onClick={collapseSidebar}
+              title={`${m.sidebarCollapse} (Ctrl+B)`}
+              aria-label={`${m.sidebarCollapse} (Ctrl+B)`}
+              aria-hidden={
+                !(mode === "pinned" && !panelLayout.sidebarCollapsed) || undefined
+              }
+              tabIndex={
+                mode === "pinned" && !panelLayout.sidebarCollapsed ? 0 : -1
+              }
+            >
+              <SidebarIcon name="collapse" />
+            </button>
+            <button
+              className={`sidebar-pin-btn ${
+                mode === "hover" ? "" : "is-hidden"
+              }`}
+              onClick={pinSidebar}
+              title={m.sidePanelPin}
+              aria-label={m.sidePanelPin}
+              aria-hidden={mode !== "hover" || undefined}
+              tabIndex={mode === "hover" ? 0 : -1}
+            >
+              <SidebarIcon name="pin" />
+            </button>
+          </div>
           <button
             className={`nav-btn ${view === "extensions" && extTab === "mcp" ? "active" : ""}`}
             onClick={() => openExtensions("mcp")}
@@ -4675,6 +4948,44 @@ export function App() {
     };
   }, [panelLayout.sidebarPinned]);
 
+  // Right-panel hover reveal. Mirrors the left edge behaviour: when the
+  // pinned right panel is closed, hovering the right edge opens it as
+  // a floating overlay. The overlay's `📌 固定` button promotes the
+  // overlay into a permanent pinned slot.
+  const [rightHoverOpen, setRightHoverOpen] = useState(false);
+  const rightHoverActiveRef = useRef(false);
+  useEffect(() => {
+    if (rightPanelOpen) {
+      // The pinned panel owns the right edge; hover reveal becomes a no-op.
+      rightHoverActiveRef.current = false;
+      setRightHoverOpen(false);
+      return;
+    }
+    if (view !== "chat") {
+      // Hide the overlay whenever we leave the chat view (settings/etc
+      // own the chrome).
+      rightHoverActiveRef.current = false;
+      setRightHoverOpen(false);
+      return;
+    }
+    const EDGE_PX = 8;
+    const onMove = (e: MouseEvent) => {
+      if (e.clientX >= window.innerWidth - EDGE_PX) {
+        rightHoverActiveRef.current = true;
+        setRightHoverOpen(true);
+      }
+    };
+    document.addEventListener("mousemove", onMove);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+    };
+  }, [rightPanelOpen, view]);
+
+  const pinRightPanel = useCallback(() => {
+    rightHoverActiveRef.current = false;
+    setRightPanelOpen(true);
+  }, []);
+
   // Shortcuts open the right panel into a specific tool (panel stays open).
   useEffect(() => {
     if (view !== "chat") return;
@@ -4748,54 +5059,14 @@ export function App() {
         />
       ) : null}
 
-      <div className="shell-header" />
-
-      {view === "chat" ? (
-      <button
-        type="button"
-        className="chat-topbar-btn chat-side-toggle-left"
-        onClick={
-          panelLayout.sidebarPinned
-            ? panelLayout.sidebarCollapsed
-              ? expandSidebar
-              : collapseSidebar
-            : toggleSidebar
-        }
-        title={
-          panelLayout.sidebarPinned
-            ? panelLayout.sidebarCollapsed
-              ? `${m.sidebarExpand} (Ctrl+B)`
-              : `${m.sidebarCollapse} (Ctrl+B)`
-            : `${m.sidebarPin} (Ctrl+B)`
-        }
-        aria-label={
-          panelLayout.sidebarPinned
-            ? panelLayout.sidebarCollapsed
-              ? `${m.sidebarExpand} (Ctrl+B)`
-              : `${m.sidebarCollapse} (Ctrl+B)`
-            : `${m.sidebarPin} (Ctrl+B)`
-        }
-      >
-        <span className="icon" aria-hidden>
-          {panelLayout.sidebarPinned ? (
-            panelLayout.sidebarCollapsed ? (
-              <SidebarIcon name="expand" />
-            ) : (
-              <SidebarIcon name="collapse" />
-            )
-          ) : (
-            <SidebarIcon name="pin" />
-          )}
-        </span>
-      </button>
-      ) : null}
+      <WindowTitleBar />
 
       {panelLayout.sidebarPinned ? (
         panelLayout.sidebarCollapsed ? (
           <div className="sidebar-rail">
             <button
               type="button"
-              className="sidebar-rail-btn"
+              className="sidebar-collapse-btn"
               title={`${m.sidebarExpand} (Ctrl+B)`}
               aria-label={`${m.sidebarExpand} (Ctrl+B)`}
               onClick={expandSidebar}
@@ -4895,6 +5166,9 @@ export function App() {
                   title={snap.sessionTitle || m.untitledSession}
                 >
                   {snap.sessionTitle || m.untitledSession}
+                </span>
+                <span className="chat-pane-caret" aria-hidden>
+                  ▾
                 </span>
                 {hasSession && !showHome ? (
                   <div
@@ -6222,53 +6496,20 @@ export function App() {
         )}
       </section>
 
-      {view === "chat" ? (
-        <button
-          type="button"
-          className={`chat-topbar-btn chat-side-toggle ${
-            rightPanelOpen ? "active" : ""
-          }`}
-          onClick={toggleRightPanel}
-          title={rightPanelOpen ? m.sidePanelToggleHide : m.sidePanelToggle}
-          aria-pressed={rightPanelOpen}
-          aria-label={
-            rightPanelOpen ? m.sidePanelToggleHide : m.sidePanelToggle
-          }
+      {(rightOpen || rightHoverOpen) && view === "chat" ? (
+        <aside
+          className={rightOpen ? "right-panel" : "right-panel right-panel-hover"}
+          aria-label={m.sidePanelToggle}
+          onMouseEnter={() => {
+            if (!rightOpen) rightHoverActiveRef.current = true;
+          }}
+          onMouseLeave={() => {
+            if (!rightOpen) {
+              rightHoverActiveRef.current = false;
+              setRightHoverOpen(false);
+            }
+          }}
         >
-          <span className="icon" aria-hidden>
-            {rightPanelOpen ? (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <rect
-                  x="2"
-                  y="3"
-                  width="12"
-                  height="10"
-                  rx="1.5"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                />
-                <path d="M10 3v10" stroke="currentColor" strokeWidth="1.3" />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-                <rect
-                  x="2"
-                  y="3"
-                  width="12"
-                  height="10"
-                  rx="1.5"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                />
-                <path d="M11 3v10" stroke="currentColor" strokeWidth="1.3" />
-              </svg>
-            )}
-          </span>
-        </button>
-      ) : null}
-
-      {rightOpen ? (
-        <aside className="right-panel" aria-label={m.sidePanelToggle}>
           <div
             className="resize-handle resize-handle-right"
             role="separator"
@@ -6278,6 +6519,44 @@ export function App() {
             onPointerDown={onResizePointerDown("right")}
             onDoubleClick={() => setRightPanelOpen(false)}
           />
+          {/* Two affordances depending on whether the panel is pinned
+              or floating (hover mode). Close hides the pinned panel;
+              "pin" promotes the overlay into a permanent slot so the
+              user can read and resize it without the cursor leaving. */}
+          {rightOpen ? (
+            <button
+              type="button"
+              className="right-panel-close"
+              onClick={toggleRightPanel}
+              title={m.sidePanelToggleHide}
+              aria-label={m.sidePanelToggleHide}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+                <path
+                  d="M4 4 L12 12 M12 4 L4 12"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="right-panel-pin"
+              onClick={pinRightPanel}
+              title={m.sidePanelPin}
+              aria-label={m.sidePanelPin}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+                {/* Pin glyph: a small thumbtack rotated 45° */}
+                <path
+                  d="M9.5 2 L14 6.5 L11 7 L9 9 L7 9 L6 11 L4 11 L4 9 L6 7 L6 5 L8 3 Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </button>
+          )}
           <div className="right-panel-body">
             {/* Landing: no tabs yet — clear File / Terminal entry points. */}
             {rightPanelTabs.length === 0 ? (

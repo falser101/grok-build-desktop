@@ -410,8 +410,12 @@ export function AccountMenu({
               }}
             >
               <span className="account-menu-label">{m.settings}</span>
-              <span className="account-menu-chev subtle" aria-hidden>
-                ›
+              <span
+                className="account-menu-kbd"
+                aria-hidden
+                title={`Ctrl+,`}
+              >
+                Ctrl + ,
               </span>
             </button>
           </div>,

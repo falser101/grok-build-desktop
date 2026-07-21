@@ -398,6 +398,7 @@ export interface Messages {
   sidePanelFiles: string;
   sidePanelTerminal: string;
   sidePanelPlan: string;
+  sidePanelPin: string;
   sidePanelFilesShortcut: string;
   sidePanelTerminalShortcut: string;
   sidePanelPlanShortcut: string;
@@ -995,6 +996,7 @@ const en: Messages = {
   sidePanelFiles: "Files",
   sidePanelTerminal: "Terminal",
   sidePanelPlan: "Plan / TODO",
+  sidePanelPin: "Pin panel",
   sidePanelFilesShortcut: "Ctrl+P",
   sidePanelTerminalShortcut: "Ctrl+`",
   sidePanelPlanShortcut: "Ctrl+Shift+P",
@@ -1590,6 +1592,7 @@ const zh: Messages = {
   sidePanelFiles: "文件",
   sidePanelTerminal: "终端",
   sidePanelPlan: "计划 / TODO",
+  sidePanelPin: "固定打开",
   sidePanelFilesShortcut: "Ctrl+P",
   sidePanelTerminalShortcut: "Ctrl+`",
   sidePanelPlanShortcut: "Ctrl+Shift+P",

@@ -308,6 +308,48 @@ const api: DesktopApi = {
       ipcRenderer.removeListener("account:event", listener);
     };
   },
+  onUiOpenSettings: (cb) => {
+    const listener = () => {
+      cb();
+    };
+    ipcRenderer.on("ui:openSettings", listener);
+    return () => {
+      ipcRenderer.removeListener("ui:openSettings", listener);
+    };
+  },
+  onUiNewSession: (cb) => {
+    const listener = () => {
+      cb();
+    };
+    ipcRenderer.on("ui:newSession", listener);
+    return () => {
+      ipcRenderer.removeListener("ui:newSession", listener);
+    };
+  },
+  minimizeWindow: () => ipcRenderer.invoke("win:minimize") as Promise<void>,
+  toggleMaximizeWindow: () =>
+    ipcRenderer.invoke("win:toggleMaximize") as Promise<void>,
+  closeWindow: () => ipcRenderer.invoke("win:close") as Promise<void>,
+  isMaximized: () =>
+    ipcRenderer.invoke("win:isMaximized") as Promise<boolean>,
+  onMaximizeChanged: (cb) => {
+    const listener = (_event: IpcRendererEvent, maximized: boolean) => {
+      cb(maximized);
+    };
+    ipcRenderer.on("win:maximizeChanged", listener);
+    return () => {
+      ipcRenderer.removeListener("win:maximizeChanged", listener);
+    };
+  },
+  requestOpenSettings: () =>
+    ipcRenderer.invoke("ui:requestOpenSettings") as Promise<void>,
+  requestNewSession: () =>
+    ipcRenderer.invoke("ui:requestNewSession") as Promise<void>,
+  requestReload: () => ipcRenderer.invoke("ui:requestReload") as Promise<void>,
+  requestToggleDevTools: () =>
+    ipcRenderer.invoke("ui:requestToggleDevTools") as Promise<void>,
+  requestAbout: () => ipcRenderer.invoke("ui:requestAbout") as Promise<void>,
+  platform: () => ipcRenderer.invoke("ui:platform") as Promise<NodeJS.Platform>,
   listExternalEditors: () =>
     ipcRenderer.invoke("files:listExternalEditors") as Promise<
       ExternalEditorDescriptor[]

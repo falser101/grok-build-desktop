@@ -1011,6 +1011,42 @@ export interface DesktopApi {
   setInstallerChannel: (channel: InstallerChannel) => Promise<InstallerChannel>;
   onEvent: (cb: (event: AgentUiEvent) => void) => () => void;
   onAccountEvent: (cb: (event: AccountUiEvent) => void) => () => void;
+  /**
+   * Fired when the main process menu Settings accelerator
+   * (Ctrl/Cmd+,) is triggered. The renderer should switch to the
+   * settings view in response.
+   */
+  onUiOpenSettings: (cb: () => void) => () => void;
+  /**
+   * Fired when the main process menu "File → New session" item
+   * (Ctrl/Cmd+N) is triggered. The renderer should start a new
+   * session, mirroring the top-bar New button.
+   */
+  onUiNewSession: (cb: () => void) => () => void;
+  /**
+   * Window control IPC used by the renderer's custom title bar
+   * on Linux/Windows (where we set `frame: false`). macOS still
+   * uses native traffic lights and these become no-ops.
+   */
+  minimizeWindow: () => Promise<void>;
+  toggleMaximizeWindow: () => Promise<void>;
+  closeWindow: () => Promise<void>;
+  isMaximized: () => Promise<boolean>;
+  /** Subscribe to maximize/unmaximize events (driven by the OS). */
+  onMaximizeChanged: (cb: (maximized: boolean) => void) => () => void;
+  /** Renderer-driven requests bound to the custom title-bar menu. */
+  requestOpenSettings: () => Promise<void>;
+  requestNewSession: () => Promise<void>;
+  requestReload: () => Promise<void>;
+  requestToggleDevTools: () => Promise<void>;
+  requestAbout: () => Promise<void>;
+  /**
+   * The OS the renderer is currently running on (`process.platform`).
+   * Used by the custom title bar to decide whether to paint its own
+   * min / max / close controls (Linux + Windows) or leave them to
+   * the OS (macOS traffic lights).
+   */
+  platform: () => Promise<NodeJS.Platform>;
   /** Available external editors for "Open in editor…" actions. */
   listExternalEditors: () => Promise<ExternalEditorDescriptor[]>;
   /**

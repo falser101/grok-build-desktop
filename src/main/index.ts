@@ -85,9 +85,15 @@ let mainWindow: BrowserWindow | null = null;
 function configureLinuxDisplayAndIme(): void {
   if (process.platform !== "linux") return;
 
-  const onWayland = Boolean(
-    process.env.WAYLAND_DISPLAY || process.env.WAYLAND_SOCKET,
-  );
+  // Wayland detection. Three sources, all worth checking:
+  //   - WAYLAND_DISPLAY / WAYLAND_SOCKET: a Wayland session is live.
+  //   - XDG_SESSION_TYPE: set by login managers (KDE, GNOME) to the
+  //     protocol the user logged in with — most reliable on modern
+  //     distros, even when WAYLAND_DISPLAY is unset (some setups).
+  const envWayland =
+    Boolean(
+      process.env.WAYLAND_DISPLAY || process.env.WAYLAND_SOCKET,
+    ) || process.env.XDG_SESSION_TYPE === "wayland";
 
   // Session often only sets XMODIFIERS; Chromium/Electron still need these
   // for XWayland GTK IM and some plugin paths.
@@ -107,9 +113,12 @@ function configureLinuxDisplayAndIme(): void {
   const ozoneRaw =
     process.env.GROK_DESKTOP_OZONE?.trim() ||
     process.env.ELECTRON_OZONE_PLATFORM_HINT?.trim() ||
-    // Prefer real Wayland on Wayland sessions — "auto" sometimes stays on
-    // XWayland where fcitx5 Chinese fails without extra GTK plumbing.
-    (onWayland ? "wayland" : "");
+    // Default to Wayland on Wayland sessions — "auto" sometimes stays
+    // on XWayland where fcitx5 Chinese fails without extra GTK
+    // plumbing. Going X11 keeps us on XWayland which makes KWin paint
+    // a redundant title bar above our custom one, so preferring
+    // Wayland when the session is Wayland-based is the right call.
+    (envWayland ? "wayland" : "");
 
   const ozone = ozoneRaw.toLowerCase();
 
@@ -131,7 +140,7 @@ function configureLinuxDisplayAndIme(): void {
     process.env.GROK_DESKTOP_WAYLAND_IME !== "0" &&
     (ozone === "wayland" ||
       ozone === "auto" ||
-      (onWayland && ozone !== "x11"));
+      (envWayland && ozone !== "x11"));
 
   if (wantWaylandIme) {
     if (!app.commandLine.hasSwitch("enable-wayland-ime")) {
@@ -161,42 +170,89 @@ function configureLinuxDisplayAndIme(): void {
 configureLinuxDisplayAndIme();
 
 /**
- * Application menu wires platform accelerators (Ctrl/Cmd+C/V/X/A, Undo…).
+ * Application menu wiring.
  *
- * On Win/Linux, `Menu.setApplicationMenu(null)` removes those roles entirely —
- * selection copy/paste stops working. Keep a minimal Edit menu and hide the
- * native bar via `autoHideMenuBar` so we don't flash a light File/Edit strip.
- * macOS still needs app + window menus in the system menu bar.
+ * Why nothing on Win/Linux: Electron publishes its menu through the
+ * freedesktop.org D-Bus `com.canonical.AppMenu.Registrar` interface.
+ * Compositors that follow the AppMenu spec — KDE Plasma is the most
+ * common — then show the menu as the window's own menu bar, completely
+ * separate from the renderer's title bar. That's the "two menu rows"
+ * bug you saw in the screenshot.
+ *
+ * Because we paint our own File / Edit / View / Help / Settings row in
+ * the renderer, we intentionally leave the platform menu blank on
+ * Win/Linux (`Menu.setApplicationMenu(null)`). The standard accelerators
+ * (Ctrl/Cmd+N, Ctrl+Comma, F11, Ctrl+Z/Shift+Z, Ctrl+X/C/V/A, Ctrl+R,
+ * Ctrl+Shift+I, …) are implemented in the renderer via a `keydown`
+ * listener (see App.tsx `useGlobalMenuAccelerators`).
+ *
+ * macOS still uses a native menu in the system menu bar (the dock
+ * convention) — that's where most users expect File / Edit / View to
+ * live, and there's no Plasma-style AppMenu to clash with the
+ * renderer's title bar.
  */
 function setupApplicationMenu(): void {
-  if (process.platform === "darwin") {
-    Menu.setApplicationMenu(
-      Menu.buildFromTemplate([
-        { role: "appMenu" },
-        { role: "editMenu" },
-        { role: "windowMenu" },
-      ]),
-    );
+  if (process.platform !== "darwin") {
+    // Detach completely so KDE/GNOME can't re-host the menu and we
+    // avoid the two-row chrome bug.
+    Menu.setApplicationMenu(null);
     return;
   }
 
-  // Explicit roles (not only role: "editMenu") so accelerators are registered
-  // even when the menu bar is auto-hidden.
+  // Forward small UI commands (settings / new session) to whichever
+  // window owns the desktop so its renderer can react. macOS only.
+  const openSettings = (): void => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send("ui:openSettings");
+        if (!win.isFocused()) win.focus();
+      }
+    }
+  };
+  const newSession = (): void => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send("ui:newSession");
+        if (!win.isFocused()) win.focus();
+      }
+    }
+  };
+
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
+      { role: "appMenu" },
       {
-        label: "Edit",
+        label: "File",
         submenu: [
-          { role: "undo" },
-          { role: "redo" },
+          {
+            label: "New session",
+            accelerator: "CmdOrCtrl+N",
+            click: () => newSession(),
+          },
           { type: "separator" },
-          { role: "cut" },
-          { role: "copy" },
-          { role: "paste" },
-          { role: "delete" },
-          { type: "separator" },
-          { role: "selectAll" },
+          { role: "quit" },
         ],
+      },
+      { role: "editMenu" },
+      {
+        label: "View",
+        submenu: [
+          { role: "reload" },
+          { role: "toggleDevTools" },
+          { type: "separator" },
+          { role: "resetZoom" },
+          { role: "zoomIn" },
+          { role: "zoomOut" },
+          { type: "separator" },
+          { role: "togglefullscreen" },
+        ],
+      },
+      { role: "windowMenu" },
+      { type: "separator" },
+      {
+        label: "Settings",
+        accelerator: "CmdOrCtrl+,",
+        click: () => openSettings(),
       },
     ]),
   );
@@ -239,6 +295,14 @@ function attachEditContextMenu(win: BrowserWindow): void {
 }
 
 function createWindow(): void {
+  // Go frameless on every desktop. We paint our own slim title bar in
+  // the renderer; KWin's redundant client title bar is the actual
+  // source of the "two rows" bug, and Electron alone can't suppress
+  // it while the window is on Wayland — only Wayland + frame:false
+  // makes KWin respect the app's choice.
+  // macOS keeps the OS-painted traffic lights via `titleBarStyle` so
+  // users still get the standard close/min/max affordances; we hide
+  // our own min/max/close controls there.
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -247,8 +311,9 @@ function createWindow(): void {
     title: "Grok Build",
     backgroundColor: "#1a1a1a",
     show: false,
-    // Keep Edit accelerators from setupApplicationMenu without a permanent
-    // system light menu strip (press Alt to reveal on Win/Linux).
+    frame: false,
+    titleBarStyle:
+      process.platform === "darwin" ? "hiddenInset" : "hidden",
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, "../preload/index.mjs"),
@@ -259,6 +324,62 @@ function createWindow(): void {
   });
 
   attachEditContextMenu(mainWindow);
+
+  // Window control IPC — the renderer's custom title bar buttons
+  // call these to act on the browser window.
+  ipcMain.handle("win:minimize", () => {
+    mainWindow?.minimize();
+  });
+  ipcMain.handle("win:toggleMaximize", () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+  });
+  ipcMain.handle("win:close", () => {
+    mainWindow?.close();
+  });
+  ipcMain.handle("win:isMaximized", () => Boolean(mainWindow?.isMaximized()));
+
+  // Keep the renderer's title bar in sync with the OS-driven maximize
+  // state (e.g. when the user double-clicks the empty drag region).
+  mainWindow.on("maximize", () => {
+    mainWindow?.webContents.send("win:maximizeChanged", true);
+  });
+  mainWindow.on("unmaximize", () => {
+    mainWindow?.webContents.send("win:maximizeChanged", false);
+  });
+
+  // Bridges from the renderer's custom title-bar menu to existing
+  // main-side handlers. Most are re-broadcasts onto the window so
+  // the single renderer-side listener (e.g. onUiOpenSettings) is the
+  // source of truth, but `reload` and `devtools` are webContents-level
+  // APIs that only the main process can call.
+  ipcMain.handle("ui:requestOpenSettings", () => {
+    mainWindow?.webContents.send("ui:openSettings");
+  });
+  ipcMain.handle("ui:requestNewSession", () => {
+    mainWindow?.webContents.send("ui:newSession");
+  });
+  ipcMain.handle("ui:requestReload", () => {
+    if (mainWindow?.webContents.isLoading()) return;
+    mainWindow?.webContents.reload();
+  });
+  ipcMain.handle("ui:requestToggleDevTools", () => {
+    mainWindow?.webContents.toggleDevTools();
+  });
+  ipcMain.handle("ui:requestAbout", () => {
+    dialog.showMessageBox(mainWindow as BrowserWindow, {
+      type: "info",
+      title: "关于 Grok Build",
+      message: "Grok Build",
+      detail: `Grok Build Desktop\n版本: ${app.getVersion()}\nElectron ${process.versions.electron}`,
+    });
+  });
+
+  // The custom title bar in the renderer needs the OS platform to
+  // decide whether to draw its own min/max/close controls (Linux +
+  // Windows) or leave them to the system (macOS traffic lights).
+  ipcMain.handle("ui:platform", () => process.platform);
 
   backend.onEvent((event) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
