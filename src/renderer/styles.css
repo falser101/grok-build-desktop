@@ -1848,6 +1848,10 @@ body.is-resizing-files-tree * {
 /* Inside the shared rail: no extra horizontal padding / max-width. */
 .chat-rail .main-scroll.chat-pane {
   padding: 16px 0 12px;
+  /* Keep classic scrollbar gutter so user bubbles line up with the
+     composer / agent-message right edge — the visible scrollbar is
+     still hidden via .main-scroll's scrollbar rules above. */
+  overflow-y: scroll;
 }
 
 .main-scroll::-webkit-scrollbar {
