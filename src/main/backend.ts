@@ -63,6 +63,24 @@ const MAX_TOOL_OUTPUT_CHARS = 80_000;
 /** Wire option id for global always-approve (YOLO) mode. */
 const ENABLE_ALWAYS_APPROVE_OPTION_ID = "enable-always-approve";
 
+/** Max base64 payload size we mirror back onto a timeline user item.
+ *  Larger images are stored as file-kind without dataBase64 — the user
+ *  bubble will render a file chip instead of an inline preview, but
+ *  the timeline snapshot stays reasonable. ~768 KB decoded ≈ 1 MB raw. */
+const TIMELINE_ATTACHMENT_DATA_B64_MAX = 1_000_000;
+
+/** Strip / downscale attachment payloads before stamping them on a
+ *  TimelineItem. The agent has already received the full payload via
+ *  `session/prompt`; this is purely for UI mirror. */
+function stripAttachmentForTimeline(a: PromptAttachment): PromptAttachment {
+  if (a.kind !== "image" || !a.dataBase64) return a;
+  if (a.dataBase64.length <= TIMELINE_ATTACHMENT_DATA_B64_MAX) return a;
+  // Oversized image: keep metadata, drop the inline bytes. Bubble will
+  // render a file-style chip with the filename only.
+  const { dataBase64: _drop, ...rest } = a;
+  return { ...rest, dataBase64: undefined };
+}
+
 interface PendingPermissionEntry {
   ui: PermissionRequestUi;
   /** Session that owns this permission prompt (for concurrent multi-session). */
@@ -4324,7 +4342,15 @@ export class AgentBackend {
       (imageBlocks.length > 0
         ? `[${imageBlocks.length} image${imageBlocks.length > 1 ? "s" : ""}]`
         : "");
-    this.pushTimeline({ id: newId("user"), kind: "user", text: displayText });
+    this.pushTimeline({
+      id: newId("user"),
+      kind: "user",
+      text: displayText,
+      // Mirror attachments onto the timeline item so the user bubble can
+      // render image previews. Strip base64 if the payload was already
+      // huge — the timeline is serialized to the renderer.
+      attachments: attachments.length > 0 ? attachments.map(stripAttachmentForTimeline) : undefined,
+    });
     if (!this.sessionTitle || this.sessionTitle === "New session") {
       this.sessionTitle =
         displayText.length > 48

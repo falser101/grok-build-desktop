@@ -26,7 +26,19 @@ export interface ToolDiff {
 }
 
 export type TimelineItem =
-  | { id: string; kind: "user"; text: string; createdAt?: number }
+  | {
+      id: string;
+      kind: "user";
+      text: string;
+      createdAt?: number;
+      /**
+       * Files / images attached to this prompt. Used by the user bubble
+       * to render inline image previews next to (or above) the text.
+       * The backend already forwarded the payload to the agent; the
+       * mirror here is purely for display.
+       */
+      attachments?: PromptAttachment[];
+    }
   | { id: string; kind: "thought"; text: string; streaming?: boolean; createdAt?: number }
   | { id: string; kind: "assistant"; text: string; streaming?: boolean; createdAt?: number }
   | {

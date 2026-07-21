@@ -908,12 +908,48 @@ const TimelineRow = memo(function TimelineRow({
     return <div className="system-line">{item.text}</div>;
   }
   if (item.kind === "user") {
+    const atts = item.attachments ?? [];
+    const images = atts.filter(
+      (a) => a.kind === "image" && a.dataBase64 && a.mimeType,
+    );
+    const files = atts.filter(
+      (a) => !(a.kind === "image" && a.dataBase64 && a.mimeType),
+    );
     return (
       <div
         className={`msg msg-user${highlight ? " msg-flash" : ""}`}
         id={msgDomId(item.id)}
       >
         <div className="msg-bubble">
+          {images.length > 0 ? (
+            <div className="msg-attachments">
+              {images.map((a) => (
+                <img
+                  key={a.id}
+                  className="msg-attachment-image"
+                  src={`data:${a.mimeType};base64,${a.dataBase64}`}
+                  alt={a.name}
+                  title={a.displayPath || a.name}
+                />
+              ))}
+            </div>
+          ) : null}
+          {files.length > 0 ? (
+            <div className="msg-attachments msg-attachments-files">
+              {files.map((a) => (
+                <span
+                  key={a.id}
+                  className="msg-attachment-file"
+                  title={a.displayPath || a.name}
+                >
+                  <span className="attach-kind">
+                    {a.kind === "image" ? "🖼" : "📄"}
+                  </span>
+                  {a.name}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {/* User messages skip the role label — the right-aligned bubble
              shape + accent color already identifies the speaker. */}
           <div className="msg-body">
@@ -6183,28 +6219,39 @@ export function App() {
                   ) : null}
                   {attachments.length > 0 ? (
                     <div className="attach-bar">
-                      {attachments.map((a) => (
-                        <span
-                          className="attach-chip"
-                          key={a.id}
-                          title={a.displayPath}
-                        >
-                          <span className="attach-kind">
-                            {a.kind === "image" ? "🖼" : "📄"}
-                          </span>
-                          {a.name}
-                          <button
-                            className="attach-x"
-                            onClick={() =>
-                              setAttachments((prev) =>
-                                prev.filter((x) => x.id !== a.id),
-                              )
-                            }
+                      {attachments.map((a) => {
+                        const isImage = a.kind === "image" && a.dataBase64 && a.mimeType;
+                        return (
+                          <span
+                            className={`attach-chip${isImage ? " attach-chip-image" : ""}`}
+                            key={a.id}
+                            title={a.displayPath}
                           >
-                            ×
-                          </button>
-                        </span>
-                      ))}
+                            {isImage ? (
+                              <img
+                                className="attach-chip-thumb"
+                                src={`data:${a.mimeType};base64,${a.dataBase64}`}
+                                alt={a.name}
+                              />
+                            ) : (
+                              <span className="attach-kind">
+                                {a.kind === "image" ? "🖼" : "📄"}
+                              </span>
+                            )}
+                            <span className="attach-chip-name">{a.name}</span>
+                            <button
+                              className="attach-x"
+                              onClick={() =>
+                                setAttachments((prev) =>
+                                  prev.filter((x) => x.id !== a.id),
+                                )
+                              }
+                            >
+                              ×
+                            </button>
+                          </span>
+                        );
+                      })}
                     </div>
                   ) : null}
 
