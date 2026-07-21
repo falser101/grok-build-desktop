@@ -925,6 +925,9 @@ const TimelineRow = memo(function TimelineRow({
       <div
         className={`msg msg-user${highlight ? " msg-flash" : ""}`}
         id={msgDomId(item.id)}
+        data-atts-count={atts.length}
+        data-prev-count={previewableImages.length}
+        data-chips-count={fileChips.length}
       >
         <div className="msg-bubble">
           {previewableImages.length > 0 ? (
