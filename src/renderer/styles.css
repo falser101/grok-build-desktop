@@ -4679,7 +4679,38 @@ html[data-theme="light"] .workspace-bar {
 }
 
 .at-icon {
-  font-size: 12px;
+  font-size: 13px;
+  flex: 0 0 auto;
+  width: 18px;
+  text-align: center;
+  font-family: var(--mono);
+}
+
+/* Basename (the file / folder the user actually wants) */
+.at-name {
+  color: var(--text);
+  font-weight: 600;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Parent directory shown muted on the right so the basename stays
+   scannable while context is still one glance away. */
+.at-parent {
+  margin-left: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--text-dim);
+  font-weight: 400;
+  direction: rtl; /* keep the rightmost segment closest to the file */
+  unicode-bidi: plaintext;
 }
 
 .at-empty {

@@ -733,6 +733,80 @@ function msgDomId(id: string): string {
   return `msg-${id}`;
 }
 
+/** Map a file path to a small inline emoji icon used in the @-mention
+ *  suggestion row. Directories always get 📁; files look up the last
+ *  segment's extension in a small table and fall back to 📄. */
+const FILE_ICONS: Record<string, string> = {
+  ".py": "🐍",
+  ".pyi": "🐍",
+  ".ts": "🔷",
+  ".tsx": "🔷",
+  ".js": "🟨",
+  ".jsx": "🟨",
+  ".mjs": "🟨",
+  ".cjs": "🟨",
+  ".rs": "🦀",
+  ".go": "🐹",
+  ".rb": "💎",
+  ".java": "☕",
+  ".kt": "🟪",
+  ".swift": "🐦",
+  ".c": "🔵",
+  ".cc": "🔵",
+  ".cpp": "🔵",
+  ".h": "🔵",
+  ".hpp": "🔵",
+  ".cs": "🟢",
+  ".php": "🟣",
+  ".lua": "🌙",
+  ".sh": "🐚",
+  ".bash": "🐚",
+  ".zsh": "🐚",
+  ".md": "📝",
+  ".mdx": "📝",
+  ".txt": "📄",
+  ".json": "🧾",
+  ".yaml": "🧾",
+  ".yml": "🧾",
+  ".toml": "🧾",
+  ".html": "🌐",
+  ".htm": "🌐",
+  ".css": "🎨",
+  ".scss": "🎨",
+  ".sass": "🎨",
+  ".less": "🎨",
+  ".svg": "🖼",
+  ".png": "🖼",
+  ".jpg": "🖼",
+  ".jpeg": "🖼",
+  ".gif": "🖼",
+  ".webp": "🖼",
+  ".ico": "🖼",
+  ".pdf": "📕",
+  ".zip": "🗜",
+  ".tar": "🗜",
+  ".gz": "🗜",
+  ".tgz": "🗜",
+};
+
+function iconForPath(path: string, isDir: boolean): string {
+  if (isDir) return "📁";
+  const lower = path.toLowerCase();
+  for (const ext of Object.keys(FILE_ICONS)) {
+    if (lower.endsWith(ext)) return FILE_ICONS[ext]!;
+  }
+  // Common special filenames
+  const base = lower.slice(lower.lastIndexOf("/") + 1);
+  if (base === "dockerfile") return "🐳";
+  if (base === "makefile") return "🔧";
+  if (base === "license" || base === "license.md" || base === "license.txt") {
+    return "📜";
+  }
+  if (base.startsWith(".gitignore") || base === ".gitignore") return "🚫";
+  if (base.startsWith(".env")) return "🔐";
+  return "📄";
+}
+
 /** Split text on `@path` mentions and render them as clickable pills. */
 function renderAtMentions(
   text: string,
@@ -6535,22 +6609,39 @@ export function App() {
                         </div>
                       ) : atSuggest && atSuggest.length > 0 ? (
                         <div ref={atListRef} className="at-suggest">
-                          {atSuggest.map((s, i) => (
-                            <button
-                              key={s.path}
-                              className={`at-item ${i === atIndex ? "active" : ""}`}
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                insertAtPath(s.path, s.isDir);
-                              }}
-                            >
-                              <span className="at-icon">
-                                {s.isDir ? "📁" : "📄"}
-                              </span>
-                              {s.path}
-                              {s.isDir ? "/" : ""}
-                            </button>
-                          ))}
+                          {atSuggest.map((s, i) => {
+                            const isDir = s.isDir;
+                            const slashIdx = s.path.lastIndexOf("/");
+                            const name =
+                              slashIdx >= 0
+                                ? s.path.slice(slashIdx + 1)
+                                : s.path;
+                            const parent =
+                              slashIdx > 0 ? s.path.slice(0, slashIdx) : "";
+                            return (
+                              <button
+                                key={s.path}
+                                className={`at-item ${i === atIndex ? "active" : ""}`}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  insertAtPath(s.path, s.isDir);
+                                }}
+                              >
+                                <span className="at-icon">
+                                  {iconForPath(s.path, isDir)}
+                                </span>
+                                <span className="at-name">
+                                  {name}
+                                  {isDir ? "/" : ""}
+                                </span>
+                                {parent ? (
+                                  <span className="at-parent">
+                                    {parent}
+                                  </span>
+                                ) : null}
+                              </button>
+                            );
+                          })}
                         </div>
                       ) : atSuggest && atSuggest.length === 0 && atQuery ? (
                         <div className="at-suggest">
