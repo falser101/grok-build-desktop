@@ -3099,14 +3099,16 @@ export class AgentBackend {
     try {
       const results = await this.pathSuggestViaCli(query, cwd);
 
-      // When the query has no '/' (user is typing a bare name),
-      // also walk the full tree so matches in nested directories
-      // show up (e.g. "@docs" finds "yak/docs/").
-      if (!query.includes("/")) {
-        const deep = await this.pathSuggestRecursive(query, cwd);
-        if (deep.length > 0) {
-          results.push(...deep);
-        }
+      // Always run the recursive walk as well, so nested matches show up
+      // regardless of whether the query has a slash:
+      //   "@docs"   finds "yak/docs/"
+      //   "@docs/"  finds "yak/docs/", "dify/docs/", ...
+      //   "@dify/d" finds anything under dify/ starting with "d"
+      // The recursive matcher scores paths by substring / fuzzy against
+      // both basename and full path, so trailing slashes are fine.
+      const deep = await this.pathSuggestRecursive(query, cwd);
+      if (deep.length > 0) {
+        results.push(...deep);
       }
 
       return results;
