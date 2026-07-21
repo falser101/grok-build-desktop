@@ -211,21 +211,17 @@ function MarkdownBodyInner({ text, className, streaming }: Props) {
   // Belt-and-suspenders vs Sudden unmount on small bursts.
   const deferredSource = useDeferredValue(displaySource);
 
-  if (streaming) {
-    // Plain text only — no remark re-parse per token. Parsing happens once
-    // when streaming flips to false (turn end).
-    return (
-      <div className={`${cls} md-streaming`}>
-        <div className="md-streaming-plain">{source}</div>
-      </div>
-    );
-  }
-
+  // Render ReactMarkdown the entire time — including during streaming — so
+  // bold/italic/code blocks/tables/etc. appear progressively as tokens arrive
+  // instead of "plain text → snap to rendered" when the turn ends. The
+  // rAF throttle + useDeferredValue keep re-parse work bounded to ≤ one
+  // pass per frame even under token storms.
   return (
     <div className={cls}>
       <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
         {deferredSource}
       </ReactMarkdown>
+      {streaming ? <span className="md-streaming-caret" aria-hidden>▍</span> : null}
     </div>
   );
 }

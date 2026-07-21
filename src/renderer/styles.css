@@ -2675,8 +2675,10 @@ body.is-resizing-files-tree * {
   white-space: pre-wrap;
 }
 
-/* Plain streaming caret (user body only). Markdown streaming uses the same
-   caret CSS via .md-streaming .md-streaming-plain (no parsed layer). */
+/* Plain streaming caret (user body only). Markdown streaming uses the
+   .md-streaming-caret span rendered as a sibling of the ReactMarkdown
+   output so bold/italic/code blocks/tables appear progressively as
+   tokens arrive (no more "plain text → snap to rendered" on turn end). */
 .msg-body.streaming:not(.md-body)::after {
   content: "▍";
   animation: blink 1s steps(1) infinite;
@@ -2684,21 +2686,21 @@ body.is-resizing-files-tree * {
   color: var(--accent);
 }
 
-/* Live token stream — plain text only (no remark) until turn completes.
-   Cap re-renders to once per animation frame to keep the caret smooth. */
-.md-streaming-plain {
-  white-space: pre-wrap;
-  word-break: break-word;
+.md-streaming-caret {
+  /* Renders as a sibling of the ReactMarkdown output. Because the markdown
+     content produces block-level nodes (<p>, <ul>, <pre>, ...), this caret
+     inline-block wraps to the line right after the last block — reading
+     naturally as "still typing". The ▍ glyph itself provides width; we
+     only tune color/baseline/blink. */
+  display: inline-block;
+  color: var(--accent);
+  line-height: 1;
+  animation: blink 1s steps(1) infinite;
+  margin-left: 2px;
 }
 
 .md-body.md-streaming {
   position: relative;
-}
-.md-body.md-streaming .md-streaming-plain::after {
-  content: "▍";
-  animation: blink 1s steps(1) infinite;
-  margin-left: 2px;
-  color: var(--accent);
 }
 
 /* —— Markdown (assistant / thought) —— */
