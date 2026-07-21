@@ -831,6 +831,8 @@ function resolveScrollPinnedUser(
  * Fullscreen image viewer used by the user bubble thumbnail click.
  * Backdrop click + Esc both dismiss; the inner image is the only
  * interactive surface so accidental outside clicks can't double-handle.
+ * On dismiss, focus returns to the previously-focused element so the
+ * composer / next keyboard interaction keeps working.
  */
 function ImageLightbox({
   src,
@@ -841,12 +843,24 @@ function ImageLightbox({
   name: string;
   onClose: () => void;
 }) {
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
+    returnFocusRef.current =
+      (document.activeElement as HTMLElement | null) ?? null;
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      // Restore focus on unmount so the composer (or wherever the user
+      // was typing) regains focus after the modal closes.
+      const prev = returnFocusRef.current;
+      if (prev && typeof prev.focus === "function") {
+        // rAF avoids a one-frame race with sibling updates.
+        requestAnimationFrame(() => prev.focus());
+      }
+    };
   }, [onClose]);
 
   return (
