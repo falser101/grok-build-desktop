@@ -7071,14 +7071,10 @@ export function App() {
               title={m.sidePanelToggleHide}
               aria-label={m.sidePanelToggleHide}
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
-                <path
-                  d="M4 4 L12 12 M12 4 L4 12"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                />
-              </svg>
+              {/* Same rectangle-with-divider icon the left sidebar uses
+                  (the "panel-collapsed" variant) — keeping the visual
+                  language identical across both panel chrome. */}
+              <SidebarIcon name="collapse" />
             </button>
           ) : (
             <button
@@ -7088,13 +7084,10 @@ export function App() {
               title={m.sidePanelPin}
               aria-label={m.sidePanelPin}
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
-                {/* Pin glyph: a small thumbtack rotated 45° */}
-                <path
-                  d="M9.5 2 L14 6.5 L11 7 L9 9 L7 9 L6 11 L4 11 L4 9 L6 7 L6 5 L8 3 Z"
-                  fill="currentColor"
-                />
-              </svg>
+              {/* Same rectangle-with-divider icon the left sidebar uses
+                  (the "panel-pinned" variant) so the affordance family
+                  is shared between left and right panel chrome. */}
+              <SidebarIcon name="pin" />
             </button>
           )}
           <div className="right-panel-body">
