@@ -7744,7 +7744,14 @@ export function App() {
                                       // Grok built-in account → weekly/monthly limit %.
                                       const u = snap.usage;
                                       if (u && !u.error) {
-                                        usageText = u.usageShort;
+                                        // Compact period label: "Weekly"→"7d", "Monthly"→"30d".
+                                        const label = u.usageLabel;
+                                        let prefix = "";
+                                        if (label.includes("Week")) prefix = "7d";
+                                        else if (label.includes("Month")) prefix = "30d";
+                                        usageText = prefix
+                                          ? `${prefix} ${u.usageShort}`
+                                          : u.usageShort;
                                         usageHigh = u.usagePct >= 85;
                                       }
                                     } else {
