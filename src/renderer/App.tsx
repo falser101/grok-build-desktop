@@ -7756,10 +7756,19 @@ export function App() {
                                             unit === "CNY" ? "¥" : unit === "USD" ? "$" : unit;
                                           usageText = `${sym}${u.balance.remaining.toFixed(2)}`;
                                         } else if (u.quota) {
-                                          const pct = u.quota.sevenDayPct ?? u.quota.fiveHourPct;
-                                          if (pct != null) {
-                                            usageText = `${Math.round(pct)}%`;
-                                            usageHigh = pct >= 85;
+                                          const parts: string[] = [];
+                                          const fh = u.quota.fiveHourPct;
+                                          const sd = u.quota.sevenDayPct;
+                                          if (fh != null) {
+                                            parts.push(`5h ${Math.round(fh)}%`);
+                                            if (fh >= 85) usageHigh = true;
+                                          }
+                                          if (sd != null) {
+                                            parts.push(`7d ${Math.round(sd)}%`);
+                                            if (sd >= 85) usageHigh = true;
+                                          }
+                                          if (parts.length > 0) {
+                                            usageText = parts.join(" · ");
                                           }
                                         }
                                       }
