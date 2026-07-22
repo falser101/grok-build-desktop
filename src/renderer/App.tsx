@@ -2176,8 +2176,6 @@ export function App() {
     useState<SettingsSectionId>("general");
   /** Desktop provider configKey → provider (for composer grouping). */
   const [modelKeyIndex, setModelKeyIndex] = useState<ModelConfigKeyIndex>({});
-  /** Filter model menu by provider id (`all` = every group). */
-  const [modelProviderFilter, setModelProviderFilter] = useState<string>("all");
   /** Provider balance/usage results keyed by providerId (for inline tab display). */
   const [providerUsageMap, setProviderUsageMap] = useState<
     Record<string, ProviderUsageResult | null>
@@ -5665,11 +5663,6 @@ export function App() {
     [snap.availableModels, modelKeyIndex, m.modelsGroupBuiltin],
   );
 
-  const filteredModelGroups = useMemo(() => {
-    if (modelProviderFilter === "all") return modelGroups;
-    return modelGroups.filter((g) => g.id === modelProviderFilter);
-  }, [modelGroups, modelProviderFilter]);
-
   const currentProviderName = useMemo(() => {
     if (!snap.modelId) return undefined;
     return modelKeyIndex[snap.modelId]?.providerName;
@@ -7729,57 +7722,6 @@ export function App() {
                               </div>
                             ) : (
                               <>
-                                {modelGroups.length > 1 ? (
-                                  <div className="model-provider-tabs">
-                                    <button
-                                      type="button"
-                                      className={`model-provider-tab ${
-                                        modelProviderFilter === "all"
-                                          ? "active"
-                                          : ""
-                                      }`}
-                                      onClick={() =>
-                                        setModelProviderFilter("all")
-                                      }
-                                    >
-                                      {m.modelsAllProviders}
-                                    </button>
-                                    {modelGroups.map((g) => {
-                                      const usage = providerUsageMap[g.id];
-                                      const balText =
-                                        usage?.success && usage.balance
-                                          ? (usage.balance.unit === "CNY"
-                                              ? "¥"
-                                              : usage.balance.unit === "USD"
-                                                ? "$"
-                                                : usage.balance.unit) +
-                                            usage.balance.remaining.toFixed(2)
-                                          : null;
-                                      return (
-                                        <button
-                                          key={g.id}
-                                          type="button"
-                                          className={`model-provider-tab ${
-                                            modelProviderFilter === g.id
-                                              ? "active"
-                                              : ""
-                                          }`}
-                                          onClick={() =>
-                                            setModelProviderFilter(g.id)
-                                          }
-                                          title={g.name}
-                                        >
-                                          {g.name}
-                                          {balText ? (
-                                            <span className="model-provider-tab-balance">
-                                              {balText}
-                                            </span>
-                                          ) : null}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                ) : null}
                                 {snap.accountAvailable === false ? (
                                   <div
                                     className="dropdown-notice warn"
@@ -7789,43 +7731,61 @@ export function App() {
                                     {m.accountRequiredForGrokHint}
                                   </div>
                                 ) : null}
-                                {filteredModelGroups.length === 0 ? (
+                                {modelGroups.length === 0 ? (
                                   <div className="dropdown-empty">
                                     {m.modelsNoModelsInProvider}
                                   </div>
                                 ) : (
-                                  filteredModelGroups.map((group) => (
-                                    <div
-                                      key={group.id}
-                                      className="model-group"
-                                    >
-                                      {modelProviderFilter === "all" &&
-                                      modelGroups.length > 1 ? (
+                                  modelGroups.map((group) => {
+                                    // Balance / usage next to provider label.
+                                    let usageText: string | null = null;
+                                    if (group.id === "builtin") {
+                                      // Grok built-in account → show token usage.
+                                      usageText = tokenUsageLabel;
+                                    } else {
+                                      const usage = providerUsageMap[group.id];
+                                      if (usage?.success && usage.balance) {
+                                        const u = usage.balance.unit;
+                                        const sym =
+                                          u === "CNY" ? "¥" : u === "USD" ? "$" : u;
+                                        usageText = `${sym}${usage.balance.remaining.toFixed(2)}`;
+                                      }
+                                    }
+                                    return (
+                                      <div
+                                        key={group.id}
+                                        className="model-group"
+                                      >
                                         <div className="model-group-label">
-                                          {group.name}
+                                          <span>{group.name}</span>
+                                          {usageText ? (
+                                            <span className="model-group-usage">
+                                              {usageText}
+                                            </span>
+                                          ) : null}
                                         </div>
-                                      ) : null}
-                                      {group.models.map((mod) => (
-                                        <button
-                                          key={mod.modelId}
-                                          type="button"
-                                          className={`dropdown-item ${
-                                            mod.modelId === snap.modelId
-                                              ? "active"
-                                              : ""
-                                          }`}
-                                          onClick={() => {
-                                            void onSetModel(mod.modelId);
-                                            setMenu(null);
-                                          }}
-                                        >
-                                          <span className="di-title">
-                                            {mod.name}
-                                          </span>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  ))
+                                        {group.models.map((mod) => (
+                                          <button
+                                            key={mod.modelId}
+                                            type="button"
+                                            className={`dropdown-item ${
+                                              mod.modelId === snap.modelId
+                                                ? "active"
+                                                : ""
+                                            }`}
+                                            onClick={() => {
+                                              void onSetModel(mod.modelId);
+                                              setMenu(null);
+                                            }}
+                                          >
+                                            <span className="di-title">
+                                              {mod.name}
+                                            </span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    );
+                                  })
                                 )}
                                 <button
                                   type="button"
