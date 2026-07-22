@@ -973,6 +973,63 @@ async function mergeDiskSkillsIntoCommands(
   return out;
 }
 
+/**
+ * Merge two command catalogs by lowercase name.
+ * `primary` wins on conflicts; entries only in `extras` are kept (so a
+ * pre-session `commands/list` pull cannot erase session ACU items like
+ * `/loop` or skills that list omitted). Fills missing skill meta from extras.
+ */
+function unionAvailableCommands(
+  primary: AvailableCommand[],
+  extras: AvailableCommand[],
+): AvailableCommand[] {
+  const byName = new Map<string, AvailableCommand>();
+  for (const c of primary) {
+    byName.set(c.name.toLowerCase(), { ...c });
+  }
+  for (const c of extras) {
+    const key = c.name.toLowerCase();
+    const existing = byName.get(key);
+    if (!existing) {
+      byName.set(key, { ...c });
+      continue;
+    }
+    if (!existing.skillPath && c.skillPath) existing.skillPath = c.skillPath;
+    if (!existing.skillScope && c.skillScope) existing.skillScope = c.skillScope;
+    if (!existing.description && c.description) {
+      existing.description = c.description;
+    }
+    if (!existing.inputHint && c.inputHint) existing.inputHint = c.inputHint;
+  }
+  return [...byName.values()];
+}
+
+/** Compact catalog summary for debug logs (`[slash-catalog] …`). */
+function summarizeCommandCatalog(cmds: AvailableCommand[]): string {
+  const lower = cmds.map((c) => c.name.toLowerCase());
+  const hasGoal = lower.includes("goal");
+  const hasLoop = lower.includes("loop");
+  const skills = cmds.filter(
+    (c) =>
+      Boolean(c.skillPath || c.skillScope) ||
+      /^(local|repo|user|server|bundled|plugin):/i.test(c.name),
+  );
+  const sample = skills
+    .slice(0, 10)
+    .map((s) => s.name)
+    .join(",");
+  const builtins = cmds
+    .filter((c) => !skills.some((s) => s.name === c.name))
+    .slice(0, 15)
+    .map((c) => c.name)
+    .join(",");
+  return (
+    `n=${cmds.length} goal=${hasGoal} loop=${hasLoop} skills=${skills.length}` +
+    ` skillSample=[${sample}${skills.length > 10 ? ",…" : ""}]` +
+    ` builtinsSample=[${builtins}]`
+  );
+}
+
 function titleFromSummary(s: Record<string, JsonValue>): string {
   const title =
     asString(s.title) ||
@@ -1231,6 +1288,17 @@ export class AgentBackend {
 
   private log(level: "info" | "warn" | "error", message: string): void {
     this.emit({ type: "log", level, message });
+  }
+
+  /**
+   * Slash-catalog debug: always mirrors to main-process stdout so
+   * `electron .` / packaged logs are easy to grep for `[slash-catalog]`.
+   */
+  private logSlashCatalog(message: string): void {
+    const line = `[slash-catalog] ${message}`;
+    // eslint-disable-next-line no-console
+    console.log(line);
+    this.log("info", line);
   }
 
   snapshot(): AppSnapshot {
@@ -2370,8 +2438,30 @@ export class AgentBackend {
     }
     this.finalizeStreamingAssistant();
     this.finalizeStreamingThought();
+    // Orphan sweep: tracking ids can be lost while a bubble still has
+    // streaming:true (cancel mid-flight, session park, late id mismatch).
+    // Leaving those flags on leaves the blinking caret after the turn ends.
+    this.clearOrphanStreamingFlags();
     this.inThinkTag = false;
     this.thinkHold = "";
+  }
+
+  /** Clear streaming:true on any assistant/thought not tied to live ids. */
+  private clearOrphanStreamingFlags(): void {
+    let changed = false;
+    for (let i = 0; i < this.timeline.length; i++) {
+      const item = this.timeline[i]!;
+      if (
+        (item.kind === "assistant" || item.kind === "thought") &&
+        item.streaming
+      ) {
+        this.timeline[i] = { ...item, streaming: false };
+        changed = true;
+      }
+    }
+    if (changed && !this.replaying) {
+      this.emitSnapshot();
+    }
   }
 
   private finalizeStreamingAssistant(): void {
@@ -2690,6 +2780,10 @@ export class AgentBackend {
     const bootstrapCmds = parseAvailableCommands(
       meta?.availableCommands as JsonValue | undefined,
     );
+    this.logSlashCatalog(
+      `initialize raw availableCommands n=${bootstrapCmds.length} ` +
+        summarizeCommandCatalog(bootstrapCmds),
+    );
     if (bootstrapCmds.length > 0) {
       this.availableCommands = await mergeDiskSkillsIntoCommands(
         bootstrapCmds,
@@ -2701,6 +2795,10 @@ export class AgentBackend {
         this.workspace,
       );
     }
+    this.logSlashCatalog(
+      `initialize after disk-merge workspace=${this.workspace ?? "(none)"} ` +
+        summarizeCommandCatalog(this.availableCommands),
+    );
     const defaultAuth = asString(meta?.defaultAuthMethodId) ?? "cached_token";
 
     // Soft auth: only require a Grok credential when one is actually
@@ -3029,8 +3127,11 @@ export class AgentBackend {
   /**
    * Reset to an empty chat with no workspace/session.
    * Parks the previous session without cancelling its in-flight turn.
+   *
+   * Reseeds the slash catalog from disk skills so the `/` popup still shows
+   * the Skills section on the home screen (previously wiped to `[]`).
    */
-  prepareNewChat(): void {
+  async prepareNewChat(): Promise<void> {
     // Keep background turns running; only unfocus the UI.
     this.parkActiveSession();
     this.workspace = undefined;
@@ -3038,8 +3139,12 @@ export class AgentBackend {
     this.sessionTitle = undefined;
     this.modelId = undefined;
     this.reasoningEffort = undefined;
-    this.availableCommands = [];
     this.contextWindow = undefined;
+    // Disk-only reseed: no session builtins yet, but skills stay invocable in the menu.
+    this.availableCommands = await mergeDiskSkillsIntoCommands([], undefined);
+    this.logSlashCatalog(
+      `prepareNewChat reseed ${summarizeCommandCatalog(this.availableCommands)}`,
+    );
     this.emitSnapshot();
     this.log("info", "Prepared empty chat (choose workspace to start)");
   }
@@ -3086,19 +3191,34 @@ export class AgentBackend {
   }
 
   /**
-   * Pull slash-command catalog for the current workspace.
+   * Pull slash-command catalog for the current workspace (desktop backup).
    * Prefer `_x.ai/commands/list` (agent-serve wire); fall back to unprefixed.
+   *
+   * Primary source of truth is still ACP `available_commands_update` (same as
+   * CLI). `commands/list` uses pre-session gates (no `/loop`, limited `/goal`),
+   * so we **union** with the existing catalog and never drop session-advertised
+   * names that list omitted.
    */
   async refreshCommands(): Promise<void> {
+    this.logSlashCatalog(
+      `refreshCommands start session=${this.sessionId ?? "(none)"} ` +
+        `workspace=${this.workspace ?? "(none)"} ` +
+        `live ${summarizeCommandCatalog(this.availableCommands)}`,
+    );
     // Skip only when the WebSocket isn't up. Custom-provider users can
     // legitimately use slash commands without a Grok account.
     if (!this.client || !this.client.connected) {
       // Still surface disk skills so `/` menu isn't empty of skills offline.
-      const merged = await mergeDiskSkillsIntoCommands(
+      const live = this.availableCommands.slice();
+      const merged = await mergeDiskSkillsIntoCommands(live, this.workspace);
+      // Union with CURRENT catalog (ACU may land while we await).
+      this.availableCommands = unionAvailableCommands(
+        merged,
         this.availableCommands,
-        this.workspace,
       );
-      this.availableCommands = merged;
+      this.logSlashCatalog(
+        `refreshCommands offline-merge ${summarizeCommandCatalog(this.availableCommands)}`,
+      );
       this.emitSnapshot();
       return;
     }
@@ -3108,6 +3228,7 @@ export class AgentBackend {
     const methods = ["_x.ai/commands/list", "x.ai/commands/list"] as const;
     let list: AvailableCommand[] = [];
     let got = false;
+    let usedMethod: string | undefined;
     for (const method of methods) {
       try {
         const raw = await client.request(method, params, 30_000);
@@ -3118,36 +3239,70 @@ export class AgentBackend {
         if (parsed.length > 0 || rec?.commands !== undefined) {
           list = parsed;
           got = true;
+          usedMethod = method;
           break;
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.log("warn", `commands/list via ${method}: ${message}`);
+        this.logSlashCatalog(`commands/list fail method=${method} err=${message}`);
       }
     }
     if (!got) {
+      // Do not wipe live ACU catalog when list fails.
       list = this.availableCommands.slice();
+      this.logSlashCatalog(
+        "commands/list got=false, falling back to live catalog",
+      );
+    } else {
+      this.logSlashCatalog(
+        `commands/list ok method=${usedMethod} ${summarizeCommandCatalog(list)}`,
+      );
     }
     const merged = await mergeDiskSkillsIntoCommands(list, this.workspace);
-    this.availableCommands = merged;
-    const skillN = merged.filter((c) => c.skillPath || c.skillScope).length;
+    // CRITICAL: union with *current* this.availableCommands at end of await —
+    // ACU often lands while commands/list is in flight. Capturing `previous`
+    // at start then overwriting dropped session-only entries (e.g. /loop):
+    // log showed ACU n=35 loop=true then refresh done n=33 loop=false.
+    this.availableCommands = unionAvailableCommands(
+      merged,
+      this.availableCommands,
+    );
+    const skillN = this.availableCommands.filter(
+      (c) => c.skillPath || c.skillScope,
+    ).length;
+    this.logSlashCatalog(
+      `refreshCommands done union ${summarizeCommandCatalog(this.availableCommands)}`,
+    );
     this.emitSnapshot();
     this.log(
       "info",
-      `Loaded ${merged.length} slash commands (${skillN} skills)`,
+      `Loaded ${this.availableCommands.length} slash commands (${skillN} skills)`,
     );
   }
 
-  private applyAvailableCommands(commands: AvailableCommand[]): void {
-    this.availableCommands = commands;
-    if (!this.replaying) this.emitSnapshot();
-    // Session push may omit skill _meta or only list builtins — merge disk.
-    void mergeDiskSkillsIntoCommands(commands, this.workspace).then(
-      (merged) => {
-        this.availableCommands = merged;
-        if (!this.replaying) this.emitSnapshot();
-      },
+  /**
+   * Apply a session (or initialize) command catalog — CLI-equivalent of
+   * draining `AvailableCommandsUpdate`. Always merge disk skills, then emit
+   * (including during replaying so cold load does not leave `/` empty).
+   */
+  private async applyAvailableCommands(
+    commands: AvailableCommand[],
+  ): Promise<void> {
+    this.logSlashCatalog(
+      `applyAvailableCommands in replaying=${this.replaying} ` +
+        `session=${this.sessionId ?? "(none)"} ` +
+        summarizeCommandCatalog(commands),
     );
+    const merged = await mergeDiskSkillsIntoCommands(
+      commands,
+      this.workspace,
+    );
+    this.availableCommands = merged;
+    this.logSlashCatalog(
+      `applyAvailableCommands after disk-merge ${summarizeCommandCatalog(merged)}`,
+    );
+    this.emitSnapshot();
   }
 
   async newSession(workspace: string): Promise<void> {
@@ -3187,7 +3342,6 @@ export class AgentBackend {
       this.sessionMode = "default";
       this.modelId = undefined;
       this.reasoningEffort = undefined;
-      this.availableCommands = [];
       this.contextWindow = undefined;
       this.tokensUsed = undefined;
       this.timeline = [];
@@ -3195,6 +3349,15 @@ export class AgentBackend {
       this.todos = [];
       this.planContent = undefined;
       this.resetTurnFlags();
+      // Keep `/` skills visible while session/new is in flight (was wiped to []).
+      this.availableCommands = await mergeDiskSkillsIntoCommands(
+        [],
+        workspace,
+      );
+      this.logSlashCatalog(
+        `newSession pre-create reseed workspace=${workspace} ` +
+          summarizeCommandCatalog(this.availableCommands),
+      );
       this.emitSnapshot();
 
       const newParams: Record<string, JsonValue> = {
@@ -3702,8 +3865,9 @@ export class AgentBackend {
     const kind = asString(update.sessionUpdate);
     if (!kind) return;
 
-    // Skip streaming flag during replay — history should look finished
-    const streaming = !this.replaying;
+    // Streaming caret only while a live turn is in flight. Replay and
+    // post-turn late chunks must not leave a blinking ▍ after the RPC ends.
+    const streaming = !this.replaying && this.busy;
 
     if (kind === "user_message_chunk") {
       // Live prompts already append the user bubble in sendPrompt — skip echo.
@@ -4052,14 +4216,33 @@ export class AgentBackend {
       kind === "available_commands_update" ||
       kind === "availableCommandsUpdate"
     ) {
-      // Skip historical catalog spam during session/load replay.
-      if (this.replaying) return;
+      // Align with CLI pager: always apply AvailableCommandsUpdate (including
+      // during session/load). Agent storage already drops historical ACU lines
+      // from replay; live post-load re-advertise must reach the client. Skipping
+      // while replaying was wiping skills/goal/loop until a weaker commands/list
+      // pull ran — and list uses pre-session gates (no /loop).
+      const rawKey =
+        update.availableCommands !== undefined
+          ? "availableCommands"
+          : update.available_commands !== undefined
+            ? "available_commands"
+            : "(missing)";
       const cmds = parseAvailableCommands(
         (update.availableCommands ?? update.available_commands) as
           | JsonValue
           | undefined,
       );
-      this.applyAvailableCommands(cmds);
+      this.logSlashCatalog(
+        `ACU received replaying=${this.replaying} key=${rawKey} ` +
+          `parsed ${summarizeCommandCatalog(cmds)} ` +
+          `prev ${summarizeCommandCatalog(this.availableCommands)}`,
+      );
+      // Ignore empty spam when we already have a catalog.
+      if (cmds.length === 0 && this.availableCommands.length > 0) {
+        this.logSlashCatalog("ACU ignored empty update (catalog already non-empty)");
+        return;
+      }
+      void this.applyAvailableCommands(cmds);
       return;
     }
 
@@ -5089,6 +5272,7 @@ export class AgentBackend {
     if (!this.client || !this.sessionId || this.connection !== "ready") {
       // No active session to cancel — force-clear busy so the UI stop
       // button does not stay stuck even if the prompt RPC never settles.
+      this.finalizeStreaming();
       this.busy = false;
       this.clearTurnPlanArtifacts();
       this.emitSnapshot();
@@ -5116,6 +5300,9 @@ export class AgentBackend {
     if (this.compacting) {
       this.finishCompact("cancelled");
     }
+    // Drop the streaming caret immediately — suppressStreamingAfterCancel
+    // only blocks new chunks; open bubbles still need streaming:false.
+    this.finalizeStreaming();
     this.busy = false;
     this.clearTurnPlanArtifacts();
     this.emitSnapshot();
@@ -5186,6 +5373,7 @@ export class AgentBackend {
       if (this.compacting) {
         this.finishCompact("cancelled");
       }
+      this.finalizeStreaming();
       this.busy = false;
       this.clearTurnPlanArtifacts();
       this.emitSnapshot();

@@ -417,7 +417,7 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("agent:prepareNewChat", async () => {
-    backend.prepareNewChat();
+    await backend.prepareNewChat();
   });
 
   ipcMain.handle(

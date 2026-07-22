@@ -62,6 +62,7 @@ import {
   tryHandleLocalSlash,
   type SlashMenuItem,
 } from "./slash";
+import { stripComposerIntentSlashPrefix } from "./stripComposerIntentSlashPrefix";
 import {
   copyText,
   downloadTextFile,
@@ -1459,16 +1460,20 @@ const ThoughtRow = memo(function ThoughtRow({
   item,
   m,
   onOpenAtFile,
+  liveStreaming,
 }: {
   item: Extract<TimelineItem, { kind: "thought" }>;
   m: Messages;
   onOpenAtFile?: (path: string) => void;
+  /** True only while the session turn is still busy (hides stuck caret). */
+  liveStreaming?: boolean;
 }) {
   const startRef = useRef<number>(item.createdAt ?? Date.now());
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
+  const streaming = Boolean(liveStreaming);
 
   useEffect(() => {
-    if (item.streaming) {
+    if (streaming) {
       // Reopen after MiniMax-style reconnect — keep original start.
       setElapsedMs(null);
       return;
@@ -1478,10 +1483,10 @@ const ThoughtRow = memo(function ThoughtRow({
       if (prev != null) return prev;
       return Math.max(0, Date.now() - startRef.current);
     });
-  }, [item.streaming]);
+  }, [streaming]);
 
   let label: string;
-  if (item.streaming) {
+  if (streaming) {
     label = m.thoughtStreaming;
   } else if (elapsedMs != null && elapsedMs > 50) {
     // Skip near-zero durations (instant replay finalize).
@@ -1506,7 +1511,7 @@ const ThoughtRow = memo(function ThoughtRow({
       <MarkdownBody
         className="thought-body"
         text={item.text}
-        streaming={item.streaming}
+        streaming={streaming}
         onOpenAtFile={onOpenAtFile}
       />
     </details>
@@ -1520,6 +1525,7 @@ const TimelineRow = memo(function TimelineRow({
   onOpenAtFile,
   onOpenLightbox,
   skillByLower,
+  turnBusy,
 }: {
   item: TimelineItem;
   m: Messages;
@@ -1528,6 +1534,8 @@ const TimelineRow = memo(function TimelineRow({
   onOpenLightbox?: (img: { src: string; mime: string; name: string }) => void;
   /** Known skill slash names (lowercase → canonical) for chip rendering. */
   skillByLower?: Map<string, string>;
+  /** Session turn busy — streaming caret only while true. */
+  turnBusy?: boolean;
 }) {
   if (item.kind === "system") {
     return <div className="system-line">{item.text}</div>;
@@ -1631,13 +1639,16 @@ const TimelineRow = memo(function TimelineRow({
   if (item.kind === "assistant") {
     // No role label — conversation history is self-evident; copy sits in
     // the hover actions strip like user bubbles.
+    // Caret only while the turn is busy — backend may leave streaming:true
+    // on a bubble after the RPC settles; never blink after the turn ends.
+    const liveStreaming = Boolean(turnBusy && item.streaming);
     return (
       <div className="msg msg-assistant">
         <div className="msg-bubble">
           <MarkdownBody
             className="msg-body"
             text={item.text}
-            streaming={item.streaming}
+            streaming={liveStreaming}
             onOpenAtFile={onOpenAtFile}
           />
           <div className="msg-actions">
@@ -1649,7 +1660,12 @@ const TimelineRow = memo(function TimelineRow({
   }
   if (item.kind === "thought") {
     return (
-      <ThoughtRow item={item} m={m} onOpenAtFile={onOpenAtFile} />
+      <ThoughtRow
+        item={item}
+        m={m}
+        onOpenAtFile={onOpenAtFile}
+        liveStreaming={Boolean(turnBusy && item.streaming)}
+      />
     );
   }
   if (item.kind === "compact") {
@@ -1743,6 +1759,7 @@ const ChatTimeline = memo(function ChatTimeline({
           onOpenAtFile={onOpenAtFile}
           onOpenLightbox={onOpenLightbox}
           skillByLower={skillByLower}
+          turnBusy={busy}
         />
       ))}
       {showPending ? (
@@ -2125,6 +2142,16 @@ export function App() {
   const draftRef = useRef("");
   const [hasDraft, setHasDraft] = useState(false);
   const suggestRafRef = useRef<number | null>(null);
+  /**
+   * Always-current slash/@ scheduler. ContentEditable onInput is a stable
+   * useCallback([]) and must not close over first-render scheduleSuggest
+   * (which saw availableCommands=[] → only plan/ask/compact/agent).
+   */
+  const scheduleSuggestRef = useRef<(value: string, cursor: number) => void>(
+    () => {},
+  );
+  const slashSuggestRef = useRef<SlashMenuItem[] | null>(null);
+  const atSuggestRef = useRef<PathSuggestion[] | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   /**
@@ -2199,7 +2226,9 @@ export function App() {
   const [slashSuggest, setSlashSuggest] = useState<SlashMenuItem[] | null>(
     null,
   );
+  slashSuggestRef.current = slashSuggest;
   const [slashIndex, setSlashIndex] = useState(0);
+  atSuggestRef.current = atSuggest;
   const [sessionQuery, setSessionQuery] = useState("");
   const [searchHits, setSearchHits] = useState<SessionSearchHit[] | null>(null);
   const [searchBusy, setSearchBusy] = useState(false);
@@ -2226,11 +2255,13 @@ export function App() {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   /**
-   * True after the user manually closes the right panel during the current
-   * run. Resets when a new run starts; suppresses the auto-pop of PlanPanel
-   * so we don't fight the user's choice.
+   * True after the user manually closes the right panel while a plan is
+   * awaiting approval. Resets when the approval clears or the session
+   * changes; suppresses auto-pop so we don't fight the user's choice.
    */
   const planAutoPopDismissed = useRef(false);
+  /** Previous rightPanelOpen for edge-detecting a user close. */
+  const prevRightPanelOpenRef = useRef(false);
   /** Track the session id so the dismissed flag resets between sessions. */
   const lastSessionIdRef = useRef<string | undefined>(undefined);
   /** Inline file-tree pane collapse state (false = expanded). */
@@ -2466,16 +2497,6 @@ export function App() {
         return fallback.id;
       });
       return next;
-    });
-  }, []);
-
-  /** Plan/Terminal aren't multi-instance by themselves — keep one of each. */
-  const ensurePlanTabOpen = useCallback(() => {
-    setRightPanelTabs((prev) => {
-      if (prev.some((t) => t.kind === "plan")) return prev;
-      const id = newRightTabId();
-      setActiveTabId(id);
-      return [...prev, { id, kind: "plan" }];
     });
   }, []);
 
@@ -2936,12 +2957,33 @@ export function App() {
     void window.desktop.getAccountStatus().then(setAccountStatus).catch(() => {
       /* ignore */
     });
+    let lastCatalogSig = "";
     const offAgent = window.desktop.onEvent((event) => {
       if (event.type === "snapshot") {
         // Apply immediately — busy / connection / permission must not lag
         // behind session switches (startTransition left the send button stuck).
         // During cold load the backend suppresses intermediate timeline frames.
         setSnap(event.snapshot);
+        const cmds = event.snapshot.availableCommands ?? [];
+        const lower = cmds.map((c) => c.name.toLowerCase());
+        const skillsN = cmds.filter(
+          (c) =>
+            Boolean(c.skillPath || c.skillScope) ||
+            /^(local|repo|user|server|bundled|plugin):/i.test(c.name),
+        ).length;
+        const sig = `${cmds.length}|${lower.includes("goal")}|${lower.includes("loop")}|${skillsN}`;
+        if (sig !== lastCatalogSig) {
+          lastCatalogSig = sig;
+          // eslint-disable-next-line no-console
+          console.log("[slash-catalog] ui snapshot", {
+            n: cmds.length,
+            goal: lower.includes("goal"),
+            loop: lower.includes("loop"),
+            skillsN,
+            sessionId: event.snapshot.sessionId,
+            replaying: event.snapshot.replaying,
+          });
+        }
       } else if (event.type === "log" && event.level === "error") {
         setLocalError(event.message);
       }
@@ -3288,21 +3330,22 @@ export function App() {
       if (t?.kind === "plan") return;
     }
     if (viewRef.current !== "chat") return;
-    setRightPanelOpen(true);
+    // openPlanTab already sets rightPanelOpen=true.
     openPlanTab();
-  }, [
-    snap.sessionId,
-    snap.pendingPlanApproval,
-    setRightPanelOpen,
-    openPlanTab,
-  ]);
+  }, [snap.sessionId, snap.pendingPlanApproval, openPlanTab]);
 
-  // If the user closes the right panel mid-run while a plan is awaiting
-  // approval, remember it so we don't re-pop it on every approval update.
+  // Mark dismissed only on a true user close: right panel goes open→closed
+  // while a plan approval is still pending (not when approval first arrives
+  // with the panel still closed).
   useEffect(() => {
-    if (snap.pendingPlanApproval && !rightPanelOpen) {
+    if (
+      snap.pendingPlanApproval &&
+      prevRightPanelOpenRef.current &&
+      !rightPanelOpen
+    ) {
       planAutoPopDismissed.current = true;
     }
+    prevRightPanelOpenRef.current = rightPanelOpen;
   }, [snap.pendingPlanApproval, rightPanelOpen]);
 
   // Close model/mode/effort menus on outside click or Escape
@@ -4027,13 +4070,16 @@ export function App() {
     resizeTextarea(ta);
     const nonEmpty = text.trim().length > 0;
     setHasDraft((prev) => (prev === nonEmpty ? prev : nonEmpty));
+    // Always re-evaluate when draft looks like / or @ (or was suggesting).
+    // Use scheduleSuggestRef so a stable onInput handler never closes over
+    // first-render availableCommands=[] (that only showed plan/ask/compact/agent).
     if (
       text.startsWith("/") ||
       text.includes("@") ||
-      slashSuggest != null ||
-      atSuggest != null
+      slashSuggestRef.current != null ||
+      atSuggestRef.current != null
     ) {
-      scheduleSuggest(text, text.length);
+      scheduleSuggestRef.current(text, text.length);
     }
   }
 
@@ -5032,6 +5078,9 @@ export function App() {
   // and drops its result if a newer call has been issued meanwhile.
   const atGenRef = useRef(0);
 
+  const availableCommandsRef = useRef(snap.availableCommands);
+  availableCommandsRef.current = snap.availableCommands;
+
   const updateSlashSuggest = useCallback(
     (value: string, cursor: number) => {
       if (!isSlashCompose(value, cursor)) {
@@ -5040,7 +5089,30 @@ export function App() {
         return;
       }
       const q = slashNameQuery(value, cursor);
-      const list = filterSlashMenu(snap.availableCommands, q, m);
+      // Prefer ref so a rAF scheduled before the last snapshot still sees
+      // the latest catalog (and stable onInput never freezes empty acp).
+      const acp = availableCommandsRef.current ?? [];
+      const list = filterSlashMenu(acp, q, m);
+      // Debug: DevTools console — greppable `[slash-catalog]`.
+      if (q !== slashQueryRef.current) {
+        const lower = acp.map((c) => c.name.toLowerCase());
+        const skills = acp.filter(
+          (c) =>
+            Boolean(c.skillPath || c.skillScope) ||
+            /^(local|repo|user|server|bundled|plugin):/i.test(c.name),
+        );
+        // eslint-disable-next-line no-console
+        console.log("[slash-catalog] ui filter", {
+          q,
+          acpN: acp.length,
+          goal: lower.includes("goal"),
+          loop: lower.includes("loop"),
+          skillsN: skills.length,
+          menuN: list.length,
+          menuNames: list.map((x) => x.name).slice(0, 20),
+          menuSections: list.map((x) => x.section).slice(0, 20),
+        });
+      }
       setSlashSuggest(list);
       // Only reset highlight when the filter query changes — not on every
       // keyup (ArrowUp/Down would otherwise always snap back to index 0).
@@ -5055,7 +5127,7 @@ export function App() {
       // Prefer slash menu over @ when both could match (slash owns leading `/`).
       setAtSuggest((prev) => (prev == null ? prev : null));
     },
-    [snap.availableCommands, m],
+    [m],
   );
 
   const updateAtSuggest = useCallback(async (value: string, cursor: number) => {
@@ -5133,15 +5205,46 @@ export function App() {
       }
       suggestRafRef.current = requestAnimationFrame(() => {
         suggestRafRef.current = null;
-        // Prefer live DOM value (IME may have advanced since schedule).
-        const el = textareaRef.current;
-        const v = el?.value ?? value;
-        const c = el?.selectionStart ?? cursor;
+        // Prefer contenteditable plain text + caret (hidden textarea is not
+        // focused; selectionStart stays 0 and can break slash detection).
+        const ce = contentEditableRef.current;
+        const ta = textareaRef.current;
+        let v = draftRef.current || ta?.value || value;
+        let c = cursor;
+        if (ce) {
+          let text = "";
+          const walk = (node: Node) => {
+            if (node.nodeType === Node.TEXT_NODE) {
+              text += node.textContent ?? "";
+            } else if (isComposerPillEl(node)) {
+              text += composerPillPlainText(node);
+            } else {
+              for (const child of Array.from(node.childNodes)) walk(child);
+            }
+          };
+          walk(ce);
+          if (text) v = text;
+          const sel = window.getSelection();
+          if (
+            sel &&
+            sel.rangeCount > 0 &&
+            sel.anchorNode &&
+            ce.contains(sel.anchorNode)
+          ) {
+            c = getTextOffset(ce, sel.anchorNode, sel.anchorOffset);
+          } else {
+            c = v.length;
+          }
+        } else if (ta && document.activeElement === ta) {
+          v = ta.value;
+          c = ta.selectionStart ?? v.length;
+        }
         updateSuggest(v, c);
       });
     },
     [updateSuggest],
   );
+  scheduleSuggestRef.current = scheduleSuggest;
 
   const applySlashMenuItem = useCallback(
     async (s: SlashMenuItem) => {
@@ -5168,9 +5271,12 @@ export function App() {
 
       if (s.action === "set_intent" && s.intentId === "goal") {
         activateGoalIntent();
-        // Keep existing draft body; strip a leading /goal if user had typed it.
-        const cur = (draftRef.current || "").replace(/^\s*\/goal\s*/i, "");
-        if (cur !== draftRef.current) setComposerText(cur);
+        // Drop in-progress `/…` or full `/goal` prefix; keep any body text.
+        const cur = stripComposerIntentSlashPrefix(
+          draftRef.current || "",
+          "goal",
+        );
+        if (cur !== (draftRef.current || "")) setComposerText(cur);
         requestAnimationFrame(() => {
           contentEditableRef.current?.focus();
           textareaRef.current?.focus();
@@ -5180,11 +5286,11 @@ export function App() {
 
       if (s.action === "set_intent" && s.intentId === "loop") {
         activateLoopIntent();
-        const cur = (draftRef.current || "").replace(
-          /^\s*\/loop(?:\s+\S+)?\s*/i,
-          "",
+        const cur = stripComposerIntentSlashPrefix(
+          draftRef.current || "",
+          "loop",
         );
-        if (cur !== draftRef.current) setComposerText(cur);
+        if (cur !== (draftRef.current || "")) setComposerText(cur);
         requestAnimationFrame(() => {
           contentEditableRef.current?.focus();
           textareaRef.current?.focus();
@@ -6276,31 +6382,6 @@ export function App() {
     return () => document.removeEventListener("keydown", onKey, true);
   }, [view, openRightTool]);
 
-  // Auto-open Plan panel when a plan approval arrives or todos first appear.
-  const prevPlanApprovalRef = useRef<string | null>(null);
-  const prevTodoCountRef = useRef(0);
-  useEffect(() => {
-    if (view !== "chat") return;
-    const approvalId = snap.pendingPlanApproval?.requestId ?? null;
-    if (approvalId && approvalId !== prevPlanApprovalRef.current) {
-      openRightTool("plan");
-    }
-    prevPlanApprovalRef.current = approvalId;
-
-    const n = snap.todos?.length ?? 0;
-    if (n > 0 && prevTodoCountRef.current === 0 && !rightPanelOpen) {
-      // Soft open: only when panel is closed and todos appear for the first time.
-      openRightTool("plan");
-    }
-    prevTodoCountRef.current = n;
-  }, [
-    view,
-    snap.pendingPlanApproval?.requestId,
-    snap.todos?.length,
-    rightPanelOpen,
-    openRightTool,
-  ]);
-
   return (
     <div
       ref={shellRef}
@@ -6311,14 +6392,6 @@ export function App() {
       }`}
     >
       {loading && view === "chat" ? <div className="loading-bar" /> : null}
-
-      {snap.pendingQuestion ? (
-        <AskUserQuestionModal
-          request={snap.pendingQuestion}
-          m={m}
-          onSubmit={(response) => void onAskUserQuestion(response)}
-        />
-      ) : null}
 
       <WindowTitleBar />
 
@@ -6848,6 +6921,14 @@ export function App() {
                 m={m}
                 onJumpToSession={(s) => void onLoadSession(s)}
               />
+              {/* ask_user_question — composer-anchored panel (not fullscreen). */}
+              {snap.pendingQuestion ? (
+                <AskUserQuestionModal
+                  request={snap.pendingQuestion}
+                  m={m}
+                  onSubmit={(response) => void onAskUserQuestion(response)}
+                />
+              ) : null}
               {/* Plan approval card — surfaces right above the composer
                   so the user can approve / request changes / abandon in
                   the same place they'll be typing their next message. */}
@@ -7302,6 +7383,7 @@ export function App() {
                         }
                         suppressContentEditableWarning
                         onInput={handleContentEditableInput}
+                        onCompositionEnd={handleContentEditableInput}
                         onKeyDown={(e) => onKeyDown(e as any)}
                         onPaste={(e) => void onPaste(e as any)}
                         data-placeholder={
@@ -7334,7 +7416,7 @@ export function App() {
                                 ) : null}
                                 <button
                                   type="button"
-                                  className={`at-item slash-item ${
+                                  className={`at-item slash-item slash-item--${s.section} ${
                                     i === slashIndex ? "active" : ""
                                   }`}
                                   onMouseDown={(e) => {
@@ -7342,7 +7424,24 @@ export function App() {
                                     void applySlashMenuItem(s);
                                   }}
                                 >
-                                  <span className="slash-title">{s.title}</span>
+                                  <span className="slash-title-row">
+                                    <span className="slash-title">
+                                      {s.title}
+                                    </span>
+                                    {s.skillScopeLabel ? (
+                                      <span
+                                        className="slash-scope"
+                                        title={s.skillScope}
+                                      >
+                                        {s.skillScopeLabel}
+                                      </span>
+                                    ) : null}
+                                    {s.inputHint ? (
+                                      <span className="slash-hint">
+                                        {s.inputHint}
+                                      </span>
+                                    ) : null}
+                                  </span>
                                   {s.description ? (
                                     <span className="slash-desc">
                                       {s.description}

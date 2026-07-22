@@ -5034,7 +5034,7 @@ html[data-theme="light"] .composer-contenteditable .composer-skill-pill {
 }
 
 .slash-suggest {
-  max-height: 280px;
+  max-height: 320px;
 }
 
 .slash-section {
@@ -5055,20 +5055,61 @@ html[data-theme="light"] .composer-contenteditable .composer-skill-pill {
   width: 100%;
 }
 
+.slash-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
 .slash-title {
   font-weight: 550;
   color: var(--text);
   font-size: 13px;
   line-height: 1.3;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Skill rows use `/name` — mono keeps them scannable next to scope badges. */
+.slash-item--skill .slash-title {
+  font-family: var(--mono);
+}
+
+.slash-scope {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
 }
 
 .slash-desc {
   font-size: 11.5px;
   color: var(--text-dim);
-  line-height: 1.3;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  width: 100%;
 }
 
 .slash-hint {
+  margin-left: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-muted);
   font-family: var(--mono);
   font-size: 11px;
@@ -6623,6 +6664,42 @@ html[data-theme="light"] .icon-btn.send {
   background: var(--bg-hover);
   border-color: var(--text-muted);
 }
+.plan-progress-bubble.expanded {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+/* Hover tip: only the current running/pending task (not the full list). */
+.plan-progress-bubble-hover-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 29;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(360px, 70vw);
+  padding: 8px 12px;
+  background: var(--bg-dropdown);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px var(--shadow-strong);
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+  white-space: normal;
+}
+.plan-progress-bubble-hover-step {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.plan-progress-bubble-hover-content {
+  color: var(--text);
+  word-break: break-word;
+}
+
 .plan-progress-bubble-spinner {
   width: 12px;
   height: 12px;
@@ -6656,8 +6733,7 @@ html[data-theme="light"] .icon-btn.send {
   max-width: 320px;
 }
 
-/* Hover popup showing the full todo list. Appears ABOVE the bubble,
-   centered horizontally on the bubble's mid-line. */
+/* Click-expanded popup: full todo list above the bubble. */
 .plan-progress-bubble-tasks {
   position: absolute;
   bottom: calc(100% + 6px);
@@ -6672,6 +6748,26 @@ html[data-theme="light"] .icon-btn.send {
   border-radius: 10px;
   box-shadow: 0 8px 24px var(--shadow-strong);
   font-size: 12px;
+}
+.plan-progress-bubble-task.current {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.plan-progress-bubble-open-panel {
+  display: block;
+  width: calc(100% - 16px);
+  margin: 6px 8px 2px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: center;
+  cursor: pointer;
+}
+.plan-progress-bubble-open-panel:hover {
+  background: var(--bg-hover);
 }
 .plan-progress-bubble-tasks-title {
   padding: 0 12px 6px;
@@ -10208,45 +10304,37 @@ html[data-theme="light"] {
   color: var(--link);
 }
 
-/* ── Ask-user-question modal ─────────────────────── */
+/* ── Ask-user-question panel (above composer, not fullscreen) ── */
 
-.askq-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 16px;
-  background: color-mix(in srgb, #000 48%, transparent);
-  backdrop-filter: blur(2px);
-}
-
-.askq-modal {
-  width: min(520px, 100%);
-  max-height: min(86vh, 720px);
+.askq-composer-panel {
+  position: relative;
+  z-index: 20;
+  width: 100%;
+  max-width: var(--chat-content-max, 48rem);
+  margin: 0 auto 8px;
+  max-height: min(50vh, 420px);
   overflow: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: 0 18px 48px var(--shadow);
-  padding: 16px 16px 14px;
+  border-radius: 14px;
+  box-shadow: 0 8px 28px var(--shadow-strong, var(--shadow));
+  padding: 14px 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   outline: none;
 }
 
-.askq-modal::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.askq-modal:focus-visible {
+.askq-composer-panel:focus-visible {
   box-shadow:
     0 0 0 2px var(--accent-soft),
-    0 18px 48px var(--shadow);
+    0 8px 28px var(--shadow-strong, var(--shadow));
+}
+
+/* Legacy class kept as alias so old snapshots/tests don't crash if present. */
+.askq-modal {
+  /* no longer used as a centered fullscreen dialog */
 }
 
 .askq-head {

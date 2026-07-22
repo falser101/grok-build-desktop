@@ -67,6 +67,19 @@ const read = (rel) => fs.readFileSync(path.join(DESKTOP, rel), "utf8");
     "goal/loop slash actions are set_intent",
     /action:\s*"set_intent"/.test(read("src/renderer/slashMenuCatalog.ts")),
   );
+  check(
+    "stripComposerIntentSlashPrefix module present",
+    /export function stripComposerIntentSlashPrefix\(/.test(
+      read("src/renderer/stripComposerIntentSlashPrefix.ts"),
+    ),
+  );
+  check(
+    "applySlashMenuItem uses stripComposerIntentSlashPrefix for set_intent",
+    /stripComposerIntentSlashPrefix\(/.test(app) &&
+      /set_intent/.test(app) &&
+      // Both goal and loop branches call the pure strip helper (not only full /goal|/loop regex).
+      (app.match(/stripComposerIntentSlashPrefix\(/g) || []).length >= 2,
+  );
 }
 
 // (4) user bubble badges

@@ -7,37 +7,27 @@ import {
   type KeyboardEvent,
 } from "react";
 import type {
-  AskUserQuestionAnnotation,
   AskUserQuestionItemUi,
   AskUserQuestionResponse,
   AskUserQuestionUi,
 } from "@shared/types";
 import type { Messages } from "./i18n";
+import {
+  buildAcceptedFromDrafts,
+  draftToLabels,
+  emptyDraft,
+  isAnswered,
+  type DraftAnswer,
+} from "./askUserQuestionDrafts";
 
-/** Local draft answer for one question. */
-interface DraftAnswer {
-  /** Selected option labels (radio → 0–1; checkbox → 0–n). */
-  labels: string[];
-  /** Other freeform selected. */
-  otherSelected: boolean;
-  /** Freeform notes when Other is used. */
-  notes: string;
-}
-
-function emptyDraft(): DraftAnswer {
-  return { labels: [], otherSelected: false, notes: "" };
-}
-
-function isAnswered(d: DraftAnswer): boolean {
-  if (d.labels.length > 0) return true;
-  return d.otherSelected && d.notes.trim().length > 0;
-}
-
-function draftToLabels(d: DraftAnswer): string[] {
-  if (d.labels.length > 0) return [...d.labels];
-  if (d.otherSelected && d.notes.trim()) return ["Other"];
-  return [];
-}
+// Re-export pure helpers for tests / external callers.
+export {
+  buildAcceptedFromDrafts,
+  draftToLabels,
+  emptyDraft,
+  isAnswered,
+  type DraftAnswer,
+} from "./askUserQuestionDrafts";
 
 export function AskUserQuestionModal({
   request,
@@ -149,41 +139,8 @@ export function AskUserQuestionModal({
     return partial;
   };
 
-  const buildAccepted = (): AskUserQuestionResponse => {
-    const answers: Record<string, string[]> = {};
-    const annotations: Record<string, AskUserQuestionAnnotation> = {};
-
-    questions.forEach((qi, i) => {
-      const d = drafts[i] ?? emptyDraft();
-      if (!isAnswered(d)) return;
-
-      const labels = draftToLabels(d);
-      if (labels.length === 0) return;
-      answers[qi.question] = labels;
-
-      const isSingle = !qi.multiSelect;
-      let preview: string | undefined;
-      if (isSingle && d.labels[0]) {
-        preview = qi.options.find((o) => o.label === d.labels[0])?.preview;
-      }
-      const notes =
-        d.otherSelected && d.notes.trim() ? d.notes.trim() : undefined;
-      // Freeform-only already maps labels to ["Other"]; notes go in annotations.
-      // When multi-select with both options + other notes, still attach notes.
-      if (preview || notes) {
-        annotations[qi.question] = {
-          ...(preview ? { preview } : {}),
-          ...(notes ? { notes } : {}),
-        };
-      }
-    });
-
-    return {
-      outcome: "accepted",
-      answers,
-      ...(Object.keys(annotations).length > 0 ? { annotations } : {}),
-    };
-  };
+  const buildAccepted = (): AskUserQuestionResponse =>
+    buildAcceptedFromDrafts(questions, drafts);
 
   const canProceed = q ? isAnswered(draft) : false;
 
@@ -235,26 +192,18 @@ export function AskUserQuestionModal({
 
   if (!q) return null;
 
+  // Composer-anchored panel (not a fullscreen viewport overlay). Mounted
+  // above the input stack so sidebar/timeline stay visible.
   return (
     <div
-      className="askq-overlay"
-      role="presentation"
-      onMouseDown={(e) => {
-        // Click on backdrop does not cancel (explicit Cancel / Esc only).
-        if (e.target === e.currentTarget) {
-          rootRef.current?.focus();
-        }
-      }}
+      ref={rootRef}
+      className="askq-composer-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-label={m.askqTitle}
+      tabIndex={0}
+      onKeyDown={onKeyDown}
     >
-      <div
-        ref={rootRef}
-        className="askq-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={m.askqTitle}
-        tabIndex={0}
-        onKeyDown={onKeyDown}
-      >
         <div className="askq-head">
           <div className="askq-head-text">
             <div className="askq-kicker">
@@ -418,7 +367,6 @@ export function AskUserQuestionModal({
 
           <div className="askq-hint">{m.askqHint}</div>
         </div>
-      </div>
     </div>
   );
 }

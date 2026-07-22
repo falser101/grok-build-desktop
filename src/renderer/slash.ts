@@ -95,9 +95,14 @@ export interface SlashMenuItem {
   intentId?: SlashMenuIntentId;
   inputHint?: string;
   skillScope?: string;
+  /** Localized scope badge (user / bundled / …). */
+  skillScopeLabel?: string;
   /** Silent agent send (no user bubble) — used for menu compact. */
   hideUserMessage?: boolean;
 }
+
+/** Max chars for skill description in the `/` popup (full text still searchable). */
+export const SKILL_DESC_DISPLAY_MAX = 100;
 
 function isZhLocale(m?: Messages): boolean {
   return m?.you === "你";
@@ -119,6 +124,48 @@ function scoreMenuQuery(
   if (n.includes(q) || t.includes(q)) return 2;
   if (d.includes(q)) return 3;
   return null;
+}
+
+/** Collapse whitespace and truncate for the slash dropdown. */
+export function shortenSlashDescription(
+  text: string,
+  max = SKILL_DESC_DISPLAY_MAX,
+): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, Math.max(1, max - 1)).trimEnd()}…`;
+}
+
+/** Bare skill id from a possibly qualified name (`user:commit` → `commit`). */
+export function skillBareName(name: string): string {
+  if (!name.includes(":")) return name;
+  return name.split(":").pop() || name;
+}
+
+/** Display title for a skill row: `/check-work`. */
+export function skillMenuTitle(name: string): string {
+  return `/${skillBareName(name)}`;
+}
+
+/** Localized short label for skill scope (user, bundled, …). */
+export function skillScopeLabel(
+  scope: string | undefined,
+  zh: boolean,
+): string | undefined {
+  if (!scope) return undefined;
+  const s = scope.toLowerCase();
+  if (zh) {
+    const map: Record<string, string> = {
+      local: "本地",
+      repo: "仓库",
+      user: "用户",
+      bundled: "内置",
+      server: "服务端",
+      plugin: "插件",
+    };
+    return map[s] ?? scope;
+  }
+  return s;
 }
 
 /** Whether an ACP catalog entry is a user-invocable skill (not a builtin/workflow). */
@@ -179,10 +226,15 @@ export function filterSlashMenu(
   for (const c of acp) {
     if (!isSkillCommand(c)) continue;
     const name = c.name;
-    const title = name.includes(":") ? name.split(":").pop() || name : name;
-    const description = c.description || "";
-    const score = scoreMenuQuery(query, name, title, description);
+    const title = skillMenuTitle(name);
+    const fullDesc = c.description || "";
+    const description = shortenSlashDescription(fullDesc);
+    // Score against full description so long Chinese trigger phrases still match.
+    const score = scoreMenuQuery(query, name, title, fullDesc);
     if (score === null) continue;
+    const scope =
+      c.skillScope ||
+      (name.includes(":") ? name.split(":")[0]?.toLowerCase() : undefined);
     skills.push({
       score,
       item: {
@@ -192,7 +244,8 @@ export function filterSlashMenu(
         description,
         action: "fill",
         inputHint: c.inputHint,
-        skillScope: c.skillScope,
+        skillScope: scope,
+        skillScopeLabel: skillScopeLabel(scope, zh),
       },
     });
   }
