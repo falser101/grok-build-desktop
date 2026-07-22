@@ -10271,6 +10271,12 @@ html[data-theme="light"] {
   white-space: nowrap;
 }
 
+.model-group-usage.usage-high {
+  opacity: 0.85;
+  color: var(--danger);
+  font-weight: 550;
+}
+
 .model-manage-item {
   border-top: 1px solid var(--border);
   color: var(--link);

@@ -7737,18 +7737,31 @@ export function App() {
                                   </div>
                                 ) : (
                                   modelGroups.map((group) => {
-                                    // Balance / usage next to provider label.
+                                    // Usage / balance next to provider label.
                                     let usageText: string | null = null;
+                                    let usageHigh = false;
                                     if (group.id === "builtin") {
-                                      // Grok built-in account → show token usage.
-                                      usageText = tokenUsageLabel;
+                                      // Grok built-in account → weekly/monthly limit %.
+                                      const u = snap.usage;
+                                      if (u && !u.error) {
+                                        usageText = u.usageShort;
+                                        usageHigh = u.usagePct >= 85;
+                                      }
                                     } else {
-                                      const usage = providerUsageMap[group.id];
-                                      if (usage?.success && usage.balance) {
-                                        const u = usage.balance.unit;
-                                        const sym =
-                                          u === "CNY" ? "¥" : u === "USD" ? "$" : u;
-                                        usageText = `${sym}${usage.balance.remaining.toFixed(2)}`;
+                                      const u = providerUsageMap[group.id];
+                                      if (u?.success) {
+                                        if (u.balance) {
+                                          const unit = u.balance.unit;
+                                          const sym =
+                                            unit === "CNY" ? "¥" : unit === "USD" ? "$" : unit;
+                                          usageText = `${sym}${u.balance.remaining.toFixed(2)}`;
+                                        } else if (u.quota) {
+                                          const pct = u.quota.sevenDayPct ?? u.quota.fiveHourPct;
+                                          if (pct != null) {
+                                            usageText = `${Math.round(pct)}%`;
+                                            usageHigh = pct >= 85;
+                                          }
+                                        }
                                       }
                                     }
                                     return (
@@ -7759,7 +7772,11 @@ export function App() {
                                         <div className="model-group-label">
                                           <span>{group.name}</span>
                                           {usageText ? (
-                                            <span className="model-group-usage">
+                                            <span
+                                              className={`model-group-usage${
+                                                usageHigh ? " usage-high" : ""
+                                              }`}
+                                            >
                                               {usageText}
                                             </span>
                                           ) : null}
