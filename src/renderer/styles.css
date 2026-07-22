@@ -10286,6 +10286,13 @@ html[data-theme="light"] {
   border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
+.model-provider-tab-balance {
+  margin-left: 5px;
+  font-size: 0.82em;
+  font-weight: 400;
+  opacity: 0.65;
+}
+
 .model-group-label {
   padding: 8px 12px 4px;
   font-size: 10.5px;

@@ -25,6 +25,7 @@ import type {
   PermissionRequestUi,
   PlanApprovalOutcome,
   PromptAttachment,
+  ProviderUsageResult,
   SessionModeId,
   SessionRunStatus,
   SessionSearchHit,
@@ -2177,6 +2178,10 @@ export function App() {
   const [modelKeyIndex, setModelKeyIndex] = useState<ModelConfigKeyIndex>({});
   /** Filter model menu by provider id (`all` = every group). */
   const [modelProviderFilter, setModelProviderFilter] = useState<string>("all");
+  /** Provider balance/usage results keyed by providerId (for inline tab display). */
+  const [providerUsageMap, setProviderUsageMap] = useState<
+    Record<string, ProviderUsageResult | null>
+  >({});
   const [dragOver, setDragOver] = useState(false);
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
   /** One-shot composer intents (slash / + menu). Cleared after successful send. */
@@ -5670,6 +5675,36 @@ export function App() {
     return modelKeyIndex[snap.modelId]?.providerName;
   }, [snap.modelId, modelKeyIndex]);
 
+  // Provider IDs that may support balance/usage queries (exclude "builtin").
+  const providerIdsForBalance = useMemo(
+    () => modelGroups.map((g) => g.id).filter((id) => id !== "builtin"),
+    [modelGroups],
+  );
+
+  // Fetch provider balance/usage for inline tab display; poll every 60 s.
+  useEffect(() => {
+    if (providerIdsForBalance.length === 0) return;
+    let alive = true;
+    const fetchOne = async (id: string) => {
+      try {
+        const r = await window.desktop.queryProviderUsage(id);
+        if (alive) setProviderUsageMap((prev) => ({ ...prev, [id]: r }));
+      } catch {
+        /* silent — balance is best-effort decoration */
+      }
+    };
+    void Promise.allSettled(providerIdsForBalance.map((id) => fetchOne(id)));
+    const timer = setInterval(() => {
+      void Promise.allSettled(
+        providerIdsForBalance.map((id) => fetchOne(id)),
+      );
+    }, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [providerIdsForBalance]);
+
   const modelChipLabel = currentModel
     ? currentProviderName
       ? `${currentProviderName} · ${currentModel.name}`
@@ -7709,23 +7744,40 @@ export function App() {
                                     >
                                       {m.modelsAllProviders}
                                     </button>
-                                    {modelGroups.map((g) => (
-                                      <button
-                                        key={g.id}
-                                        type="button"
-                                        className={`model-provider-tab ${
-                                          modelProviderFilter === g.id
-                                            ? "active"
-                                            : ""
-                                        }`}
-                                        onClick={() =>
-                                          setModelProviderFilter(g.id)
-                                        }
-                                        title={g.name}
-                                      >
-                                        {g.name}
-                                      </button>
-                                    ))}
+                                    {modelGroups.map((g) => {
+                                      const usage = providerUsageMap[g.id];
+                                      const balText =
+                                        usage?.success && usage.balance
+                                          ? (usage.balance.unit === "CNY"
+                                              ? "¥"
+                                              : usage.balance.unit === "USD"
+                                                ? "$"
+                                                : usage.balance.unit) +
+                                            usage.balance.remaining.toFixed(2)
+                                          : null;
+                                      return (
+                                        <button
+                                          key={g.id}
+                                          type="button"
+                                          className={`model-provider-tab ${
+                                            modelProviderFilter === g.id
+                                              ? "active"
+                                              : ""
+                                          }`}
+                                          onClick={() =>
+                                            setModelProviderFilter(g.id)
+                                          }
+                                          title={g.name}
+                                        >
+                                          {g.name}
+                                          {balText ? (
+                                            <span className="model-provider-tab-balance">
+                                              {balText}
+                                            </span>
+                                          ) : null}
+                                        </button>
+                                      );
+                                    })}
                                   </div>
                                 ) : null}
                                 {snap.accountAvailable === false ? (
