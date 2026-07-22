@@ -5,6 +5,12 @@ import type {
 } from "@shared/types";
 import type { Messages } from "./i18n";
 import { localizeEffort } from "./i18n";
+import {
+  DESKTOP_SLASH_MENU,
+  type SlashMenuAction,
+  type SlashMenuIntentId,
+  type SlashMenuModeId,
+} from "./slashMenuCatalog";
 
 /** Desktop-local slash commands (not always advertised by the shell). */
 export const LOCAL_COMMANDS: AvailableCommand[] = [
@@ -74,6 +80,132 @@ export interface SlashSuggestion {
   /** Display label e.g. `/compact` */
   display: string;
   source: "local" | "acp";
+}
+
+export type SlashMenuSection = "command" | "skill";
+
+/** Localized row for the composer `/` popup. */
+export interface SlashMenuItem {
+  section: SlashMenuSection;
+  name: string;
+  title: string;
+  description: string;
+  action: SlashMenuAction;
+  modeId?: SlashMenuModeId;
+  intentId?: SlashMenuIntentId;
+  inputHint?: string;
+  skillScope?: string;
+  /** Silent agent send (no user bubble) — used for menu compact. */
+  hideUserMessage?: boolean;
+}
+
+function isZhLocale(m?: Messages): boolean {
+  return m?.you === "你";
+}
+
+function scoreMenuQuery(
+  query: string,
+  name: string,
+  title: string,
+  description: string,
+): number | null {
+  const q = query.toLowerCase();
+  if (!q) return 0;
+  const n = name.toLowerCase();
+  const t = title.toLowerCase();
+  const d = description.toLowerCase();
+  if (n === q || t === q) return 0;
+  if (n.startsWith(q) || t.startsWith(q)) return 1;
+  if (n.includes(q) || t.includes(q)) return 2;
+  if (d.includes(q)) return 3;
+  return null;
+}
+
+/** Whether an ACP catalog entry is a user-invocable skill (not a builtin/workflow). */
+export function isSkillCommand(c: AvailableCommand): boolean {
+  if (c.skillPath || c.skillScope) return true;
+  // Qualified skill names survive even when _meta is stripped.
+  if (/^(local|repo|user|server|bundled|plugin):/i.test(c.name)) return true;
+  return false;
+}
+
+/**
+ * Build the desktop `/` menu: whitelist commands + ACP skills, localized.
+ * Aliases and non-whitelisted shell/TUI commands are omitted (hand-type still works).
+ */
+export function filterSlashMenu(
+  acp: AvailableCommand[],
+  query: string,
+  m?: Messages,
+  limit = 50,
+): SlashMenuItem[] {
+  const zh = isZhLocale(m);
+  const acpByName = new Map<string, AvailableCommand>();
+  for (const c of acp) {
+    acpByName.set(c.name.toLowerCase(), c);
+  }
+
+  const commands: { item: SlashMenuItem; score: number }[] = [];
+  for (const def of DESKTOP_SLASH_MENU) {
+    if (def.requireAcp && !acpByName.has(def.name.toLowerCase())) {
+      continue;
+    }
+    const title = zh ? def.titleZh : def.titleEn;
+    const description = zh ? def.descZh : def.descEn;
+    const score = scoreMenuQuery(query, def.name, title, description);
+    if (score === null) continue;
+    const acpCmd = acpByName.get(def.name.toLowerCase());
+    commands.push({
+      score,
+      item: {
+        section: "command",
+        name: def.name,
+        title,
+        description,
+        action: def.action,
+        modeId: def.modeId,
+        intentId: def.intentId,
+        inputHint: acpCmd?.inputHint,
+        hideUserMessage: def.action === "execute" && def.name === "compact",
+      },
+    });
+  }
+  commands.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    return a.item.name.localeCompare(b.item.name);
+  });
+
+  const skills: { item: SlashMenuItem; score: number }[] = [];
+  for (const c of acp) {
+    if (!isSkillCommand(c)) continue;
+    const name = c.name;
+    const title = name.includes(":") ? name.split(":").pop() || name : name;
+    const description = c.description || "";
+    const score = scoreMenuQuery(query, name, title, description);
+    if (score === null) continue;
+    skills.push({
+      score,
+      item: {
+        section: "skill",
+        name,
+        title,
+        description,
+        action: "fill",
+        inputHint: c.inputHint,
+        skillScope: c.skillScope,
+      },
+    });
+  }
+  skills.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    return a.item.name.localeCompare(b.item.name);
+  });
+
+  const half = Math.max(8, Math.floor(limit / 2));
+  return [
+    ...commands.slice(0, half).map((x) => x.item),
+    ...skills.slice(0, half).map((x) => x.item),
+  ].slice(0, limit);
 }
 
 export interface ParsedSlash {

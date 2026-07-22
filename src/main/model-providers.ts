@@ -262,6 +262,7 @@ export const PROVIDER_PRESETS: ModelProviderPreset[] = [
     protocolEndpoints: {
       messages: "https://api.minimaxi.com/anthropic/v1",
       chat_completions: "https://api.minimaxi.com/v1",
+      responses: "https://api.minimaxi.com/v1",
     },
     // List models via OpenAI-compatible host (Anthropic path has no /models).
     modelsListBaseUrl: "https://api.minimaxi.com/v1",

@@ -46,19 +46,21 @@ import { FilesTabSection } from "./FilesTabSection";
 import { PlanPanel } from "./PlanPanel";
 import { PlanApprovalCard } from "./PlanApprovalCard";
 import { PlanProgressBubble } from "./PlanProgressBubble";
+import { GoalProgressBubble } from "./GoalProgressBubble";
 import { WaitingSessionsBanner } from "./WaitingSessionsBanner";
+import { linearizeTimeline } from "./groupTurns";
 import { WindowTitleBar } from "./WindowTitleBar";
 import { usePrefs } from "./PrefsContext";
 import { SettingsView, type SettingsSectionId } from "./SettingsView";
 import { TerminalPanel } from "./TerminalPanel";
 import { ToolCard } from "./ToolCard";
 import {
-  completeSlashName,
-  filterSlashSuggestions,
+  filterSlashMenu,
+  isSkillCommand,
   isSlashCompose,
   slashNameQuery,
   tryHandleLocalSlash,
-  type SlashSuggestion,
+  type SlashMenuItem,
 } from "./slash";
 import {
   copyText,
@@ -427,6 +429,228 @@ function RightPanelPlusMenu({
               <span>{item.label}</span>
             </button>
           ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Composer `+` button popup menu — three options: Files & folders,
+ * Goal mode, and Plan mode. Replaces the old single-action attach button.
+ *
+ * Menu uses `position: fixed` so it is not clipped by parent overflow.
+ */
+function ComposerPlusMenu({
+  m,
+  onPickFiles,
+  onGoalMode,
+  onPlanMode,
+  disabled,
+}: {
+  m: Messages;
+  onPickFiles: () => void;
+  onGoalMode: () => void;
+  onPlanMode: () => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(
+    null,
+  );
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  const updateMenuPos = useCallback(() => {
+    const btn = buttonRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    setMenuPos({
+      top: r.top - 8,
+      left: Math.max(8, r.left),
+    });
+  }, []);
+
+  const close = useCallback(() => {
+    setOpen(false);
+    setMenuPos(null);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updateMenuPos();
+    // Defer outside-click so the same click that opened us doesn't close us.
+    let removeDoc: (() => void) | undefined;
+    const t = window.setTimeout(() => {
+      const onDoc = (e: MouseEvent) => {
+        const target = e.target as Node;
+        if (wrapRef.current?.contains(target)) return;
+        if (menuRef.current?.contains(target)) return;
+        close();
+      };
+      const onKey = (e: globalThis.KeyboardEvent) => {
+        if (e.key === "Escape") {
+          close();
+          buttonRef.current?.focus();
+        }
+      };
+      const onScrollOrResize = () => updateMenuPos();
+      document.addEventListener("mousedown", onDoc, true);
+      document.addEventListener("keydown", onKey);
+      window.addEventListener("resize", onScrollOrResize);
+      window.addEventListener("scroll", onScrollOrResize, true);
+      removeDoc = () => {
+        document.removeEventListener("mousedown", onDoc, true);
+        document.removeEventListener("keydown", onKey);
+        window.removeEventListener("resize", onScrollOrResize);
+        window.removeEventListener("scroll", onScrollOrResize, true);
+      };
+    }, 0);
+    return () => {
+      window.clearTimeout(t);
+      removeDoc?.();
+    };
+  }, [open, close, updateMenuPos]);
+
+  return (
+    <div className="composer-plus-wrap" ref={wrapRef}>
+      <button
+        ref={buttonRef}
+        type="button"
+        className={`icon-btn attach-btn ${open ? "open" : ""}`}
+        title={m.attachFiles}
+        disabled={disabled}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen((v) => {
+            if (v) {
+              setMenuPos(null);
+              return false;
+            }
+            // Position will be set in the open effect; seed from rect now.
+            const btn = buttonRef.current;
+            if (btn) {
+              const r = btn.getBoundingClientRect();
+              setMenuPos({
+                top: r.top - 8,
+                left: Math.max(8, r.left),
+              });
+            }
+            return true;
+          });
+        }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+      </button>
+      {open && menuPos ? (
+        <div
+          className="dropdown composer-plus-menu"
+          ref={menuRef}
+          role="menu"
+          style={{
+            position: "fixed",
+            top: menuPos.top,
+            left: menuPos.left,
+            right: "auto",
+            bottom: "auto",
+            zIndex: 10000,
+            transform: "translateY(-100%)",
+          }}
+        >
+          {/* Files & folders */}
+          <button
+            type="button"
+            className="dropdown-item"
+            role="menuitem"
+            onClick={() => {
+              close();
+              onPickFiles();
+            }}
+          >
+            <span className="di-icon" aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M3.5 4a1 1 0 0 1 1-1h2l1.2 1.2h4.3a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V4Z"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            <span>{m.composerAddFilesFolders}</span>
+          </button>
+          {/* Goal mode */}
+          <button
+            type="button"
+            className="dropdown-item"
+            role="menuitem"
+            onClick={() => {
+              close();
+              onGoalMode();
+            }}
+          >
+            <span className="di-icon" aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="5.5"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                />
+                <circle cx="8" cy="8" r="2.5" fill="currentColor" />
+                <path
+                  d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <span>{m.composerAddGoalMode}</span>
+          </button>
+          {/* Plan mode */}
+          <button
+            type="button"
+            className="dropdown-item"
+            role="menuitem"
+            onClick={() => {
+              close();
+              onPlanMode();
+            }}
+          >
+            <span className="di-icon" aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M3.5 2.5h9a.5.5 0 0 1 .5.5v10a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                />
+                <path
+                  d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <span>{m.composerAddPlanMode}</span>
+          </button>
         </div>
       ) : null}
     </div>
@@ -812,33 +1036,130 @@ function iconForPath(path: string, isDir: boolean): string {
   return "📄";
 }
 
-/** Split text on `@path` mentions and render them as clickable pills. */
-function renderAtMentions(
+/** Bare skill label for chips (drop optional `scope:` prefix). */
+function skillChipLabel(name: string): string {
+  const i = name.lastIndexOf(":");
+  return i >= 0 ? name.slice(i + 1) : name;
+}
+
+/** Detect `/skill` tokens that match known skill names (longest-first). */
+function findSkillSpans(
+  text: string,
+  skillByLower: Map<string, string>,
+): { start: number; end: number; name: string }[] {
+  if (skillByLower.size === 0 || !text.includes("/")) return [];
+  const spans: { start: number; end: number; name: string }[] = [];
+  const re = /(?:^|[\s\n])\/([A-Za-z0-9][A-Za-z0-9_.:-]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const token = m[1]!;
+    const slashStart = m.index + (m[0].startsWith("/") ? 0 : 1);
+    const lower = token.toLowerCase();
+    const canonical = skillByLower.get(lower);
+    if (!canonical) continue;
+    // Require exact token match (not a longer unknown name sharing a prefix).
+    if (lower !== canonical.toLowerCase()) continue;
+    spans.push({
+      start: slashStart,
+      end: slashStart + 1 + token.length,
+      name: canonical,
+    });
+  }
+  return spans;
+}
+
+type UserBodySpan =
+  | { kind: "text"; text: string }
+  | { kind: "at"; path: string; leading: string }
+  | { kind: "skill"; name: string; leading: string };
+
+/** Split user/composer text into plain + @file + skill segments. */
+function segmentUserBody(
+  text: string,
+  skillByLower?: Map<string, string>,
+): UserBodySpan[] {
+  const skills = skillByLower
+    ? findSkillSpans(text, skillByLower)
+    : [];
+  const ats = findAtMentionSpans(text);
+  type Mark = { start: number; end: number; kind: "at" | "skill"; value: string };
+  const marks: Mark[] = [
+    ...ats.map((s) => ({
+      start: s.start,
+      end: s.end,
+      kind: "at" as const,
+      value: s.path,
+    })),
+    ...skills.map((s) => ({
+      start: s.start,
+      end: s.end,
+      kind: "skill" as const,
+      value: s.name,
+    })),
+  ].sort((a, b) => a.start - b.start || b.end - a.end);
+  // Drop overlapping marks (prefer earlier / longer).
+  const kept: Mark[] = [];
+  let cursor = 0;
+  for (const mk of marks) {
+    if (mk.start < cursor) continue;
+    kept.push(mk);
+    cursor = mk.end;
+  }
+  const out: UserBodySpan[] = [];
+  let last = 0;
+  for (const mk of kept) {
+    if (mk.start > last) {
+      out.push({ kind: "text", text: text.slice(last, mk.start) });
+    }
+    if (mk.kind === "at") {
+      out.push({ kind: "at", path: mk.value, leading: "" });
+    } else {
+      out.push({ kind: "skill", name: mk.value, leading: "" });
+    }
+    last = mk.end;
+  }
+  if (last < text.length) out.push({ kind: "text", text: text.slice(last) });
+  return out.length ? out : [{ kind: "text", text }];
+}
+
+/** Split text on `@path` and skill `/name` mentions for history bubbles. */
+function renderUserMessageBody(
   text: string,
   onOpenAtFile?: (path: string) => void,
+  skillByLower?: Map<string, string>,
 ): ReactNode {
-  const parts = text.split(/((?:^|\s)@[^\s@]+)/g);
-  return parts.map((part, i) => {
-    const m = part.match(/^(\s*)@(\S+)$/);
-    if (m) {
-      const [, space, path] = m;
+  const segs = segmentUserBody(text, skillByLower);
+  return segs.map((seg, i) => {
+    if (seg.kind === "at") {
       return (
-        <span key={i}>
-          {space}
-          <span
-            className="at-file-link"
-            onClick={() => onOpenAtFile?.(path)}
-            title={path}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => { if (e.key === "Enter") onOpenAtFile?.(path); }}
-          >
-            @{path}
-          </span>
+        <span
+          key={i}
+          className="at-file-link"
+          onClick={() => onOpenAtFile?.(seg.path)}
+          title={seg.path}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onOpenAtFile?.(seg.path);
+          }}
+        >
+          @{seg.path}
         </span>
       );
     }
-    return <span key={i}>{part}</span>;
+    if (seg.kind === "skill") {
+      return (
+        <span
+          key={i}
+          className="skill-chip"
+          title={`/${seg.name}`}
+          data-skill={seg.name}
+        >
+          {skillChipLabel(seg.name)}
+        </span>
+      );
+    }
+    return <span key={i}>{seg.text}</span>;
   });
 }
 
@@ -905,6 +1226,86 @@ function resolveScrollPinnedUser(
   if (activeEl.getBoundingClientRect().top >= paneTop - 1) return null;
   return active;
 }
+
+/**
+ * Thumbnail for a user-message image. Prefers inline base64; falls back to
+ * loading an absolute path under ~/.grok/sessions via IPC (reload of large
+ * images that were materialised to disk).
+ */
+const UserImageThumb = memo(function UserImageThumb({
+  attachment: a,
+  onOpenLightbox,
+}: {
+  attachment: PromptAttachment;
+  onOpenLightbox?: (img: { src: string; mime: string; name: string }) => void;
+}) {
+  const mime = a.mimeType || "image/png";
+  const inlineSrc = a.dataBase64
+    ? `data:${mime};base64,${a.dataBase64}`
+    : null;
+  const [src, setSrc] = useState<string | null>(inlineSrc);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (inlineSrc) {
+      setSrc(inlineSrc);
+      setFailed(false);
+      return;
+    }
+    if (!a.path) {
+      setFailed(true);
+      return;
+    }
+    let cancelled = false;
+    void window.desktop
+      .readSessionImageDataUrl(a.path)
+      .then((dataUrl) => {
+        if (cancelled) return;
+        if (dataUrl) {
+          setSrc(dataUrl);
+          setFailed(false);
+        } else {
+          setFailed(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inlineSrc, a.path]);
+
+  if (failed || !src) {
+    return (
+      <span
+        className="msg-attachment-file"
+        title={a.displayPath || a.name || a.path}
+      >
+        <span className="attach-kind">🖼</span>
+        {a.name}
+      </span>
+    );
+  }
+
+  return (
+    <img
+      className="msg-attachment-image"
+      src={src}
+      alt={a.name}
+      title={a.displayPath || a.name}
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpenLightbox?.({ src, mime, name: a.name })}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenLightbox?.({ src, mime, name: a.name });
+        }
+      }}
+    />
+  );
+});
 
 /**
  * Fullscreen image viewer used by the user bubble thumbnail click.
@@ -1036,36 +1437,120 @@ function MsgCopyButton({
   );
 }
 
+/** CLI-style duration for thought headers (matches pager format_duration). */
+function formatThoughtDuration(ms: number): string {
+  const totalSecs = ms / 1000;
+  if (totalSecs < 10) return `${totalSecs.toFixed(1)}s`;
+  if (totalSecs < 60) return `${Math.round(totalSecs)}s`;
+  const mins = Math.floor(totalSecs / 60);
+  const secs = Math.round(totalSecs - mins * 60);
+  if (mins < 60) return `${mins}m${secs}s`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return `${hours}h${remMins}m`;
+}
+
+/**
+ * CLI-aligned thought row: collapsed by default, header is
+ * "Thinking…" while streaming / "Thought for 2.6s" when done.
+ * Duration is measured locally (start → first non-streaming finalize).
+ */
+const ThoughtRow = memo(function ThoughtRow({
+  item,
+  m,
+  onOpenAtFile,
+}: {
+  item: Extract<TimelineItem, { kind: "thought" }>;
+  m: Messages;
+  onOpenAtFile?: (path: string) => void;
+}) {
+  const startRef = useRef<number>(item.createdAt ?? Date.now());
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (item.streaming) {
+      // Reopen after MiniMax-style reconnect — keep original start.
+      setElapsedMs(null);
+      return;
+    }
+    // Finished: freeze wall-clock duration once.
+    setElapsedMs((prev) => {
+      if (prev != null) return prev;
+      return Math.max(0, Date.now() - startRef.current);
+    });
+  }, [item.streaming]);
+
+  let label: string;
+  if (item.streaming) {
+    label = m.thoughtStreaming;
+  } else if (elapsedMs != null && elapsedMs > 50) {
+    // Skip near-zero durations (instant replay finalize).
+    label = m.thoughtFor.replace("{t}", formatThoughtDuration(elapsedMs));
+  } else {
+    label = m.thought;
+  }
+
+  // Controlled collapse — always start closed (including while streaming).
+  const [open, setOpen] = useState(false);
+
+  return (
+    <details
+      className="thought activity-thought"
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+    >
+      <summary className="thought-summary">
+        <span className="thought-summary-label">{label}</span>
+        <MsgCopyButton item={item} m={m} />
+      </summary>
+      <MarkdownBody
+        className="thought-body"
+        text={item.text}
+        streaming={item.streaming}
+        onOpenAtFile={onOpenAtFile}
+      />
+    </details>
+  );
+});
+
 const TimelineRow = memo(function TimelineRow({
   item,
   m,
   highlight,
   onOpenAtFile,
   onOpenLightbox,
+  skillByLower,
 }: {
   item: TimelineItem;
   m: Messages;
   highlight?: boolean;
   onOpenAtFile?: (path: string) => void;
   onOpenLightbox?: (img: { src: string; mime: string; name: string }) => void;
+  /** Known skill slash names (lowercase → canonical) for chip rendering. */
+  skillByLower?: Map<string, string>;
 }) {
   if (item.kind === "system") {
     return <div className="system-line">{item.text}</div>;
   }
   if (item.kind === "user") {
     const atts = item.attachments ?? [];
-    // An attachment is "previewable" when we have inline base64 + a
-    // mime type. Default the mime to image/png if missing (paste/drop
-    // sometimes leaves it blank for screenshots). Everything else
-    // (oversized image that was downgraded on the backend, file
-    // attachment, model that doesn't accept images) renders as a file
-    // chip so the user always sees what they sent.
+    // Goal/loop badges: UI-intent only (backend attach*Badge). Hand-typed
+    // `/goal` / `/loop` keep literal text and no badge.
+    const isGoalCommand = item.attachGoalBadge === true;
+    const isLoopCommand = item.attachLoopBadge === true;
+    // Previewable: inline base64, or image with a session path (loaded
+    // async). Everything else becomes a file chip.
     const previewableImages = atts.filter(
-      (a) => a.kind === "image" && a.dataBase64,
+      (a) => a.kind === "image" && (a.dataBase64 || a.path),
     );
     const fileChips = atts.filter(
-      (a) => !(a.kind === "image" && a.dataBase64),
+      (a) => !(a.kind === "image" && (a.dataBase64 || a.path)),
     );
+    // Hide the "[N images]" placeholder when thumbnails already convey that.
+    const bodyText =
+      previewableImages.length > 0 && /^\[\d+ images?\]$/i.test(item.text.trim())
+        ? ""
+        : item.text;
     return (
       <div
         className={`msg msg-user${highlight ? " msg-flash" : ""}`}
@@ -1077,30 +1562,13 @@ const TimelineRow = memo(function TimelineRow({
         <div className="msg-bubble">
           {previewableImages.length > 0 ? (
             <div className="msg-attachments">
-              {previewableImages.map((a) => {
-                const mime = a.mimeType || "image/png";
-                const src = `data:${mime};base64,${a.dataBase64}`;
-                return (
-                  <img
-                    key={a.id}
-                    className="msg-attachment-image"
-                    src={src}
-                    alt={a.name}
-                    title={a.displayPath || a.name}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() =>
-                      onOpenLightbox?.({ src, mime, name: a.name })
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        onOpenLightbox?.({ src, mime, name: a.name });
-                      }
-                    }}
-                  />
-                );
-              })}
+              {previewableImages.map((a) => (
+                <UserImageThumb
+                  key={a.id}
+                  attachment={a}
+                  onOpenLightbox={onOpenLightbox}
+                />
+              ))}
             </div>
           ) : null}
           {fileChips.length > 0 ? (
@@ -1121,9 +1589,57 @@ const TimelineRow = memo(function TimelineRow({
           ) : null}
           {/* User messages skip the role label — the right-aligned bubble
              shape + accent color already identifies the speaker. */}
-          <div className="msg-body">
-            {renderAtMentions(item.text, onOpenAtFile)}
+          {bodyText ? (
+            <div className="msg-body">
+              {renderUserMessageBody(bodyText, onOpenAtFile, skillByLower)}
+            </div>
+          ) : null}
+          <div className="msg-actions">
+            <MsgCopyButton item={item} m={m} />
           </div>
+          {isGoalCommand ? (
+            <div className="user-msg-goal-badge" aria-label={m.goalMessageBadge}>
+              <span className="user-msg-goal-badge-icon" aria-hidden="true">
+                🎯
+              </span>
+              <span>{m.goalMessageBadge}</span>
+            </div>
+          ) : null}
+          {isLoopCommand ? (
+            <div
+              className="user-msg-loop-badge"
+              aria-label={m.loopMessageBadge.replace(
+                "{interval}",
+                item.loopInterval || "5m",
+              )}
+            >
+              <span className="user-msg-loop-badge-icon" aria-hidden="true">
+                ⏱
+              </span>
+              <span>
+                {m.loopMessageBadge.replace(
+                  "{interval}",
+                  item.loopInterval || "5m",
+                )}
+              </span>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+  if (item.kind === "assistant") {
+    // No role label — conversation history is self-evident; copy sits in
+    // the hover actions strip like user bubbles.
+    return (
+      <div className="msg msg-assistant">
+        <div className="msg-bubble">
+          <MarkdownBody
+            className="msg-body"
+            text={item.text}
+            streaming={item.streaming}
+            onOpenAtFile={onOpenAtFile}
+          />
           <div className="msg-actions">
             <MsgCopyButton item={item} m={m} />
           </div>
@@ -1131,42 +1647,9 @@ const TimelineRow = memo(function TimelineRow({
       </div>
     );
   }
-  if (item.kind === "assistant") {
-    return (
-      <div className="msg msg-assistant">
-        <div className="msg-bubble">
-          <div className="msg-head">
-            <div className="msg-role assistant">{m.grok}</div>
-            <MsgCopyButton item={item} m={m} />
-          </div>
-          <MarkdownBody
-            className="msg-body"
-            text={item.text}
-            streaming={item.streaming}
-            onOpenAtFile={onOpenAtFile}
-          />
-        </div>
-      </div>
-    );
-  }
   if (item.kind === "thought") {
-    // Default-open when nested inside a turn-group so the user sees the
-    // thought text immediately after expanding the per-turn toggle.
     return (
-      <details className="thought msg-assistant" open>
-        <summary className="thought-summary">
-          <span className="thought-summary-label">
-            {item.streaming ? m.thoughtStreaming : m.thought}
-          </span>
-          <MsgCopyButton item={item} m={m} />
-        </summary>
-        <MarkdownBody
-          className="thought-body"
-          text={item.text}
-          streaming={item.streaming}
-          onOpenAtFile={onOpenAtFile}
-        />
-      </details>
+      <ThoughtRow item={item} m={m} onOpenAtFile={onOpenAtFile} />
     );
   }
   if (item.kind === "compact") {
@@ -1205,215 +1688,9 @@ const TimelineRow = memo(function TimelineRow({
   return null;
 });
 
-/** A single assistant "turn" — one assistant text plus all of its
- *  intermediate thoughts / tool calls / compact events. */
-type TurnGroup = {
-  /** Stable id for React key + scroll-jump anchor. */
-  id: string;
-  /** Final assistant text for this turn (may be null if only tool calls). */
-  assistant: Extract<TimelineItem, { kind: "assistant" }> | null;
-  /** Everything between this assistant text and the next one. */
-  extras: TimelineItem[];
-};
-
-/** Flatten timeline → user/system rows + per-turn groups.
- *  Rule: an assistant text starts a new turn; everything between it and the
- *  next assistant text belongs to this turn. user/system rows are emitted
- *  inline so they retain their original ordering. */
-function groupTimelineForTurns(timeline: TimelineItem[]): Array<
-  | { kind: "row"; item: TimelineItem }
-  | { kind: "turn"; turn: TurnGroup }
-> {
-  const out: Array<
-    | { kind: "row"; item: TimelineItem }
-    | { kind: "turn"; turn: TurnGroup }
-  > = [];
-  let current: TurnGroup | null = null;
-
-  const flush = () => {
-    if (current && (current.assistant || current.extras.length > 0)) {
-      out.push({ kind: "turn", turn: current });
-    }
-    current = null;
-  };
-
-  for (const item of timeline) {
-    if (item.kind === "assistant") {
-      // New turn — close the previous one and start a fresh group whose
-      // anchor is this assistant text.
-      flush();
-      current = {
-        id: item.id,
-        assistant: item,
-        extras: [],
-      };
-      continue;
-    }
-    if (item.kind === "user" || item.kind === "system") {
-      // user/system always render standalone (turns collapse around them).
-      flush();
-      out.push({ kind: "row", item });
-      continue;
-    }
-    // thought / tool / compact: attach to the current turn if any, otherwise
-    // start an orphan turn so the items aren't lost.
-    if (!current) {
-      current = {
-        id: `orphan-${item.id}`,
-        assistant: null,
-        extras: [],
-      };
-    }
-    current.extras.push(item);
-  }
-  flush();
-  return out;
-}
-
-/** One assistant turn — collapses the intermediate thought/tool chain by
- *  default. While the turn is still streaming it stays expanded so the user
- *  can watch it type. Once the turn ends, default is collapsed.
- *
- *  Layout: the toggle (when there are extras) sits *inside* the assistant
- *  message, right under the "Grok" role head. That way it visually belongs
- *  to the same turn instead of floating as a separate row above it. */
-const TurnGroupView = memo(function TurnGroupView({
-  turn,
-  m,
-  highlight,
-  onOpenAtFile,
-  onOpenLightbox,
-}: {
-  turn: TurnGroup;
-  m: Messages;
-  highlight: boolean;
-  onOpenAtFile?: (path: string) => void;
-  onOpenLightbox?: (img: { src: string; mime: string; name: string }) => void;
-}) {
-  const isStreaming = Boolean(turn.assistant?.streaming);
-  // Default: collapsed once the turn has settled. While streaming we keep
-  // it open so the user can follow the live output (and so newly arriving
-  // intermediate steps are visible).
-  const [open, setOpen] = useState<boolean>(isStreaming);
-
-  // Auto-expand on stream start, auto-collapse when stream ends AND the
-  // user hasn't manually toggled yet. We track that with a ref so we don't
-  // override an explicit click.
-  const userToggledRef = useRef(false);
-  useEffect(() => {
-    if (isStreaming) {
-      if (!userToggledRef.current) setOpen(true);
-    } else {
-      if (!userToggledRef.current) setOpen(false);
-    }
-  }, [isStreaming]);
-
-  const onToggle = (e: ReactMouseEvent<HTMLElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    userToggledRef.current = true;
-    setOpen((v) => !v);
-  };
-
-  const hasExtras = turn.extras.length > 0;
-  const assistantText = turn.assistant?.text ?? "";
-  const assistantStreaming = Boolean(turn.assistant?.streaming);
-
-  // If there's no assistant text, fall back to the original layout:
-  // extras first, then nothing. (Orphan turns with only tool calls.)
-  if (!turn.assistant) {
-    return (
-      <div
-        className={`turn-group${open ? " is-open" : ""}`}
-        id={msgDomId(turn.id)}
-      >
-        {hasExtras ? (
-          <div className="turn-group-extras">
-            <button
-              type="button"
-              className="turn-group-toggle"
-              aria-expanded={open}
-              onClick={onToggle}
-              title={m.turnGroupToggle}
-            >
-              <span className={`turn-chev ${open ? "open" : ""}`} aria-hidden>
-                ▸
-              </span>
-              <span className="turn-group-label">
-                {`${m.turnGroupToggle} · ${turn.extras.length}`}
-              </span>
-            </button>
-            {open ? (
-              <div className="turn-group-extras-list">
-                {turn.extras.map((it) => (
-                  <TimelineRow
-                    key={it.id}
-                    item={it}
-                    m={m}
-                    highlight={false}
-                    onOpenAtFile={onOpenAtFile}
-                    onOpenLightbox={onOpenLightbox}
-                  />
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className={`msg msg-assistant turn-group${open ? " is-open" : ""}${
-        isStreaming ? " is-streaming" : ""
-      }${highlight ? " msg-flash" : ""}`}
-      id={msgDomId(turn.id)}
-    >
-      <div className="msg-bubble">
-        <div className="msg-head">
-          <div className="msg-role assistant">{m.grok}</div>
-          <MsgCopyButton item={turn.assistant} m={m} />
-        </div>
-
-        {/* Extras toggle lives *inside* the bubble, right under the head,
-            so it's visually part of the same turn. */}
-        {hasExtras ? (
-          <button
-            type="button"
-            className="turn-group-toggle"
-            aria-expanded={open}
-            onClick={onToggle}
-            title={open ? m.turnGroupToggle : m.turnGroupInner}
-          >
-            <span className={`turn-chev ${open ? "open" : ""}`} aria-hidden>
-              ▸
-            </span>
-            <span className="turn-group-label">
-              {`${m.turnGroupToggle} · ${turn.extras.length}`}
-            </span>
-          </button>
-        ) : null}
-
-        {hasExtras && open ? (
-          <div className="turn-group-extras-list">
-            {turn.extras.map((it) => (
-              <TimelineRow key={it.id} item={it} m={m} highlight={false} onOpenAtFile={onOpenAtFile} onOpenLightbox={onOpenLightbox} />
-            ))}
-          </div>
-        ) : null}
-
-        <MarkdownBody
-          className="msg-body"
-          text={assistantText}
-          streaming={assistantStreaming}
-        />
-      </div>
-    </div>
-  );
-});
-
-/** Isolated so composer keystrokes don't re-render the whole timeline tree. */
+/** Isolated so composer keystrokes don't re-render the whole timeline tree.
+ *  Flat chronological order — each thought/tool is its own row and starts
+ *  collapsed; nothing is merged into a group fold. */
 const ChatTimeline = memo(function ChatTimeline({
   timeline,
   replaying,
@@ -1423,6 +1700,7 @@ const ChatTimeline = memo(function ChatTimeline({
   bottomRef,
   onOpenAtFile,
   onOpenLightbox,
+  skillByLower,
 }: {
   timeline: TimelineItem[];
   replaying: boolean;
@@ -1432,7 +1710,15 @@ const ChatTimeline = memo(function ChatTimeline({
   bottomRef: RefObject<HTMLDivElement | null>;
   onOpenAtFile?: (path: string) => void;
   onOpenLightbox?: (img: { src: string; mime: string; name: string }) => void;
+  skillByLower?: Map<string, string>;
 }) {
+  const items = useMemo(() => linearizeTimeline(timeline), [timeline]);
+  // Show the "thinking" indicator right after the user message when the
+  // agent is busy but no assistant text / thought has landed yet.
+  const lastItem = timeline[timeline.length - 1];
+  const lastIsUser = lastItem?.kind === "user";
+  const showPending = busy && lastIsUser;
+
   // During cold session load, skip mounting partial history (avoids N× markdown
   // re-parses). Backend holds emits until replay finishes; this is a safety net.
   if (replaying) {
@@ -1445,35 +1731,20 @@ const ChatTimeline = memo(function ChatTimeline({
       </div>
     );
   }
-  const segments = useMemo(() => groupTimelineForTurns(timeline), [timeline]);
-  // Show the "thinking" indicator right after the user message when the
-  // agent is busy but no assistant text / thought has landed yet.
-  const lastItem = timeline[timeline.length - 1];
-  const lastIsUser = lastItem?.kind === "user";
-  const showPending = busy && lastIsUser;
+
   return (
     <div className="timeline">
-      {segments.map((seg) =>
-        seg.kind === "row" ? (
-          <TimelineRow
-            key={seg.item.id}
-            item={seg.item}
-            m={m}
-            highlight={flashMsgId === seg.item.id}
-            onOpenAtFile={onOpenAtFile}
-            onOpenLightbox={onOpenLightbox}
-          />
-        ) : (
-          <TurnGroupView
-            key={seg.turn.id}
-            turn={seg.turn}
-            m={m}
-            highlight={flashMsgId === seg.turn.id}
-            onOpenAtFile={onOpenAtFile}
-            onOpenLightbox={onOpenLightbox}
-          />
-        ),
-      )}
+      {items.map((item) => (
+        <TimelineRow
+          key={item.id}
+          item={item}
+          m={m}
+          highlight={flashMsgId === item.id}
+          onOpenAtFile={onOpenAtFile}
+          onOpenLightbox={onOpenLightbox}
+          skillByLower={skillByLower}
+        />
+      ))}
       {showPending ? (
         <div className="turn-pending" role="status" aria-live="polite">
           <span className="turn-pending-dots" aria-hidden>
@@ -1494,9 +1765,69 @@ type MenuKind = "model" | "mode" | "effort" | null;
 /** Follow-up prompt waiting for the current turn to finish. */
 type QueuedPrompt = {
   id: string;
+  /** User-facing body (no auto `/goal` / `/loop` prefix). */
   text: string;
   attachments: PromptAttachment[];
+  /** Snapshotted UI intent at enqueue time. */
+  prependGoal?: boolean;
+  prependLoop?: boolean;
+  loopInterval?: string;
 };
+
+/** Resolved wire text + bubble flags for goal/loop composer intents. */
+type ResolvedPromptIntent = {
+  wireText: string;
+  prependGoal?: boolean;
+  prependLoop?: boolean;
+  loopInterval?: string;
+};
+
+const LOOP_INTERVAL_PRESETS = ["1m", "5m", "15m", "1h"] as const;
+
+function resolvePromptIntent(
+  text: string,
+  opts: {
+    goalActive: boolean;
+    loopActive: boolean;
+    loopInterval: string;
+    /** When set, ignore live UI state and use these flags (queued drain). */
+    frozen?: {
+      prependGoal?: boolean;
+      prependLoop?: boolean;
+      loopInterval?: string;
+    };
+  },
+): ResolvedPromptIntent {
+  if (opts.frozen?.prependLoop) {
+    const interval = opts.frozen.loopInterval || "5m";
+    if (/^\s*\/(goal|loop)\b/i.test(text)) {
+      return { wireText: text, prependLoop: true, loopInterval: interval };
+    }
+    return {
+      wireText: `/loop ${interval} ${text}`,
+      prependLoop: true,
+      loopInterval: interval,
+    };
+  }
+  if (opts.frozen?.prependGoal) {
+    if (/^\s*\/goal\b/i.test(text)) {
+      return { wireText: text, prependGoal: true };
+    }
+    return { wireText: `/goal ${text}`, prependGoal: true };
+  }
+  if (opts.loopActive && !/^\s*\/(goal|loop)\b/i.test(text)) {
+    const interval = opts.loopInterval || "5m";
+    return {
+      wireText: `/loop ${interval} ${text}`,
+      prependLoop: true,
+      loopInterval: interval,
+    };
+  }
+  if (opts.goalActive && !/^\s*\/goal\b/i.test(text)) {
+    return { wireText: `/goal ${text}`, prependGoal: true };
+  }
+  return { wireText: text };
+}
 
 function newQueueId(): string {
   return `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1821,6 +2152,11 @@ export function App() {
   const [modelProviderFilter, setModelProviderFilter] = useState<string>("all");
   const [dragOver, setDragOver] = useState(false);
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
+  /** One-shot composer intents (slash / + menu). Cleared after successful send. */
+  const [goalActive, setGoalActive] = useState(false);
+  const [loopActive, setLoopActive] = useState(false);
+  const [loopInterval, setLoopInterval] = useState<string>("5m");
+  const [loopIntervalMenuOpen, setLoopIntervalMenuOpen] = useState(false);
   /**
    * Per-session follow-up queue. While a turn is busy, Enter enqueues here;
    * items auto-send when the session becomes idle (FIFO).
@@ -1838,6 +2174,9 @@ export function App() {
     sessionId: string;
     text: string;
     attachments: PromptAttachment[];
+    prependGoal?: boolean;
+    prependLoop?: boolean;
+    loopInterval?: string;
   } | null>(null);
   /**
    * Prompt history (newest first). Loaded from agent `x.ai/prompt_history`
@@ -1857,7 +2196,7 @@ export function App() {
   const [atSuggest, setAtSuggest] = useState<PathSuggestion[] | null>(null);
   const [atQuery, setAtQuery] = useState("");
   const [atIndex, setAtIndex] = useState(0);
-  const [slashSuggest, setSlashSuggest] = useState<SlashSuggestion[] | null>(
+  const [slashSuggest, setSlashSuggest] = useState<SlashMenuItem[] | null>(
     null,
   );
   const [slashIndex, setSlashIndex] = useState(0);
@@ -2898,6 +3237,10 @@ export function App() {
       stickToBottomRef.current = true;
       pinHoldIdRef.current = null;
       pinIgnoreScrollRef.current = false;
+      // Reset one-shot composer intents when switching sessions.
+      setGoalActive(false);
+      setLoopActive(false);
+      setLoopIntervalMenuOpen(false);
     }
     if (snap.replaying) {
       stickToBottomRef.current = true;
@@ -3159,6 +3502,17 @@ export function App() {
     return list;
   }, [snap.sessions]);
   const modes = useMemo(() => modeOptions(m), [m]);
+  /** lowercase skill name → canonical ACP name (for chips / composer pills). */
+  const skillByLower = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of snap.availableCommands) {
+      if (!isSkillCommand(c)) continue;
+      map.set(c.name.toLowerCase(), c.name);
+    }
+    return map;
+  }, [snap.availableCommands]);
+  const skillByLowerRef = useRef(skillByLower);
+  skillByLowerRef.current = skillByLower;
   const currentModel = useMemo(
     () => snap.availableModels.find((mod) => mod.modelId === snap.modelId),
     [snap.availableModels, snap.modelId],
@@ -3511,25 +3865,75 @@ export function App() {
     if (ce) renderContentEditable(ce, next);
   }, []);
 
-  /** Render text into a contenteditable div, replacing @mentions with
-   *  styled `<span contenteditable="false">` pills. */
+  function isComposerPillEl(node: Node): node is HTMLElement {
+    return (
+      node instanceof HTMLElement &&
+      (node.classList.contains("composer-at-pill") ||
+        node.classList.contains("composer-skill-pill"))
+    );
+  }
+
+  function composerPillPlainText(el: HTMLElement): string {
+    if (el.classList.contains("composer-skill-pill")) {
+      return `/${el.getAttribute("data-skill") ?? ""}`;
+    }
+    return `@${el.getAttribute("data-path") ?? ""}`;
+  }
+
+  /** Render text into a contenteditable div, replacing @mentions and
+   *  known skills with styled `contenteditable=false` pills. */
   function renderContentEditable(el: HTMLElement, text: string) {
-    const spans = findAtMentionSpans(text);
-    if (spans.length === 0) {
+    const atSpans = findAtMentionSpans(text);
+    const skillSpans = findSkillSpans(text, skillByLowerRef.current);
+    type Mark = {
+      start: number;
+      end: number;
+      kind: "at" | "skill";
+      value: string;
+    };
+    const marks: Mark[] = [
+      ...atSpans.map((s) => ({
+        start: s.start,
+        end: s.end,
+        kind: "at" as const,
+        value: s.path,
+      })),
+      ...skillSpans.map((s) => ({
+        start: s.start,
+        end: s.end,
+        kind: "skill" as const,
+        value: s.name,
+      })),
+    ].sort((a, b) => a.start - b.start || b.end - a.end);
+    const kept: Mark[] = [];
+    let cur = 0;
+    for (const mk of marks) {
+      if (mk.start < cur) continue;
+      kept.push(mk);
+      cur = mk.end;
+    }
+    if (kept.length === 0) {
       el.textContent = text;
       return;
     }
     el.innerHTML = "";
     let last = 0;
-    for (const s of spans) {
+    for (const s of kept) {
       if (s.start > last) {
         el.appendChild(document.createTextNode(text.slice(last, s.start)));
       }
       const pill = document.createElement("span");
-      pill.className = "composer-at-pill";
       pill.contentEditable = "false";
-      pill.textContent = `@${s.path}`;
-      pill.setAttribute("data-path", s.path);
+      if (s.kind === "at") {
+        pill.className = "composer-at-pill";
+        pill.textContent = `@${s.value}`;
+        pill.setAttribute("data-path", s.value);
+      } else {
+        pill.className = "composer-skill-pill";
+        pill.textContent = skillChipLabel(s.value);
+        pill.setAttribute("data-skill", s.value);
+        pill.title = `/${s.value}`;
+      }
       el.appendChild(pill);
       last = s.end;
     }
@@ -3538,7 +3942,54 @@ export function App() {
     }
   }
 
-  /** Read the contenteditable's text (pills → @path) and sync to the
+  /** Place caret at a plain-text offset inside the contenteditable. */
+  function setTextOffset(root: HTMLElement, target: number) {
+    let remaining = Math.max(0, target);
+    const sel = window.getSelection();
+    if (!sel) return;
+    const walk = (node: Node): boolean => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const len = (node.textContent ?? "").length;
+        if (remaining <= len) {
+          const range = document.createRange();
+          range.setStart(node, remaining);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          return true;
+        }
+        remaining -= len;
+        return false;
+      }
+      if (isComposerPillEl(node)) {
+        const plain = composerPillPlainText(node);
+        if (remaining <= plain.length) {
+          // Land after the whole pill (atomic).
+          const range = document.createRange();
+          range.setStartAfter(node);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          return true;
+        }
+        remaining -= plain.length;
+        return false;
+      }
+      for (const child of Array.from(node.childNodes)) {
+        if (walk(child)) return true;
+      }
+      return false;
+    };
+    if (!walk(root)) {
+      const range = document.createRange();
+      range.selectNodeContents(root);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+
+  /** Read the contenteditable's text (pills → @path / /skill) and sync to the
    *  hidden textarea, then trigger the normal onChange flow. */
   function syncContentEditable() {
     const ce = contentEditableRef.current;
@@ -3548,21 +3999,40 @@ export function App() {
     const walk = (node: Node) => {
       if (node.nodeType === Node.TEXT_NODE) {
         text += node.textContent ?? "";
-      } else if (node instanceof HTMLElement && node.classList.contains("composer-at-pill")) {
-        const path = node.getAttribute("data-path") ?? "";
-        text += `@${path}`;
+      } else if (isComposerPillEl(node)) {
+        text += composerPillPlainText(node);
       } else {
         for (const child of Array.from(node.childNodes)) walk(child);
       }
     };
     walk(ce);
+    // If the plain text contains complete skill tokens but the DOM is
+    // missing pills (e.g. user finished typing a skill name), re-pillify.
+    const expectedSkills = findSkillSpans(text, skillByLowerRef.current).length;
+    const expectedAts = findAtMentionSpans(text).length;
+    const haveSkills = ce.querySelectorAll(".composer-skill-pill").length;
+    const haveAts = ce.querySelectorAll(".composer-at-pill").length;
+    if (expectedSkills > haveSkills || expectedAts > haveAts) {
+      let caret = text.length;
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && sel.anchorNode && ce.contains(sel.anchorNode)) {
+        caret = getTextOffset(ce, sel.anchorNode, sel.anchorOffset);
+      }
+      renderContentEditable(ce, text);
+      setTextOffset(ce, caret);
+    }
     ta.value = text;
     draftRef.current = text;
     // Trigger resize + suggestion re-evaluation
     resizeTextarea(ta);
     const nonEmpty = text.trim().length > 0;
-    setHasDraft((prev) => prev === nonEmpty ? prev : nonEmpty);
-    if (text.startsWith("/") || text.includes("@") || slashSuggest != null || atSuggest != null) {
+    setHasDraft((prev) => (prev === nonEmpty ? prev : nonEmpty));
+    if (
+      text.startsWith("/") ||
+      text.includes("@") ||
+      slashSuggest != null ||
+      atSuggest != null
+    ) {
       scheduleSuggest(text, text.length);
     }
   }
@@ -3694,12 +4164,42 @@ export function App() {
     return queuesBySession[snap.sessionId] ?? [];
   }, [queuesBySession, snap.sessionId]);
 
+  const clearComposerIntent = useCallback(() => {
+    setGoalActive(false);
+    setLoopActive(false);
+    setLoopIntervalMenuOpen(false);
+  }, []);
+
+  const activateGoalIntent = useCallback(() => {
+    setLoopActive(false);
+    setLoopIntervalMenuOpen(false);
+    setGoalActive(true);
+  }, []);
+
+  const activateLoopIntent = useCallback(() => {
+    setGoalActive(false);
+    setLoopInterval((prev) => prev || "5m");
+    setLoopActive(true);
+  }, []);
+
   const enqueuePrompt = useCallback(
-    (sessionId: string, text: string, atts: PromptAttachment[]) => {
+    (
+      sessionId: string,
+      text: string,
+      atts: PromptAttachment[],
+      intent?: {
+        prependGoal?: boolean;
+        prependLoop?: boolean;
+        loopInterval?: string;
+      },
+    ) => {
       const item: QueuedPrompt = {
         id: newQueueId(),
         text,
         attachments: atts.map((a) => ({ ...a })),
+        prependGoal: intent?.prependGoal || undefined,
+        prependLoop: intent?.prependLoop || undefined,
+        loopInterval: intent?.loopInterval,
       };
       setQueuesBySession((prev) => ({
         ...prev,
@@ -3734,12 +4234,36 @@ export function App() {
 
   /** Deliver a prompt to the agent (session must exist / be creatable). */
   const dispatchAgentPrompt = useCallback(
-    async (text: string, atts: PromptAttachment[]) => {
+    async (
+      text: string,
+      atts: PromptAttachment[],
+      frozenIntent?: {
+        prependGoal?: boolean;
+        prependLoop?: boolean;
+        loopInterval?: string;
+      },
+    ) => {
       const ok = await ensureSession();
       if (!ok) return;
-      await window.desktop.sendPrompt({ text, attachments: atts });
+      // Goal/loop UI intents: prepend slash command for the agent; flags
+      // tell the backend to strip prefixes from the user bubble.
+      const resolved = resolvePromptIntent(text, {
+        goalActive,
+        loopActive,
+        loopInterval,
+        frozen: frozenIntent,
+      });
+      await window.desktop.sendPrompt({
+        text: resolved.wireText,
+        attachments: atts,
+        prependGoal: resolved.prependGoal || undefined,
+        prependLoop: resolved.prependLoop || undefined,
+      });
+      if (resolved.prependGoal || resolved.prependLoop) {
+        clearComposerIntent();
+      }
     },
-    [ensureSession],
+    [ensureSession, goalActive, loopActive, loopInterval, clearComposerIntent],
   );
 
   /**
@@ -3750,15 +4274,31 @@ export function App() {
     async (
       text: string,
       atts: PromptAttachment[],
-      opts?: { sessionId?: string },
+      opts?: {
+        sessionId?: string;
+        prependGoal?: boolean;
+        prependLoop?: boolean;
+        loopInterval?: string;
+      },
     ) => {
       const sid = opts?.sessionId ?? snap.sessionId;
+      const frozen =
+        opts?.prependGoal || opts?.prependLoop
+          ? {
+              prependGoal: opts.prependGoal,
+              prependLoop: opts.prependLoop,
+              loopInterval: opts.loopInterval,
+            }
+          : undefined;
       // Mid-turn on this session: park payload, cancel, drain on idle.
       if (snap.busy && sid && sid === snap.sessionId) {
         pendingImmediateRef.current = {
           sessionId: sid,
           text,
           attachments: atts.map((a) => ({ ...a })),
+          prependGoal: frozen?.prependGoal,
+          prependLoop: frozen?.prependLoop,
+          loopInterval: frozen?.loopInterval,
         };
         try {
           await window.desktop.cancel();
@@ -3770,7 +4310,7 @@ export function App() {
       }
 
       try {
-        await dispatchAgentPrompt(text, atts);
+        await dispatchAgentPrompt(text, atts, frozen);
       } catch (err) {
         setLocalError(err instanceof Error ? err.message : String(err));
       }
@@ -3850,29 +4390,50 @@ export function App() {
     setAttachments([]);
     if (text) rememberPrompt(text);
 
+    // Snapshot one-shot goal/loop intent before queue/send so chip state
+    // cannot change what was already committed.
+    const intentSnap = resolvePromptIntent(text, {
+      goalActive,
+      loopActive,
+      loopInterval,
+    });
+    const frozen =
+      intentSnap.prependGoal || intentSnap.prependLoop
+        ? {
+            prependGoal: intentSnap.prependGoal,
+            prependLoop: intentSnap.prependLoop,
+            loopInterval: intentSnap.loopInterval,
+          }
+        : undefined;
+    if (frozen) clearComposerIntent();
+
     // Busy turn: queue follow-up (FIFO, auto-sends when idle).
     if (snap.busy) {
       if (!snap.sessionId) {
         setLocalError(m.chooseWorkspaceFirst);
         return;
       }
-      enqueuePrompt(snap.sessionId, text, atts);
+      enqueuePrompt(snap.sessionId, text, atts, frozen);
       return;
     }
 
     try {
-      await dispatchAgentPrompt(text, atts);
+      await dispatchAgentPrompt(text, atts, frozen);
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
   }, [
     attachments,
     clearComposerText,
+    clearComposerIntent,
     dispatchAgentPrompt,
     enqueuePrompt,
     exitHistoryBrowse,
     openHistorySearch,
     rememberPrompt,
+    goalActive,
+    loopActive,
+    loopInterval,
     snap.availableModels,
     snap.modelId,
     snap.workspace,
@@ -3902,6 +4463,9 @@ export function App() {
         if (item.text) rememberPrompt(item.text);
         await requestImmediateSend(item.text, item.attachments, {
           sessionId: sid,
+          prependGoal: item.prependGoal,
+          prependLoop: item.prependLoop,
+          loopInterval: item.loopInterval,
         });
         return;
       }
@@ -3960,7 +4524,21 @@ export function App() {
         clearComposerText();
         setAttachments([]);
         if (text) rememberPrompt(text);
-        await requestImmediateSend(text, atts);
+        const intentSnap = resolvePromptIntent(text, {
+          goalActive,
+          loopActive,
+          loopInterval,
+        });
+        const frozen =
+          intentSnap.prependGoal || intentSnap.prependLoop
+            ? {
+                prependGoal: intentSnap.prependGoal,
+                prependLoop: intentSnap.prependLoop,
+                loopInterval: intentSnap.loopInterval,
+              }
+            : undefined;
+        if (frozen) clearComposerIntent();
+        await requestImmediateSend(text, atts, frozen);
         return;
       }
 
@@ -3972,6 +4550,9 @@ export function App() {
           if (top.text) rememberPrompt(top.text);
           await requestImmediateSend(top.text, top.attachments, {
             sessionId: sid,
+            prependGoal: top.prependGoal,
+            prependLoop: top.prependLoop,
+            loopInterval: top.loopInterval,
           });
         }
       }
@@ -3987,9 +4568,13 @@ export function App() {
       removeQueuedPrompt,
       requestImmediateSend,
       clearComposerText,
+      clearComposerIntent,
       exitHistoryBrowse,
       openHistorySearch,
       rememberPrompt,
+      goalActive,
+      loopActive,
+      loopInterval,
     ],
   );
 
@@ -4022,9 +4607,14 @@ export function App() {
       text: string,
       atts: PromptAttachment[],
       requeue?: QueuedPrompt,
+      frozen?: {
+        prependGoal?: boolean;
+        prependLoop?: boolean;
+        loopInterval?: string;
+      },
     ) => {
       try {
-        await dispatchAgentPrompt(text, atts);
+        await dispatchAgentPrompt(text, atts, frozen);
       } catch (err) {
         if (requeue) {
           setQueuesBySession((prev) => ({
@@ -4040,7 +4630,15 @@ export function App() {
 
     if (immediate && immediate.sessionId === sid) {
       pendingImmediateRef.current = null;
-      void run(immediate.text, immediate.attachments);
+      const frozen =
+        immediate.prependGoal || immediate.prependLoop
+          ? {
+              prependGoal: immediate.prependGoal,
+              prependLoop: immediate.prependLoop,
+              loopInterval: immediate.loopInterval,
+            }
+          : undefined;
+      void run(immediate.text, immediate.attachments, undefined, frozen);
       return;
     }
 
@@ -4050,7 +4648,15 @@ export function App() {
       if (!list.length || list[0]?.id !== next.id) return prev;
       return { ...prev, [sid]: list.slice(1) };
     });
-    void run(next.text, next.attachments, next);
+    const frozen =
+      next.prependGoal || next.prependLoop
+        ? {
+            prependGoal: next.prependGoal,
+            prependLoop: next.prependLoop,
+            loopInterval: next.loopInterval,
+          }
+        : undefined;
+    void run(next.text, next.attachments, next, frozen);
   }, [
     snap.busy,
     snap.replaying,
@@ -4228,6 +4834,31 @@ export function App() {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
   }, [mergeAttachments]);
+
+  /** Enter goal intent — shows the 🎯 chip; send prepends `/goal ` once. */
+  const onGoalMode = useCallback(() => {
+    activateGoalIntent();
+  }, [activateGoalIntent]);
+
+  /** Send a `/goal <verb>` slash command to the agent. Used by the
+   *  GoalProgressBubble's pause / resume / clear action buttons.
+   *  Falls back to ensuring a session exists first (mirrors onGoalMode
+   *  behavior) so the user can click these from a fresh workspace. */
+  const onGoalAction = useCallback(
+    async (verb: "pause" | "resume" | "clear") => {
+      setLocalError(null);
+      try {
+        if (!snap.sessionId) {
+          const ok = await ensureSession();
+          if (!ok) return;
+        }
+        await window.desktop.sendPrompt(`/goal ${verb}`);
+      } catch (err) {
+        setLocalError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [snap.sessionId, ensureSession],
+  );
 
   const onDropFiles = useCallback(
     async (e: DragEvent) => {
@@ -4409,7 +5040,7 @@ export function App() {
         return;
       }
       const q = slashNameQuery(value, cursor);
-      const list = filterSlashSuggestions(snap.availableCommands, q);
+      const list = filterSlashMenu(snap.availableCommands, q, m);
       setSlashSuggest(list);
       // Only reset highlight when the filter query changes — not on every
       // keyup (ArrowUp/Down would otherwise always snap back to index 0).
@@ -4424,7 +5055,7 @@ export function App() {
       // Prefer slash menu over @ when both could match (slash owns leading `/`).
       setAtSuggest((prev) => (prev == null ? prev : null));
     },
-    [snap.availableCommands],
+    [snap.availableCommands, m],
   );
 
   const updateAtSuggest = useCallback(async (value: string, cursor: number) => {
@@ -4512,23 +5143,94 @@ export function App() {
     [updateSuggest],
   );
 
-  const applySlashSuggestion = useCallback(
-    (s: SlashSuggestion) => {
-      const cur = textareaRef.current?.value ?? draftRef.current;
-      const next = completeSlashName(cur, s);
-      setComposerText(next);
+  const applySlashMenuItem = useCallback(
+    async (s: SlashMenuItem) => {
       setSlashSuggest(null);
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (!el) return;
-        el.focus();
-        const pos = next.length;
-        el.setSelectionRange(pos, pos);
-        // If the command takes args, keep composing; re-open filter only for name phase
-        updateSlashSuggest(next, pos);
-      });
+      setLocalError(null);
+
+      if (s.action === "fill") {
+        const next = `/${s.name} `;
+        setComposerText(next);
+        requestAnimationFrame(() => {
+          const ce = contentEditableRef.current;
+          if (ce) {
+            ce.focus();
+            setTextOffset(ce, next.length);
+            return;
+          }
+          const el = textareaRef.current;
+          if (!el) return;
+          el.focus();
+          el.setSelectionRange(next.length, next.length);
+        });
+        return;
+      }
+
+      if (s.action === "set_intent" && s.intentId === "goal") {
+        activateGoalIntent();
+        // Keep existing draft body; strip a leading /goal if user had typed it.
+        const cur = (draftRef.current || "").replace(/^\s*\/goal\s*/i, "");
+        if (cur !== draftRef.current) setComposerText(cur);
+        requestAnimationFrame(() => {
+          contentEditableRef.current?.focus();
+          textareaRef.current?.focus();
+        });
+        return;
+      }
+
+      if (s.action === "set_intent" && s.intentId === "loop") {
+        activateLoopIntent();
+        const cur = (draftRef.current || "").replace(
+          /^\s*\/loop(?:\s+\S+)?\s*/i,
+          "",
+        );
+        if (cur !== draftRef.current) setComposerText(cur);
+        requestAnimationFrame(() => {
+          contentEditableRef.current?.focus();
+          textareaRef.current?.focus();
+        });
+        return;
+      }
+
+      // execute / set_mode: clear composer and run immediately
+      clearComposerText();
+
+      if (s.action === "set_mode" && s.modeId) {
+        try {
+          const mode =
+            s.modeId === "default"
+              ? ("default" as const)
+              : s.modeId === "plan"
+                ? ("plan" as const)
+                : ("ask" as const);
+          await window.desktop.setMode(mode);
+        } catch (err) {
+          setLocalError(err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+
+      if (s.action === "execute") {
+        const text = `/${s.name}`;
+        try {
+          const ok = await ensureSession();
+          if (!ok) return;
+          await window.desktop.sendPrompt({
+            text,
+            hideUserMessage: s.hideUserMessage === true,
+          });
+        } catch (err) {
+          setLocalError(err instanceof Error ? err.message : String(err));
+        }
+      }
     },
-    [setComposerText, updateSlashSuggest],
+    [
+      setComposerText,
+      clearComposerText,
+      ensureSession,
+      activateGoalIntent,
+      activateLoopIntent,
+    ],
   );
 
   const insertAtPath = useCallback(
@@ -4585,21 +5287,23 @@ export function App() {
   );
 
   /** Walk contenteditable DOM and count the text offset at a given
-   *  node+offset, treating pills as their `@path` representation. */
+   *  node+offset, treating pills as their plain `@path` / `/skill` form. */
   function getTextOffset(root: Node, targetNode: Node, targetOffset: number): number {
     let offset = 0;
     const walk = (node: Node): boolean => {
       if (node === targetNode) {
         if (node.nodeType === Node.TEXT_NODE) {
           offset += targetOffset;
+        } else if (isComposerPillEl(node)) {
+          // Inside a non-editable pill: treat as start or end of the token.
+          if (targetOffset > 0) offset += composerPillPlainText(node).length;
         }
         return true;
       }
       if (node.nodeType === Node.TEXT_NODE) {
         offset += (node.textContent ?? "").length;
-      } else if (node instanceof HTMLElement && node.classList.contains("composer-at-pill")) {
-        const path = node.getAttribute("data-path") ?? "";
-        offset += path.length + 1; // +1 for @
+      } else if (isComposerPillEl(node)) {
+        offset += composerPillPlainText(node).length;
       } else {
         for (const child of Array.from(node.childNodes)) {
           if (walk(child)) return true;
@@ -4666,7 +5370,7 @@ export function App() {
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
         const s = slashSuggest[slashIndex];
-        if (s) applySlashSuggestion(s);
+        if (s) void applySlashMenuItem(s);
         return;
       }
       if (e.key === "Escape") {
@@ -4698,7 +5402,7 @@ export function App() {
         return;
       }
     }
-    // Backspace / Delete on an @-mention pill in the contenteditable:
+    // Backspace / Delete on an @-mention or skill pill in the contenteditable:
     // remove the whole pill atomically — but ONLY when the cursor is
     // touching the pill (no characters in between). Otherwise the
     // user is editing text and Backspace should delete a character.
@@ -4720,16 +5424,10 @@ export function App() {
         if (
           node.nodeType === Node.TEXT_NODE &&
           range.startOffset === 0 &&
-          node.previousSibling instanceof HTMLElement &&
-          node.previousSibling.classList.contains("composer-at-pill")
+          isComposerPillEl(node.previousSibling as Node)
         ) {
-          pill = node.previousSibling;
-        } else if (
-          node instanceof HTMLElement &&
-          node.classList.contains("composer-at-pill") &&
-          range.startOffset === 0
-        ) {
-          // Cursor at the start of a pill itself: delete that pill.
+          pill = node.previousSibling as HTMLElement;
+        } else if (isComposerPillEl(node) && range.startOffset === 0) {
           pill = node;
         }
       } else {
@@ -4739,19 +5437,17 @@ export function App() {
         if (
           node.nodeType === Node.TEXT_NODE &&
           range.startOffset === node.textContent?.length &&
-          node.nextSibling instanceof HTMLElement &&
-          node.nextSibling.classList.contains("composer-at-pill")
+          isComposerPillEl(node.nextSibling as Node)
         ) {
-          pill = node.nextSibling;
+          pill = node.nextSibling as HTMLElement;
         } else if (
-          node instanceof HTMLElement &&
-          node.classList.contains("composer-at-pill") &&
+          isComposerPillEl(node) &&
           range.startOffset === node.childNodes.length
         ) {
           pill = node;
         }
       }
-      if (pill?.classList.contains("composer-at-pill")) {
+      if (pill && isComposerPillEl(pill)) {
         e.preventDefault();
         pill.remove();
         syncContentEditable();
@@ -5934,7 +6630,11 @@ export function App() {
                       }}
                     >
                       <div className="history-timeline-popover-text">
-                        {previewText(item.text, 240)}
+                        {renderUserMessageBody(
+                          previewText(item.text, 240),
+                          undefined,
+                          skillByLower,
+                        )}
                       </div>
                       <span className="history-timeline-popover-arrow" />
                     </div>
@@ -6075,6 +6775,7 @@ export function App() {
                     bottomRef={bottomRef}
                     onOpenAtFile={handleOpenAtFile}
                     onOpenLightbox={setLightbox}
+                    skillByLower={skillByLower}
                   />
                 )}
               </div>
@@ -6167,6 +6868,21 @@ export function App() {
                   onOpenPanel={() => {
                     openPlanTab();
                   }}
+                />
+              ) : null}
+              {/* Goal subsystem progress — mirrors the agent's
+                  xAI goal_updated notifications. Hidden when the
+                  goal has finished or been cleared. */}
+              {snap.goalState ? (
+                <GoalProgressBubble
+                  goal={snap.goalState}
+                  m={m}
+                  onOpenPanel={() => {
+                    openPlanTab();
+                  }}
+                  onPause={() => void onGoalAction("pause")}
+                  onResume={() => void onGoalAction("resume")}
+                  onClear={() => void onGoalAction("clear")}
                 />
               ) : null}
 
@@ -6587,7 +7303,7 @@ export function App() {
                         suppressContentEditableWarning
                         onInput={handleContentEditableInput}
                         onKeyDown={(e) => onKeyDown(e as any)}
-                        onPaste={(e) => { e.preventDefault(); void onPaste(e as any); }}
+                        onPaste={(e) => void onPaste(e as any)}
                         data-placeholder={
                           !connectionReady
                             ? m.placeholderWaiting
@@ -6603,29 +7319,39 @@ export function App() {
                           ref={slashListRef}
                           className="at-suggest slash-suggest"
                         >
-                          {slashSuggest.map((s, i) => (
-                            <button
-                              key={`${s.source}:${s.name}`}
-                              className={`at-item slash-item ${
-                                i === slashIndex ? "active" : ""
-                              }`}
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                applySlashSuggestion(s);
-                              }}
-                            >
-                              <span className="slash-cmd">{s.display}</span>
-                              <span className="slash-desc">
-                                {s.description}
-                                {s.inputHint ? (
-                                  <span className="slash-hint">
-                                    {" "}
-                                    {s.inputHint}
-                                  </span>
+                          {slashSuggest.map((s, i) => {
+                            const prev = i > 0 ? slashSuggest[i - 1] : null;
+                            const showSection =
+                              !prev || prev.section !== s.section;
+                            return (
+                              <div key={`${s.section}:${s.name}`}>
+                                {showSection ? (
+                                  <div className="slash-section">
+                                    {s.section === "command"
+                                      ? m.slashSectionCommands
+                                      : m.slashSectionSkills}
+                                  </div>
                                 ) : null}
-                              </span>
-                            </button>
-                          ))}
+                                <button
+                                  type="button"
+                                  className={`at-item slash-item ${
+                                    i === slashIndex ? "active" : ""
+                                  }`}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    void applySlashMenuItem(s);
+                                  }}
+                                >
+                                  <span className="slash-title">{s.title}</span>
+                                  {s.description ? (
+                                    <span className="slash-desc">
+                                      {s.description}
+                                    </span>
+                                  ) : null}
+                                </button>
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : slashSuggest && slashSuggest.length === 0 ? (
                         <div className="at-suggest">
@@ -6684,64 +7410,17 @@ export function App() {
 
                   <div className="composer-toolbar" ref={selectsRef}>
                     <div className="composer-toolbar-left">
-                      <button
-                        type="button"
-                        className="icon-btn attach-btn"
-                        title={m.attachFiles}
+                      <ComposerPlusMenu
+                        m={m}
+                        onPickFiles={() => void onPickFiles()}
+                        onGoalMode={onGoalMode}
+                        onPlanMode={() => void onSetMode("plan")}
                         disabled={
                           !canCompose ||
                           snap.replaying ||
                           Boolean(snap.pendingPermission)
                         }
-                        onClick={() => void onPickFiles()}
-                      >
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          aria-hidden="true"
-                        >
-                          <path d="M12 5v14M5 12h14" />
-                        </svg>
-                      </button>
-                      {snap.busy ||
-                      snap.pendingPlanApproval ||
-                      (snap.sessionMode === "plan" &&
-                        Boolean(snap.planContent?.trim())) ? (
-                        <button
-                          type="button"
-                          className={`chip chip-btn plan-todos-chip ${
-                            snap.pendingPlanApproval ? "needs-approval" : ""
-                          }`}
-                          onClick={() => openRightTool("plan")}
-                          title={m.sidePanelPlan}
-                        >
-                          <strong>
-                            {snap.pendingPlanApproval
-                              ? m.planApprovalNeeded
-                              : m.planTodosChip}
-                          </strong>
-                          {(snap.todos?.length ?? 0) > 0 ? (
-                            <span className="chip-meta">
-                              {
-                                snap.todos.filter(
-                                  (t) => t.status === "completed",
-                                ).length
-                              }
-                              /
-                              {
-                                snap.todos.filter(
-                                  (t) => t.status !== "cancelled",
-                                ).length
-                              }
-                            </span>
-                          ) : null}
-                        </button>
-                      ) : null}
+                      />
                       <button
                         type="button"
                         className={`chip chip-btn always-approve-chip ${
@@ -6773,6 +7452,107 @@ export function App() {
                             : m.alwaysApproveOff}
                         </strong>
                       </button>
+                      {/* One-shot goal / loop intent chips (beside always-approve). */}
+                      {goalActive ? (
+                        <span className="chip goal-chip" title={m.goalChipHint}>
+                          <span className="chip-leading-icon" aria-hidden="true">
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                              <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3" />
+                              <circle cx="8" cy="8" r="2.5" fill="currentColor" />
+                              <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                            </svg>
+                          </span>
+                          <strong>{m.goalChipLabel}</strong>
+                          <button
+                            type="button"
+                            className="goal-chip-close"
+                            title={m.goalChipDismiss}
+                            aria-label={m.goalChipDismiss}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setGoalActive(false);
+                            }}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ) : null}
+                      {loopActive ? (
+                        <span className="chip loop-chip" title={m.loopChipHint}>
+                          <span className="chip-leading-icon" aria-hidden="true">
+                            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                              <path
+                                d="M12.5 8a4.5 4.5 0 1 1-1.4-3.2"
+                                stroke="currentColor"
+                                strokeWidth="1.3"
+                                strokeLinecap="round"
+                              />
+                              <path
+                                d="M12.5 3.5v3h-3"
+                                stroke="currentColor"
+                                strokeWidth="1.3"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </span>
+                          <strong>{m.loopChipLabel}</strong>
+                          <span className="loop-chip-interval-wrap">
+                            <button
+                              type="button"
+                              className="loop-chip-interval"
+                              aria-haspopup="listbox"
+                              aria-expanded={loopIntervalMenuOpen}
+                              title={m.loopIntervalPick}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setLoopIntervalMenuOpen((v) => !v);
+                              }}
+                            >
+                              {loopInterval}
+                              <span aria-hidden>▾</span>
+                            </button>
+                            {loopIntervalMenuOpen ? (
+                              <div
+                                className="dropdown loop-interval-menu"
+                                role="listbox"
+                              >
+                                {LOOP_INTERVAL_PRESETS.map((iv) => (
+                                  <button
+                                    key={iv}
+                                    type="button"
+                                    role="option"
+                                    className={`dropdown-item${
+                                      iv === loopInterval ? " active" : ""
+                                    }`}
+                                    aria-selected={iv === loopInterval}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setLoopInterval(iv);
+                                      setLoopIntervalMenuOpen(false);
+                                    }}
+                                  >
+                                    {iv}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </span>
+                          <button
+                            type="button"
+                            className="goal-chip-close loop-chip-close"
+                            title={m.loopChipDismiss}
+                            aria-label={m.loopChipDismiss}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setLoopActive(false);
+                              setLoopIntervalMenuOpen(false);
+                            }}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ) : null}
                     </div>
 
                     <div className="composer-toolbar-right">

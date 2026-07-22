@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { TodoItemUi } from "@shared/types";
+import type { TodoItemUi, TodoStatus } from "@shared/types";
 import type { Messages } from "./i18n";
 
 type Props = {
@@ -12,12 +12,12 @@ type Props = {
  * Compact pill shown above the composer while a plan is being executed.
  * Format: "Step X / Y" with a spinner for the currently running item.
  *
- * Hidden when the plan has finished (all items completed/cancelled) or
- * when the user has dismissed it for this session — we trust the right
- * Plan panel to be the canonical view, this is just a heads-up display.
+ * Hidden when the plan has finished (all items completed/cancelled).
+ * Hover expands a popup listing every todo with its current status,
+ * replacing the dedicated todo tab in the right-side Plan panel.
  */
 export function PlanProgressBubble({ todos, m, onOpenPanel }: Props) {
-  const [expanded, setExpanded] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
   const stats = useMemo(() => {
     let inProgress = 0;
@@ -66,13 +66,15 @@ export function PlanProgressBubble({ todos, m, onOpenPanel }: Props) {
   const onClick = () => {
     if (onOpenPanel) {
       onOpenPanel();
-      return;
     }
-    setExpanded((e) => !e);
   };
 
   return (
-    <div className="plan-progress-bubble-wrap">
+    <div
+      className="plan-progress-bubble-wrap"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       <button
         type="button"
         className="plan-progress-bubble"
@@ -92,11 +94,44 @@ export function PlanProgressBubble({ todos, m, onOpenPanel }: Props) {
           </span>
         ) : null}
       </button>
-      {expanded && !onOpenPanel ? (
-        <div className="plan-progress-bubble-detail" role="tooltip">
-          {current.content}
+      {hovered ? (
+        <div className="plan-progress-bubble-tasks" role="tooltip">
+          <div className="plan-progress-bubble-tasks-title">
+            {m.planProgressTasksTitle}
+          </div>
+          <ul className="plan-progress-bubble-tasks-list">
+            {todos.map((t, i) => (
+              <li
+                key={t.id}
+                className={`plan-progress-bubble-task status-${t.status}`}
+              >
+                <span className={`plan-progress-bubble-task-icon status-${t.status}`} aria-hidden>
+                  {todoStatusIcon(t.status)}
+                </span>
+                <span className="plan-progress-bubble-task-step">
+                  {i + 1}.
+                </span>
+                <span className="plan-progress-bubble-task-content">
+                  {t.content}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
     </div>
   );
+}
+
+function todoStatusIcon(status: TodoStatus): string {
+  switch (status) {
+    case "in_progress":
+      return "↻";
+    case "completed":
+      return "✓";
+    case "cancelled":
+      return "✕";
+    default:
+      return "○";
+  }
 }

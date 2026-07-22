@@ -13,27 +13,11 @@ function statusClass(status: string): string {
   return "idle";
 }
 
-function kindLabel(_m: Messages, kind: string | undefined): string {
-  // No mapping — display whatever the agent sent. Backend prefers
-  // _meta.x.ai.tool.kind (e.g. "read", "edit", "list", "ask_user", …)
-  // so the badge reflects the real tool category, not the placeholder
-  // "Other" that the agent uses until a follow-up update lands.
-  return kind || "";
-}
-
-function statusLabel(m: Messages, status: string): string {
-  const s = status.toLowerCase();
-  if (s === "completed" || s === "complete" || s === "success")
-    return m.toolStatusCompleted;
-  if (s === "failed" || s === "error") return m.toolStatusFailed;
-  if (s === "cancelled" || s === "canceled") return m.toolStatusCancelled;
-  if (s === "in_progress" || s === "running") return m.toolStatusRunning;
-  if (s === "awaiting_permission" || s === "awaiting" || s === "needs_permission")
-    return m.toolStatusAwaiting;
-  if (s === "pending") return m.toolStatusPending;
-  return status;
-}
-
+/**
+ * CLI-style tool row: one compact line (title from agent already looks like
+ * `Read foo.vue (1-150 of 2773)` / `Search "…" (N matches)`).
+ * Always starts collapsed when there is body content (output / diffs).
+ */
 export const ToolCard = memo(function ToolCard({
   item,
   m,
@@ -46,44 +30,55 @@ export const ToolCard = memo(function ToolCard({
   const hasOutput = Boolean(item.outputText && item.outputText.length > 0);
   const hasDetails = hasDiffs || hasOutput;
   const sc = statusClass(item.status);
+  // File IO content starts collapsed — title line only until the user opens.
+  const [open, setOpen] = useState(false);
 
-  // Open state lives locally so that streaming updates to item.status /
-  // item.outputText don't override the user's manual collapse. We start
-  // with `hasDiffs` as the default (most useful for coding feedback) and
-  // then respect user toggles forever after.
-  const [open, setOpen] = useState<boolean>(hasDiffs);
+  const title = item.title || kindFallback(item.toolKind);
+  const isFail = sc === "fail";
+  const isBusy = sc === "busy";
 
   const header = (
-    <div className="tool-card-header">
-      <span className="badge">{kindLabel(m, item.toolKind)}</span>
-      <span className="title" title={item.title}>
-        {item.title}
+    <div className="activity-tool-line">
+      <span className="activity-tool-title" title={title}>
+        {title}
       </span>
       {hasDiffs ? (
-        <span className="tool-meta">
-          {m.toolDiffCount.replace(
-            "{n}",
-            String(diffs.length),
-          )}
+        <span className="activity-tool-meta">
+          {m.toolDiffCount.replace("{n}", String(diffs.length))}
         </span>
       ) : null}
-      <span className={`status status-${sc}`}>{statusLabel(m, item.status)}</span>
+      {isFail ? (
+        <span className="activity-tool-flag is-fail">{m.toolStatusFailed}</span>
+      ) : null}
+      {isBusy ? <span className="activity-tool-spinner" aria-hidden /> : null}
     </div>
   );
 
+  // No body → plain one-liner (already the "collapsed" view).
   if (!hasDetails) {
-    return <div className={`tool-card status-${sc}`}>{header}</div>;
+    return (
+      <div
+        className={`activity-tool status-${sc}`}
+        data-tool-kind={item.toolKind || ""}
+      >
+        {header}
+      </div>
+    );
   }
 
   return (
     <details
-      className={`tool-card expandable status-${sc}`}
+      className={`activity-tool expandable status-${sc}`}
+      data-tool-kind={item.toolKind || ""}
       open={open}
       onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
     >
-      <summary className="tool-card-summary">{header}</summary>
-      <div className="tool-card-body">
-        {hasDiffs ? <DiffList diffs={diffs} defaultOpen /> : null}
+      <summary className="activity-tool-summary">{header}</summary>
+      <div className="activity-tool-body">
+        {/* Diffs stay collapsed until the outer details is opened; then
+            show them open so the user sees the change immediately. */}
+        {/* Keep nested diffs collapsed until the user opens each one. */}
+        {hasDiffs ? <DiffList diffs={diffs} defaultOpen={false} /> : null}
         {hasOutput ? (
           <div className="tool-output">
             <div className="tool-output-label">{m.toolOutput}</div>
@@ -97,3 +92,7 @@ export const ToolCard = memo(function ToolCard({
     </details>
   );
 });
+
+function kindFallback(kind: string | undefined): string {
+  return kind || "tool";
+}

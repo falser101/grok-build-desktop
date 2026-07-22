@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import { randomBytes } from "node:crypto";
 import { access, readFile, readdir, stat } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, writeFileSync, mkdirSync } from "node:fs";
 import { basename, relative, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -77,9 +77,130 @@ function stripAttachmentForTimeline(a: PromptAttachment): PromptAttachment {
   if (a.kind !== "image" || !a.dataBase64) return a;
   if (a.dataBase64.length <= TIMELINE_ATTACHMENT_DATA_B64_MAX) return a;
   // Oversized image: keep metadata, drop the inline bytes. Bubble will
-  // render a file-style chip with the filename only.
+  // render via path on demand when path is set.
   const { dataBase64: _drop, ...rest } = a;
   return { ...rest, dataBase64: undefined };
+}
+
+function sessionDirFor(cwd: string, sessionId: string): string {
+  return join(homedir(), ".grok", "sessions", encodeSessionCwd(cwd), sessionId);
+}
+
+/**
+ * If an image is too large for the timeline snapshot but has base64 and no
+ * path, write it under session assets so the renderer can still preview it.
+ */
+function materializeOversizedImage(
+  a: PromptAttachment,
+  sessionDir: string | null,
+): PromptAttachment {
+  const stripped = stripAttachmentForTimeline(a);
+  if (stripped.dataBase64 || stripped.path || !a.dataBase64 || !sessionDir) {
+    return stripped;
+  }
+  try {
+    const assets = join(sessionDir, "assets");
+    mkdirSync(assets, { recursive: true });
+    const mime = a.mimeType || "image/png";
+    const ext =
+      mime.includes("jpeg") || mime.includes("jpg")
+        ? "jpg"
+        : mime.includes("webp")
+          ? "webp"
+          : mime.includes("gif")
+            ? "gif"
+            : "png";
+    const filename = `image-ui-${randomBytes(8).toString("hex")}.${ext}`;
+    const path = join(assets, filename);
+    writeFileSync(path, Buffer.from(a.dataBase64, "base64"));
+    return {
+      ...stripped,
+      path,
+      displayPath: stripped.displayPath || path,
+      name: stripped.name || filename,
+    };
+  } catch {
+    return stripped;
+  }
+}
+
+/**
+ * Parse one ACP user_message_chunk content block for timeline replay.
+ * Returns text delta and/or a single image attachment (never both null).
+ */
+function parseUserMessageContent(content: Record<string, JsonValue> | null): {
+  text?: string;
+  attachment?: PromptAttachment;
+} {
+  if (!content) return {};
+  const type = (asString(content.type) ?? "").toLowerCase();
+  // Text blocks (ACP ContentBlock::Text). Empty text is not an image — each
+  // content block is a separate notification, so images arrive as type "image".
+  if (type === "text" || (type === "" && content.text != null && content.data == null)) {
+    const text = asString(content.text);
+    if (text != null && text.length > 0) return { text };
+    return {};
+  }
+  // Image blocks: type "image" with base64 `data` + mimeType (jsonl stores these).
+  if (
+    type === "image" ||
+    type === "image_url" ||
+    content.data != null ||
+    (content.mimeType != null && content.data != null)
+  ) {
+    const dataBase64 =
+      asString(content.data) ??
+      asString(content.base64) ??
+      // data:image/png;base64,... form sometimes used in older writers
+      (() => {
+        const url = asString(content.url) ?? asString(content.uri);
+        if (!url) return undefined;
+        const m = /^data:([^;]+);base64,(.+)$/i.exec(url);
+        return m?.[2];
+      })();
+    const mimeType =
+      asString(content.mimeType) ??
+      asString(content.mime_type) ??
+      (() => {
+        const url = asString(content.url) ?? asString(content.uri);
+        const m = /^data:([^;]+);base64,/i.exec(url ?? "");
+        return m?.[1];
+      })() ??
+      "image/png";
+    const uri = asString(content.uri) ?? asString(content.url);
+    let path: string | undefined;
+    if (uri?.startsWith("file://")) {
+      try {
+        path = decodeURIComponent(uri.slice("file://".length));
+      } catch {
+        path = uri.slice("file://".length);
+      }
+    } else if (uri && !uri.startsWith("data:") && isAbsolute(uri)) {
+      path = uri;
+    }
+    if (!dataBase64 && !path) return {};
+    const ext =
+      mimeType.includes("jpeg") || mimeType.includes("jpg")
+        ? "jpg"
+        : mimeType.includes("webp")
+          ? "webp"
+          : mimeType.includes("gif")
+            ? "gif"
+            : "png";
+    const name = path ? basename(path) : `image.${ext}`;
+    const att: PromptAttachment = {
+      id: newId("att"),
+      kind: "image",
+      displayPath: path ?? name,
+      name,
+      mimeType,
+      dataBase64: dataBase64 || undefined,
+      path,
+    };
+    // Size strip happens later with sessionDir context (materializeOversizedImage).
+    return { attachment: att };
+  }
+  return {};
 }
 
 interface PendingPermissionEntry {
@@ -87,6 +208,24 @@ interface PendingPermissionEntry {
   /** Session that owns this permission prompt (for concurrent multi-session). */
   sessionId?: string;
   resolve: (result: JsonValue) => void;
+}
+
+/** Goal subsystem snapshot, mirrored to the renderer for the progress bubble. */
+interface GoalStatePayload {
+  goalId: string;
+  objective: string;
+  status: string;
+  phase: string;
+  currentDeliverableTitle?: string;
+  currentSubagentRole?: string;
+  totalDeliverables: number;
+  completedDeliverables: number;
+  tokensUsed?: number;
+  tokenBudget?: number;
+  elapsedMs?: number;
+  pauseMessage?: string;
+  lastEvent?: string;
+  updatedAt: number;
 }
 
 interface PendingPlanApprovalEntry {
@@ -657,13 +796,179 @@ function parseAvailableCommands(
     }
     const meta =
       asRecord(rec._meta as JsonValue) ?? asRecord(rec.meta as JsonValue);
+    // Skill advertising uses _meta.path + _meta.scope (shell slash_commands).
+    // Coerce non-string scope (defensive) and accept nested path shapes.
+    let skillPath = asString(meta?.path);
+    if (!skillPath && meta?.path != null && typeof meta.path !== "object") {
+      skillPath = String(meta.path);
+    }
+    let skillScope = asString(meta?.scope);
+    if (!skillScope && meta?.scope != null && typeof meta.scope !== "object") {
+      skillScope = String(meta.scope);
+    }
+    // Workflows use different meta keys — not skills.
+    const isWorkflow =
+      Boolean(asString(meta?.workflowPath) || asString(meta?.workflowSource));
     out.push({
       name,
       description,
       inputHint,
-      skillPath: asString(meta?.path),
-      skillScope: asString(meta?.scope),
+      skillPath: isWorkflow ? undefined : skillPath,
+      skillScope: isWorkflow ? undefined : skillScope,
     });
+  }
+  return out;
+}
+
+/**
+ * Shell builtins + common pager names that must never be treated as skills
+ * when ACP omits `_meta` (or when merging disk skill scans).
+ */
+const NON_SKILL_COMMAND_NAMES = new Set(
+  [
+    "compact",
+    "always-approve",
+    "yolo",
+    "flush",
+    "dream",
+    "memory",
+    "mem",
+    "context",
+    "hooks-trust",
+    "hooks-list",
+    "hooks-add",
+    "hooks-remove",
+    "hooks-untrust",
+    "plugins",
+    "plugin",
+    "reload-plugins",
+    "session-info",
+    "status",
+    "info",
+    "feedback",
+    "deep-research",
+    "workflow",
+    "workflows",
+    "goal",
+    "loop",
+    "new",
+    "clear",
+    "model",
+    "m",
+    "effort",
+    "plan",
+    "view-plan",
+    "show-plan",
+    "plan-view",
+    "ask",
+    "agent",
+    "history",
+    "settings",
+    "config",
+    "theme",
+    "vim-mode",
+    "minimal",
+    "fullscreen",
+    "full",
+    "doctor",
+    "docs",
+    "quit",
+    "exit",
+    "home",
+    "welcome",
+    "resume",
+    "fork",
+    "rewind",
+    "rename",
+    "export",
+    "copy",
+    "login",
+    "logout",
+    "usage",
+    "cost",
+    "skills",
+    "hooks",
+    "marketplace",
+    "mcps",
+    "personas",
+    "config-agents",
+    "agents",
+    "remember",
+    "imagine",
+    "imagine-video",
+    "btw",
+    "auto",
+    "help",
+  ].map((s) => s.toLowerCase()),
+);
+
+/** Merge filesystem skills into the ACP command catalog (fills missing skill meta). */
+async function mergeDiskSkillsIntoCommands(
+  cmds: AvailableCommand[],
+  workspace?: string,
+): Promise<AvailableCommand[]> {
+  let disk: Awaited<ReturnType<typeof import("./extensions-manager").listSkills>>;
+  try {
+    const { listSkills } = await import("./extensions-manager");
+    disk = await listSkills(workspace || undefined);
+  } catch {
+    return cmds;
+  }
+  const out = cmds.map((c) => ({ ...c }));
+  const byName = new Map(out.map((c) => [c.name.toLowerCase(), c]));
+
+  // Repair ACP skills that lost _meta: if name isn't a known builtin and has
+  // no skillPath yet, mark as skill when a disk scan matches.
+  for (const c of out) {
+    if (c.skillPath || c.skillScope) continue;
+    if (NON_SKILL_COMMAND_NAMES.has(c.name.toLowerCase())) continue;
+    if (/^(local|repo|user|server|bundled|plugin):/i.test(c.name)) {
+      c.skillScope = c.name.split(":")[0]!.toLowerCase();
+      continue;
+    }
+    const hit = disk.find(
+      (s) => !s.disabled && s.name.toLowerCase() === c.name.toLowerCase(),
+    );
+    if (hit) {
+      c.skillPath = hit.path;
+      c.skillScope = hit.scope;
+    }
+  }
+
+  for (const s of disk) {
+    if (s.disabled) continue;
+    const key = s.name.toLowerCase();
+    if (NON_SKILL_COMMAND_NAMES.has(key)) {
+      // Bare name reserved — advertise as scope:name when free.
+      const qualified = `${s.scope}:${s.name}`;
+      if (byName.has(qualified.toLowerCase())) continue;
+      const entry: AvailableCommand = {
+        name: qualified,
+        description: s.description || s.name,
+        skillPath: s.path,
+        skillScope: s.scope,
+      };
+      out.push(entry);
+      byName.set(qualified.toLowerCase(), entry);
+      continue;
+    }
+    const existing = byName.get(key);
+    if (existing) {
+      if (!existing.skillPath) existing.skillPath = s.path;
+      if (!existing.skillScope) existing.skillScope = s.scope;
+      if (!existing.description && s.description) {
+        existing.description = s.description;
+      }
+      continue;
+    }
+    const entry: AvailableCommand = {
+      name: s.name,
+      description: s.description || s.name,
+      skillPath: s.path,
+      skillScope: s.scope,
+    };
+    out.push(entry);
+    byName.set(key, entry);
   }
   return out;
 }
@@ -796,6 +1101,25 @@ export class AgentBackend {
   private streamingAssistantId: string | null = null;
   private streamingThoughtId: string | null = null;
   /**
+   * During session-load replay, consecutive `user_message_chunk` events
+   * (text + image content blocks for one prompt) fold into a single user
+   * timeline item. Cleared on any non-user update so the next prompt opens
+   * a fresh bubble.
+   */
+  private replayOpenUserId: string | null = null;
+  /**
+   * ID of the last thought that was finalized. If a new AgentThoughtChunk
+   * arrives shortly after finalize (typically <1.2s) — e.g. MiniMax's
+   * OpenAI-compat stream sends thinking in several bursts — we reopen
+   * the same thought item instead of creating a new bubble, so a
+   * continuous reasoning block stays as one collapsible group in the UI.
+   * Cleared by any genuine "interrupting" event (real assistant text,
+   * tool call, plan approval, session lifecycle).
+   */
+  private reopenableThoughtId: string | null = null;
+  /** Wall-clock ms timestamp of the last `finalizeStreamingThought`. */
+  private lastThoughtFinalizedAt = 0;
+  /**
    * When true, suppress agent_message_chunk / agent_thought_chunk
    * from reaching the timeline. Armed by cancel() / cancelSession()
    * so that in-flight model chunks arriving after the user clicks
@@ -818,6 +1142,13 @@ export class AgentBackend {
   private todos: TodoItemUi[] = [];
   /** plan.md body for the focused session. */
   private planContent?: string;
+  /**
+   * Latest goal subsystem state pushed by the agent via the xAI
+   * `goal_updated` notification (sent at most 1/s). Drives the
+   * 🎯 progress bubble above the composer. Cleared on session/turn
+   * boundaries so it never shows stale state from a prior session.
+   */
+  private goalState: GoalStatePayload | null = null;
   /**
    * Live/parked runtimes for sessions that have been opened or are mid-turn.
    * The focused session is also mirrored on the fields above for the hot path.
@@ -977,6 +1308,27 @@ export class AgentBackend {
       pendingPlanApproval: this.activePlanApproval()
         ? { ...this.activePlanApproval()! }
         : undefined,
+      // Goal subsystem snapshot (from xAI `goal_updated`). Cleared on
+      // session/turn boundaries inside the handler that processes the
+      // event, so it never leaks across sessions.
+      goalState: this.goalState
+        ? {
+            goalId: this.goalState.goalId,
+            objective: this.goalState.objective,
+            status: this.goalState.status,
+            phase: this.goalState.phase,
+            currentDeliverableTitle: this.goalState.currentDeliverableTitle,
+            currentSubagentRole: this.goalState.currentSubagentRole,
+            totalDeliverables: this.goalState.totalDeliverables,
+            completedDeliverables: this.goalState.completedDeliverables,
+            tokensUsed: this.goalState.tokensUsed,
+            tokenBudget: this.goalState.tokenBudget,
+            elapsedMs: this.goalState.elapsedMs,
+            pauseMessage: this.goalState.pauseMessage,
+            lastEvent: this.goalState.lastEvent,
+            updatedAt: this.goalState.updatedAt,
+          }
+        : undefined,
       installerStatus: this.installerStatus,
       installerChannel: this.installerChannel,
       lastUpdateCheckAt: this.lastUpdateCheckAt,
@@ -1121,6 +1473,8 @@ export class AgentBackend {
     this.compactTimelineId = null;
     this.streamingAssistantId = null;
     this.streamingThoughtId = null;
+    this.clearReopenableThought();
+    this.goalState = null;
     this.inThinkTag = false;
     this.thinkHold = "";
     this.tokensUsed = undefined;
@@ -1213,6 +1567,7 @@ export class AgentBackend {
         this.compactTimelineId = null;
         this.streamingAssistantId = null;
         this.streamingThoughtId = null;
+        this.clearReopenableThought();
         this.inThinkTag = false;
         this.thinkHold = "";
         this.tokensUsed = undefined;
@@ -1910,6 +2265,7 @@ export class AgentBackend {
     this.toolIndex.clear();
     this.streamingAssistantId = null;
     this.streamingThoughtId = null;
+    this.clearReopenableThought();
     this.compactTimelineId = null;
     this.compacting = false;
     this.tokensUsed = undefined;
@@ -2029,11 +2385,25 @@ export class AgentBackend {
 
   private finalizeStreamingThought(): void {
     if (this.streamingThoughtId) {
+      // Stash the id + timestamp so the next AgentThoughtChunk (if it
+      // arrives within the reconnect window) can reopen the same item
+      // instead of minting a new bubble. Real interrupting events clear
+      // these fields before they can be reused.
+      this.reopenableThoughtId = this.streamingThoughtId;
+      this.lastThoughtFinalizedAt = Date.now();
       this.updateTimeline(this.streamingThoughtId, (item) =>
         item.kind === "thought" ? { ...item, streaming: false } : item,
       );
     }
     this.streamingThoughtId = null;
+  }
+
+  /** Drop any pending thought-reopen state — called when something
+   *  genuinely separates the next thought from the previous one
+   *  (real assistant text, tool call, plan approval, session lifecycle). */
+  private clearReopenableThought(): void {
+    this.reopenableThoughtId = null;
+    this.lastThoughtFinalizedAt = 0;
   }
 
   /**
@@ -2321,7 +2691,15 @@ export class AgentBackend {
       meta?.availableCommands as JsonValue | undefined,
     );
     if (bootstrapCmds.length > 0) {
-      this.availableCommands = bootstrapCmds;
+      this.availableCommands = await mergeDiskSkillsIntoCommands(
+        bootstrapCmds,
+        this.workspace,
+      );
+    } else {
+      this.availableCommands = await mergeDiskSkillsIntoCommands(
+        this.availableCommands,
+        this.workspace,
+      );
     }
     const defaultAuth = asString(meta?.defaultAuthMethodId) ?? "cached_token";
 
@@ -2564,6 +2942,8 @@ export class AgentBackend {
     this.compactTimelineId = null;
     this.streamingAssistantId = null;
     this.streamingThoughtId = null;
+    this.clearReopenableThought();
+    this.goalState = null;
     this.inThinkTag = false;
     this.thinkHold = "";
   }
@@ -2604,13 +2984,8 @@ export class AgentBackend {
     if (!wasBusy || !client || this.connection !== "ready") {
       return;
     }
-    try {
-      await client.request("session/cancel", { sessionId }, 10_000);
-      this.log("info", `Cancel sent (${reason}) session=${sessionId}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.log("warn", `Cancel failed (${reason}): ${message}`);
-    }
+    client.notify("session/cancel", { sessionId, _meta: { cancelSubagents: true } });
+    this.log("info", `Cancel sent (${reason}) session=${sessionId}`);
   }
 
   private cancelPermissionsForSession(sessionId: string, reason: string): void {
@@ -2717,34 +3092,62 @@ export class AgentBackend {
   async refreshCommands(): Promise<void> {
     // Skip only when the WebSocket isn't up. Custom-provider users can
     // legitimately use slash commands without a Grok account.
-    if (!this.client || !this.client.connected) return;
+    if (!this.client || !this.client.connected) {
+      // Still surface disk skills so `/` menu isn't empty of skills offline.
+      const merged = await mergeDiskSkillsIntoCommands(
+        this.availableCommands,
+        this.workspace,
+      );
+      this.availableCommands = merged;
+      this.emitSnapshot();
+      return;
+    }
     const client = this.client;
     const params: Record<string, JsonValue> = {};
     if (this.workspace) params.cwd = this.workspace;
     const methods = ["_x.ai/commands/list", "x.ai/commands/list"] as const;
+    let list: AvailableCommand[] = [];
+    let got = false;
     for (const method of methods) {
       try {
         const raw = await client.request(method, params, 30_000);
         const rec = asRecord(raw);
-        const list =
+        const parsed =
           parseAvailableCommands(rec?.commands as JsonValue | undefined) ||
           parseAvailableCommands(raw);
-        if (list.length > 0 || rec?.commands !== undefined) {
-          this.availableCommands = list;
-          this.emitSnapshot();
-          this.log("info", `Loaded ${list.length} slash commands`);
-          return;
+        if (parsed.length > 0 || rec?.commands !== undefined) {
+          list = parsed;
+          got = true;
+          break;
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.log("warn", `commands/list via ${method}: ${message}`);
       }
     }
+    if (!got) {
+      list = this.availableCommands.slice();
+    }
+    const merged = await mergeDiskSkillsIntoCommands(list, this.workspace);
+    this.availableCommands = merged;
+    const skillN = merged.filter((c) => c.skillPath || c.skillScope).length;
+    this.emitSnapshot();
+    this.log(
+      "info",
+      `Loaded ${merged.length} slash commands (${skillN} skills)`,
+    );
   }
 
   private applyAvailableCommands(commands: AvailableCommand[]): void {
     this.availableCommands = commands;
     if (!this.replaying) this.emitSnapshot();
+    // Session push may omit skill _meta or only list builtins — merge disk.
+    void mergeDiskSkillsIntoCommands(commands, this.workspace).then(
+      (merged) => {
+        this.availableCommands = merged;
+        if (!this.replaying) this.emitSnapshot();
+      },
+    );
   }
 
   async newSession(workspace: string): Promise<void> {
@@ -2863,6 +3266,8 @@ export class AgentBackend {
       this.planContent = undefined;
       this.streamingAssistantId = null;
       this.streamingThoughtId = null;
+      this.replayOpenUserId = null;
+      this.clearReopenableThought();
       this.inThinkTag = false;
       this.thinkHold = "";
       this.compactTimelineId = null;
@@ -2913,6 +3318,7 @@ export class AgentBackend {
         }
         this.applyModelsFromSession(result?.models);
         this.finalizeStreaming();
+        this.replayOpenUserId = null;
         if (planBody?.trim()) this.planContent = planBody;
         const known = this.sessions.find((s) => s.sessionId === sessionId);
         if (known) this.sessionTitle = known.title;
@@ -2932,6 +3338,7 @@ export class AgentBackend {
           this.replaying = false;
           this.busy = false;
           this.compacting = false;
+          this.replayOpenUserId = null;
           this.syncActiveIntoRuntimes();
           this.emitSnapshot();
         }
@@ -3300,35 +3707,121 @@ export class AgentBackend {
 
     if (kind === "user_message_chunk") {
       // Live prompts already append the user bubble in sendPrompt — skip echo.
-      // Session load replay needs these to rebuild history.
+      // Session load replay needs these to rebuild history (text + images).
       if (!this.replaying) return;
       const content = asRecord(update.content);
-      const text = asString(content?.text) ?? "";
-      if (!text) return;
-      this.pushTimeline({ id: newId("user"), kind: "user", text });
+      const parsed = parseUserMessageContent(content);
+      if (parsed.text == null && !parsed.attachment) return;
+
+      const applyToUser = (
+        item: Extract<TimelineItem, { kind: "user" }>,
+      ): Extract<TimelineItem, { kind: "user" }> => {
+        let text = item.text;
+        let attachments = item.attachments ? [...item.attachments] : undefined;
+        if (parsed.text) {
+          text = text ? `${text}${parsed.text}` : parsed.text;
+        }
+        if (parsed.attachment) {
+          const sessionDir =
+            this.sessionId && this.workspace
+              ? sessionDirFor(this.workspace, this.sessionId)
+              : null;
+          const att = materializeOversizedImage(parsed.attachment, sessionDir);
+          attachments = [...(attachments ?? []), att];
+        }
+        // Pure-image turns: light placeholder for history previews. Refresh
+        // when only the synthetic "[N images]" text is present so multi-image
+        // prompts count correctly as more chunks land.
+        const imageCount =
+          attachments?.filter((a) => a.kind === "image").length ?? 0;
+        if (
+          imageCount > 0 &&
+          (!text.trim() || /^\[\d+ images?\]$/i.test(text.trim()))
+        ) {
+          text = `[${imageCount} image${imageCount > 1 ? "s" : ""}]`;
+        }
+        return { ...item, text, attachments };
+      };
+
+      if (this.replayOpenUserId) {
+        const openId = this.replayOpenUserId;
+        this.updateTimeline(openId, (item) =>
+          item.kind === "user" ? applyToUser(item) : item,
+        );
+      } else {
+        const id = newId("user");
+        const seed: Extract<TimelineItem, { kind: "user" }> = {
+          id,
+          kind: "user",
+          text: "",
+        };
+        this.pushTimeline(applyToUser(seed));
+        this.replayOpenUserId = id;
+      }
       this.streamingAssistantId = null;
       this.streamingThoughtId = null;
+      this.clearReopenableThought();
       this.inThinkTag = false;
       this.thinkHold = "";
       return;
     }
+
+    // Any non-user update closes the open replay user bubble so the next
+    // prompt starts a fresh item (text+image chunks of one turn stay merged).
+    this.replayOpenUserId = null;
 
     if (kind === "agent_message_chunk") {
       if (this.suppressStreamingAfterCancel) return;
       const content = asRecord(update.content);
       const text = asString(content?.text) ?? "";
       if (!text) return;
-      // Close any open native thought caret before assistant text resumes.
-      this.finalizeStreamingThought();
+      // Pure-whitespace chunks (newlines, spaces) are common in
+      // OpenAI-compat streams (notably MiniMax). They MUST be appended to
+      // the assistant text so markdown newlines between headings /
+      // paragraphs survive — dropping them collapses the whole response
+      // into one line and breaks markdown rendering. But they don't
+      // carry think-tag content, so skip the heavy ingest pass and just
+      // forward them to the assistant bubble (if any).
+      if (!text.trim()) {
+        if (this.streamingAssistantId) {
+          this.updateTimeline(
+            this.streamingAssistantId,
+            (item) =>
+              item.kind === "assistant"
+                ? { ...item, text: item.text + text, streaming }
+                : item,
+            { throttle: true },
+          );
+        }
+        return;
+      }
       // Some custom models (DeepSeek R1, Qwen QwQ, MiniMax, …) embed
       // `<think>...</think>` inline in the assistant content. Split it
       // out into its own collapsible thought bubble, leaving only the
       // user-visible response text on the assistant bubble.
+      //
+      // Don't pre-finalize the open thought here — MiniMax's OpenAI-
+      // compatible stream emits the same `<think>...</think>` block as
+      // multiple `agent_message_chunk` events, and pre-finalizing would
+      // carve one continuous thought into many separate bubbles. The
+      // `closeThought` flag below drives finalization.
       const parsed = this.ingestThinkTags(text);
+
+      // If this chunk has assistant text and we currently have an open
+      // thought caret that this chunk doesn't extend, close it so the
+      // assistant text starts a new bubble.
+      if (
+        parsed.assistantDelta &&
+        this.streamingThoughtId &&
+        !parsed.thoughtDelta
+      ) {
+        this.finalizeStreamingThought();
+      }
 
       // Thought side
       if (parsed.thoughtDelta) {
         if (!this.streamingThoughtId) {
+          this.finalizeStreamingAssistant();
           this.streamingThoughtId = newId("th");
           this.pushTimeline({
             id: this.streamingThoughtId,
@@ -3352,8 +3845,16 @@ export class AgentBackend {
         this.finalizeStreamingThought();
       }
 
-      // Assistant side
-      if (parsed.assistantDelta) {
+      // Assistant side. A whitespace-only delta (e.g. the trailing `\n`
+      // after a `<think>...</think>` block) must NOT create a new bubble
+      // — it would render as an empty reply between folds. Drop the
+      // whitespace on the floor; any later non-whitespace chunk reuses
+      // the streamingAssistantId or opens a fresh bubble.
+      if (parsed.assistantDelta && parsed.assistantDelta.trim()) {
+        // Real assistant text means the model has moved past thinking.
+        // Drop any pending thought-reopen so the NEXT AgentThoughtChunk
+        // starts a fresh item instead of stitching onto the old one.
+        this.clearReopenableThought();
         if (!this.streamingAssistantId) {
           this.streamingAssistantId = newId("asst");
           this.pushTimeline({
@@ -3383,6 +3884,42 @@ export class AgentBackend {
       const content = asRecord(update.content);
       const text = asString(content?.text) ?? "";
       if (!text) return;
+
+      // —— Thought auto-reconnect ——
+      // OpenAI-compat streams (notably MiniMax M3) frequently emit the
+      // same continuous `reasoning_content` block as several separate
+      // AgentThoughtChunk events. The agent's short ReplayBuffer window
+      // (10ms / 2KB, server-side) flushes each as its own notification,
+      // and any blank AgentMessageChunk in between can also call
+      // finalizeStreamingThought on us. Without this guard every burst
+      // becomes its own thought bubble in the UI.
+      //
+      // If the previous thought was finalized within the reconnect
+      // window (and no genuine interrupt has cleared the marker),
+      // reopen the same item and append — preserving one collapsible
+      // bubble for the whole reasoning run.
+      const RECONNECT_WINDOW_MS = 1200;
+      if (
+        !this.streamingThoughtId &&
+        this.reopenableThoughtId &&
+        Date.now() - this.lastThoughtFinalizedAt < RECONNECT_WINDOW_MS
+      ) {
+        const reopenId = this.reopenableThoughtId;
+        this.reopenableThoughtId = null;
+        this.lastThoughtFinalizedAt = 0;
+        this.streamingThoughtId = reopenId;
+        this.updateTimeline(
+          reopenId,
+          (item) =>
+            item.kind === "thought"
+              ? { ...item, text: item.text + text, streaming }
+              : item,
+          { throttle: true },
+        );
+        return;
+      }
+      // —— reconnect end ——
+
       // New thought after assistant text (or tools) — close assistant caret.
       if (!this.streamingThoughtId) {
         this.finalizeStreamingAssistant();
@@ -3414,10 +3951,38 @@ export class AgentBackend {
       const status = asString(update.status) ?? "pending";
       const toolKind = semanticToolKind(update);
       const content = toolContentFields(update);
+
+      // Dedup: if we've already seen this toolCallId (session replay,
+      // duplicate stream emit, etc.), update the existing card instead
+      // of pushing a second one. `tool_call_update` already follows
+      // this pattern — we mirror it for the initial event.
+      const existingId = this.toolIndex.get(toolCallId);
+      if (existingId) {
+        this.updateTimeline(existingId, (item) => {
+          if (item.kind !== "tool") return item;
+          const next: Extract<TimelineItem, { kind: "tool" }> = {
+            ...item,
+            title,
+            status,
+            toolKind: toolKind ?? item.toolKind,
+          };
+          if (content.hasContent) {
+            next.diffs = content.diffs;
+            next.outputText = content.outputText;
+            next.outputTruncated = content.outputTruncated;
+          }
+          return next;
+        });
+        return;
+      }
+
       const id = newId("tool");
       this.toolIndex.set(toolCallId, id);
       // Tool interrupts the stream — must clear streaming or the caret sticks.
       this.finalizeStreaming();
+      // Tool calls always separate the preceding thought from any later
+      // one — never reconnect across a tool boundary.
+      this.clearReopenableThought();
       this.pushTimeline({
         id,
         kind: "tool",
@@ -3609,6 +4174,57 @@ export class AgentBackend {
       return;
     }
 
+    // Goal subsystem progress — emitted by the agent's goal orchestrator
+    // via the xAI `goal_updated` notification (rate-limited to 1/s).
+    // Drives the 🎯 progress bubble above the composer.
+    if (kind === "goal_updated" || kind === "GoalUpdated") {
+      const payload = update as Record<string, JsonValue>;
+      const status = asString(payload.status) ?? "";
+      // "complete" → drop the bubble (goal finished). The objective
+      // stays in the user-message badge, but no live progress chip.
+      if (status === "complete") {
+        this.goalState = null;
+      } else {
+        this.goalState = {
+          goalId:
+            asString(payload.goal_id) ?? asString(payload.goalId) ?? "",
+          objective: asString(payload.objective) ?? "",
+          status,
+          phase: asString(payload.phase) ?? "",
+          currentDeliverableTitle: asString(
+            payload.current_deliverable_title ??
+              payload.currentDeliverableTitle,
+          ),
+          currentSubagentRole: asString(
+            payload.current_subagent_role ?? payload.currentSubagentRole,
+          ),
+          totalDeliverables:
+            asNumber(payload.total_deliverables) ??
+            asNumber(payload.totalDeliverables) ??
+            0,
+          completedDeliverables:
+            asNumber(payload.completed_deliverables) ??
+            asNumber(payload.completedDeliverables) ??
+            0,
+          tokensUsed:
+            asNumber(payload.tokens_used) ??
+            asNumber(payload.tokensUsed),
+          tokenBudget:
+            asNumber(payload.token_budget) ??
+            asNumber(payload.tokenBudget),
+          elapsedMs:
+            asNumber(payload.elapsed_ms) ?? asNumber(payload.elapsedMs),
+          pauseMessage: asString(
+            payload.pause_message ?? payload.pauseMessage,
+          ),
+          lastEvent: asString(payload.last_event ?? payload.lastEvent),
+          updatedAt: Date.now(),
+        };
+      }
+      this.emitSnapshot();
+      return;
+    }
+
     // turn_completed / session_recap / retry_state: ignore for now
   }
 
@@ -3617,6 +4233,12 @@ export class AgentBackend {
     method: string,
     params: JsonValue | undefined,
   ): Promise<JsonValue> {
+    // When the user clicks stop, suppress all reverse requests (ask_user_question,
+    // request_permission, folder_trust/request, exit_plan_mode) so stale dialogs
+    // don't pop up after the turn has been cancelled.
+    if (this.suppressStreamingAfterCancel) {
+      return { outcome: "cancelled" };
+    }
     if (
       method === "session/request_permission" ||
       method.endsWith("request_permission")
@@ -4244,20 +4866,53 @@ export class AgentBackend {
       (imageBlocks.length > 0
         ? `[${imageBlocks.length} image${imageBlocks.length > 1 ? "s" : ""}]`
         : "");
-    this.pushTimeline({
-      id: newId("user"),
-      kind: "user",
-      text: displayText,
-      // Mirror attachments onto the timeline item so the user bubble can
-      // render image previews. Strip base64 if the payload was already
-      // huge — the timeline is serialized to the renderer.
-      attachments: attachments.length > 0 ? attachments.map(stripAttachmentForTimeline) : undefined,
-    });
-    if (!this.sessionTitle || this.sessionTitle === "New session") {
-      this.sessionTitle =
-        displayText.length > 48
-          ? `${displayText.slice(0, 48)}…`
-          : displayText || "New session";
+    // Goal/loop UI intent: when the renderer prepended `/goal ` or
+    // `/loop <interval> ` (prependGoal / prependLoop), the agent still
+    // gets the full text, but the bubble shows only the user-typed
+    // portion + a badge flag.
+    const hideUser = p.hideUserMessage === true && imageBlocks.length === 0;
+    if (!hideUser) {
+      const goalAutoStripped =
+        p.prependGoal === true &&
+        /^\s*\/goal\b/i.test(trimmed) &&
+        imageBlocks.length === 0;
+      const loopMatch =
+        p.prependLoop === true && imageBlocks.length === 0
+          ? trimmed.match(/^\s*\/loop\s+(\S+)\s+([\s\S]+)$/i)
+          : null;
+      const loopAutoStripped = Boolean(loopMatch);
+      const loopInterval = loopMatch?.[1];
+      let bubbleText = displayText;
+      if (goalAutoStripped) {
+        bubbleText = trimmed.replace(/^\s*\/goal\s*/i, "").trim() || trimmed;
+      } else if (loopAutoStripped && loopMatch) {
+        bubbleText = (loopMatch[2] ?? "").trim() || trimmed;
+      }
+      this.pushTimeline({
+        id: newId("user"),
+        kind: "user",
+        text: bubbleText,
+        // Marker so the renderer can show the 🎯 badge for auto-prepended
+        // goal messages (even though the bubble text no longer contains
+        // `/goal`). `true` only when the renderer flagged `prependGoal`
+        // and the text matched the expected shape.
+        attachGoalBadge: goalAutoStripped || undefined,
+        attachLoopBadge: loopAutoStripped || undefined,
+        loopInterval: loopAutoStripped ? loopInterval : undefined,
+        // Mirror attachments onto the timeline item so the user bubble can
+        // render image previews. Strip base64 if the payload was already
+        // huge — the timeline is serialized to the renderer.
+        attachments:
+          attachments.length > 0
+            ? attachments.map(stripAttachmentForTimeline)
+            : undefined,
+      });
+      if (!this.sessionTitle || this.sessionTitle === "New session") {
+        this.sessionTitle =
+          displayText.length > 48
+            ? `${displayText.slice(0, 48)}…`
+            : displayText || "New session";
+      }
     }
 
     // Manual /compact: show progress immediately (agent may only emit
@@ -4449,34 +5104,21 @@ export class AgentBackend {
     this.cancelQuestionsForSession(sid, "session cancel");
     this.cancelTrustPromptsForSession(sid, "session cancel");
     this.emitSnapshot();
-    try {
-      const cancelResult = await this.client.request("session/cancel", {
-        sessionId: sid,
-      });
-      // session/cancel timed out but the stream was active — the cancel
-      // RPC was still sent over the wire and the agent should have received
-      // it. Treat as success.
-      if (isAbsorbedByStream(cancelResult)) {
-        this.log("info", `Cancel absorbed by stream for ${sid}`);
-      } else {
-        this.log("info", `Cancel sent session=${sid}`);
-      }
-      if (this.compacting) {
-        this.finishCompact("cancelled");
-      }
-      this.busy = false;
-      this.clearTurnPlanArtifacts();
-      this.emitSnapshot();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.log("warn", `Cancel failed: ${message}`);
-      // Even if the cancel RPC itself threw, force-clear busy so the
-      // stop button does not remain stuck. The prompt's finally block
-      // will also run when its RPC settles.
-      this.busy = false;
-      this.clearTurnPlanArtifacts();
-      this.emitSnapshot();
+    // Send as a notification (fire-and-forget, no response expected)
+    // so the agent receives the cancel immediately without waiting for
+    // a request-response round-trip. This matches how the CLI sends
+    // cancel (via acp_send CancelNotification).
+    this.client.notify("session/cancel", {
+      sessionId: sid,
+      _meta: { cancelSubagents: true },
+    });
+    this.log("info", `Cancel sent session=${sid}`);
+    if (this.compacting) {
+      this.finishCompact("cancelled");
     }
+    this.busy = false;
+    this.clearTurnPlanArtifacts();
+    this.emitSnapshot();
   }
 
   /**
@@ -4539,27 +5181,14 @@ export class AgentBackend {
       this.cancelQuestionsForSession(targetSessionId, "session cancel");
       this.cancelTrustPromptsForSession(targetSessionId, "session cancel");
       this.emitSnapshot();
-      try {
-        await this.client.request("session/cancel", {
-          sessionId: targetSessionId,
-        });
-        this.log(
-          "info",
-          `Background cancel sent session=${targetSessionId}`,
-        );
-        if (this.compacting) {
-          this.finishCompact("cancelled");
-        }
-        this.busy = false;
-        this.clearTurnPlanArtifacts();
-        this.emitSnapshot();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.log(
-          "warn",
-          `Background cancel failed session=${targetSessionId}: ${message}`,
-        );
+      this.client.notify("session/cancel", { sessionId: targetSessionId, _meta: { cancelSubagents: true } });
+      this.log("info", `Background cancel sent session=${targetSessionId}`);
+      if (this.compacting) {
+        this.finishCompact("cancelled");
       }
+      this.busy = false;
+      this.clearTurnPlanArtifacts();
+      this.emitSnapshot();
     } finally {
       this.parkedDepth--;
       if (focusSnap) {
@@ -4577,6 +5206,7 @@ export class AgentBackend {
         this.compactTimelineId = null;
         this.streamingAssistantId = null;
         this.streamingThoughtId = null;
+        this.clearReopenableThought();
         this.inThinkTag = false;
         this.thinkHold = "";
         this.tokensUsed = undefined;

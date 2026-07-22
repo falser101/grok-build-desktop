@@ -38,6 +38,21 @@ export type TimelineItem =
        * mirror here is purely for display.
        */
       attachments?: PromptAttachment[];
+      /**
+       * Renderer-only marker: true when the bubble text was rendered
+       * without the leading `/goal` prefix because the renderer
+       * prepended it on the user's behalf (goal-mode UI intent). The
+       * agent still received the full text. Used by the user bubble
+       * to decide whether to show the 🎯 goal badge.
+       */
+      attachGoalBadge?: boolean;
+      /**
+       * Same idea as attachGoalBadge for UI-initiated `/loop <interval> …`.
+       * Bubble shows the user prompt only; badge shows loop + interval.
+       */
+      attachLoopBadge?: boolean;
+      /** Interval token when attachLoopBadge is set (e.g. `5m`). */
+      loopInterval?: string;
     }
   | { id: string; kind: "thought"; text: string; streaming?: boolean; createdAt?: number }
   | { id: string; kind: "assistant"; text: string; streaming?: boolean; createdAt?: number }
@@ -207,6 +222,18 @@ export interface PromptAttachment {
 export interface PromptPayload {
   text: string;
   attachments?: PromptAttachment[];
+  /** True when the renderer prepended `/goal ` to the text on the
+   *  user's behalf (goal-mode UI intent). Backend uses this to strip
+   *  the prefix from the rendered user bubble — the agent still sees
+   *  the full text. Not set when the user typed `/goal` themselves. */
+  prependGoal?: boolean;
+  /** True when the renderer prepended `/loop <interval> ` for loop UI intent. */
+  prependLoop?: boolean;
+  /**
+   * When true, send the prompt to the agent without appending a user
+   * timeline bubble (e.g. menu-triggered `/compact`).
+   */
+  hideUserMessage?: boolean;
 }
 
 /** ACP AvailableCommand (slash autocomplete). */
@@ -264,6 +291,32 @@ export interface TodoItemUi {
   content: string;
   status: TodoStatus;
   priority: TodoPriority;
+}
+
+/**
+ * Goal subsystem state mirrored to the renderer for the 🎯 progress
+ * bubble above the composer. Mirrors the xAI `goal_updated` payload
+ * (camelCased for the renderer).
+ */
+export interface GoalStateSnapshot {
+  goalId: string;
+  objective: string;
+  /** "active" | "user_paused" | "back_off_paused" | "no_progress_paused"
+   *  | "infra_paused" | "blocked" | "budget_limited" | "complete". */
+  status: string;
+  /** "idle" | "planning" | "executing". */
+  phase: string;
+  currentDeliverableTitle?: string;
+  currentSubagentRole?: string;
+  totalDeliverables: number;
+  completedDeliverables: number;
+  tokensUsed?: number;
+  tokenBudget?: number;
+  elapsedMs?: number;
+  pauseMessage?: string;
+  lastEvent?: string;
+  /** Wall-clock ms when the agent last sent an update. */
+  updatedAt: number;
 }
 
 /**
@@ -453,6 +506,12 @@ export interface AppSnapshot {
   planContent?: string;
   /** Pending plan-mode exit approval for the focused session. */
   pendingPlanApproval?: PlanApprovalUi;
+  /**
+   * Latest goal-subsystem snapshot mirrored from the agent's xAI
+   * `goal_updated` notification. Drives the 🎯 progress bubble above
+   * the composer. Undefined when no goal is active (or goal completed).
+   */
+  goalState?: GoalStateSnapshot;
   /**
    * Installer state — surfaced to Settings → Agent and to the connection
    * error card so the user can see "absent / ready / update-available /
@@ -929,6 +988,12 @@ export interface DesktopApi {
    * Binary / oversized files return metadata with empty content.
    */
   readFile: (relPath: string) => Promise<FileReadResult>;
+  /**
+   * Read an image under `~/.grok/sessions/...` (or an absolute path that
+   * resolves there) as a data URL for user-message thumbnails / lightbox.
+   * Returns null when the path is outside the sessions tree or unreadable.
+   */
+  readSessionImageDataUrl: (absPath: string) => Promise<string | null>;
   /** Start an interactive PTY shell in cwd (defaults to workspace). */
   termStart: (
     cwd?: string,

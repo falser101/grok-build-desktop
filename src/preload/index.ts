@@ -158,6 +158,10 @@ const api: DesktopApi = {
     ipcRenderer.invoke("fs:listDir", relDir) as Promise<FileEntry[]>,
   readFile: (relPath: string) =>
     ipcRenderer.invoke("fs:readFile", relPath) as Promise<FileReadResult>,
+  readSessionImageDataUrl: (absPath: string) =>
+    ipcRenderer.invoke("fs:readSessionImageDataUrl", absPath) as Promise<
+      string | null
+    >,
   termStart: (cwd?: string, cols?: number, rows?: number) =>
     ipcRenderer.invoke("term:start", cwd, cols, rows) as Promise<TermStartResult>,
   termWrite: (id: string, data: string) =>

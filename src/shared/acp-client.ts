@@ -229,18 +229,29 @@ export class AcpClient {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("ACP client is not connected");
     }
-    this.ws.send(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        method,
-        params: params ?? {},
-      }),
-    );
+    const data = JSON.stringify({
+      jsonrpc: "2.0",
+      method,
+      params: params ?? {},
+    });
+    // Use the callback form so we surface send errors (e.g. closed socket,
+    // backpressure) instead of silently dropping the notification.
+    this.ws.send(data, (err) => {
+      if (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.handlers.onError?.(new Error(`notify(${method}) failed: ${message}`));
+      }
+    });
   }
 
   respond(id: number | string, result: JsonValue): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, result }));
+    this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, result }), (err) => {
+      if (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.handlers.onError?.(new Error(`respond(${id}) failed: ${message}`));
+      }
+    });
   }
 
   respondError(
@@ -251,11 +262,13 @@ export class AcpClient {
   ): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     this.ws.send(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id,
-        error: { code, message, data },
-      }),
+      JSON.stringify({ jsonrpc: "2.0", id, error: { code, message, data } }),
+      (err) => {
+        if (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.handlers.onError?.(new Error(`respondError(${id}) failed: ${msg}`));
+        }
+      },
     );
   }
 

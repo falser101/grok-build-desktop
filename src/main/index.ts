@@ -679,6 +679,38 @@ function registerIpc(): void {
     return readWorkspaceFile(root, relPath.trim());
   });
 
+  /** User-message image preview for paths under ~/.grok/sessions only. */
+  ipcMain.handle(
+    "fs:readSessionImageDataUrl",
+    async (_e, absPath: string): Promise<string | null> => {
+      if (typeof absPath !== "string" || !absPath.trim()) return null;
+      const { readFile } = await import("node:fs/promises");
+      const { resolve, relative, extname } = await import("node:path");
+      const { homedir } = await import("node:os");
+      const sessionsRoot = resolve(homedir(), ".grok", "sessions");
+      const resolved = resolve(absPath.trim());
+      const rel = relative(sessionsRoot, resolved);
+      if (!rel || rel.startsWith("..") || rel.includes("\0")) return null;
+      try {
+        const buf = await readFile(resolved);
+        // Cap ~25 MB raw so a single click can't OOM the process.
+        if (buf.length > 25 * 1024 * 1024) return null;
+        const ext = extname(resolved).toLowerCase();
+        const mime =
+          ext === ".jpg" || ext === ".jpeg"
+            ? "image/jpeg"
+            : ext === ".gif"
+              ? "image/gif"
+              : ext === ".webp"
+                ? "image/webp"
+                : "image/png";
+        return `data:${mime};base64,${buf.toString("base64")}`;
+      } catch {
+        return null;
+      }
+    },
+  );
+
   // ── Terminal panel ──
   terminalHost.onEvent((ev) => {
     const win = mainWindow;

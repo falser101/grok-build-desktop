@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from "react";
 import type {
   ApiBackend,
@@ -879,21 +880,29 @@ export function ModelsView({
 
   return (
     <div className="settings-page ext-page models-page">
+      <div className="models-page-bg" aria-hidden />
       <header className="settings-header models-hero">
         <div className="models-hero-row">
           <button type="button" className="settings-back" onClick={onBack}>
             ← {m.backToChat}
           </button>
         </div>
-        <div className="models-hero-row">
+        <div className="models-hero-row models-hero-main">
           <div className="models-hero-text">
-            <h1 className="settings-title">{m.modelsTitle}</h1>
-            <p className="settings-subtitle">{m.modelsSubtitle}</p>
+            <p className="models-hero-eyebrow">
+              {zh ? "提供商 · 协议 · 配额" : "Providers · protocol · quotas"}
+            </p>
+            <h1 className="settings-title models-hero-title">
+              {m.modelsTitle}
+            </h1>
+            <p className="settings-subtitle models-hero-sub">
+              {m.modelsSubtitle}
+            </p>
           </div>
           <div className="models-hero-actions">
             <button
               type="button"
-              className="ext-btn"
+              className="ext-btn models-toolbar-btn"
               disabled={busy}
               onClick={() => void load()}
               title={m.extRefresh}
@@ -905,7 +914,7 @@ export function ModelsView({
             </button>
             <button
               type="button"
-              className="ext-btn"
+              className="ext-btn models-toolbar-btn"
               disabled={busy}
               onClick={() => onReconnect()}
               title={m.modelsReconnectHint}
@@ -933,21 +942,22 @@ export function ModelsView({
           </div>
         </div>
         {providers.length > 0 ? (
-          <div className="models-stats">
-            <span className="models-stat">
-              <strong>{stats.enabledProviders}</strong>
-              <span>/ {stats.totalProviders}</span>
-              <span className="models-stat-label">
-                {m.extEnabled.toLowerCase()}
+          <div className="models-stats" role="group" aria-label={m.modelsTitle}>
+            <div className="models-stat-tile">
+              <span className="models-stat-k">{m.extEnabled}</span>
+              <span className="models-stat-v">
+                <strong>{stats.enabledProviders}</strong>
+                <span className="models-stat-den">
+                  / {stats.totalProviders}
+                </span>
               </span>
-            </span>
-            <span className="models-stat-sep" aria-hidden />
-            <span className="models-stat">
-              <strong>{stats.totalModels}</strong>
-              <span className="models-stat-label">
-                {m.modelsEnabledModelsStat}
+            </div>
+            <div className="models-stat-tile">
+              <span className="models-stat-k">{m.modelsEnabledModelsStat}</span>
+              <span className="models-stat-v">
+                <strong>{stats.totalModels}</strong>
               </span>
-            </span>
+            </div>
           </div>
         ) : null}
       </header>
@@ -1459,7 +1469,7 @@ export function ModelsView({
               </div>
             ) : (
               <div className="models-provider-grid">
-                {filteredProviders.map((p) => {
+                {filteredProviders.map((p, cardIndex) => {
                   const preset = p.presetId
                     ? presetById.get(p.presetId)
                     : undefined;
@@ -1476,9 +1486,19 @@ export function ModelsView({
                     <article
                       key={p.id}
                       className={`models-provider-card region-${region} ${
-                        p.enabled ? "" : "disabled"
+                        p.enabled ? "is-on" : "disabled"
                       }`}
+                      style={
+                        { "--card-i": cardIndex } as CSSProperties
+                      }
                     >
+                      <div
+                        className={`models-provider-led ${
+                          p.enabled ? "on" : "off"
+                        }`}
+                        aria-hidden
+                        title={p.enabled ? m.extEnabled : m.extDisabled}
+                      />
                       <div className="models-provider-card-top">
                         <span
                           className="models-preset-avatar models-provider-avatar"
@@ -1499,7 +1519,9 @@ export function ModelsView({
                         <div className="models-provider-title-wrap">
                           <h3 className="models-provider-title">{p.name}</h3>
                           <div className="models-provider-meta">
-                            <span className={`ext-badge region-pill region-${region}`}>
+                            <span
+                              className={`ext-badge region-pill region-${region}`}
+                            >
                               {regionLabel}
                             </span>
                             <span className="models-provider-api">
@@ -1523,7 +1545,9 @@ export function ModelsView({
                           <span>/{total}</span>
                         </span>
                       </div>
-                      <div className="models-provider-url">{p.baseUrl || "—"}</div>
+                      <div className="models-provider-url" title={p.baseUrl}>
+                        {p.baseUrl || "—"}
+                      </div>
                       {providerSupportsUsage(p) ? (
                         <ProviderUsageStrip providerId={p.id} m={m} />
                       ) : null}
@@ -1533,12 +1557,17 @@ export function ModelsView({
                             .filter((x) => x.enabled)
                             .slice(0, 6)
                             .map((x) => (
-                              <span key={x.configKey || x.id} className="chip">
+                              <span
+                                key={x.configKey || x.id}
+                                className="models-model-chip"
+                              >
                                 {x.name}
                               </span>
                             ))}
                           {count > 6 ? (
-                            <span className="chip">+{count - 6}</span>
+                            <span className="models-model-chip more">
+                              +{count - 6}
+                            </span>
                           ) : null}
                         </div>
                       ) : (

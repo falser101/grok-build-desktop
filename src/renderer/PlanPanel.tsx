@@ -1,14 +1,18 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type {
   PlanApprovalUi,
   TodoItemUi,
-  TodoStatus,
 } from "@shared/types";
 import type { Messages } from "./i18n";
 import { MarkdownBody } from "./MarkdownBody";
 
-export type PlanPanelTab = "todos" | "plan";
-
+/**
+ * Plan side-panel — now displays ONLY the plan.md body (the agent's
+ * proposed plan text). The task list was moved to the composer's
+ * task progress button (hover to expand). This keeps the right rail
+ * focused on plan content while still allowing the user to view
+ * approval controls when a plan-mode exit is pending.
+ */
 type Props = {
   todos: TodoItemUi[];
   planContent?: string;
@@ -23,32 +27,6 @@ type Props = {
   ) => void;
   onRefreshPlan?: () => void;
 };
-
-function statusIcon(status: TodoStatus): string {
-  switch (status) {
-    case "in_progress":
-      return "↻";
-    case "completed":
-      return "✓";
-    case "cancelled":
-      return "✕";
-    default:
-      return "○";
-  }
-}
-
-function statusAriaLabel(status: TodoStatus): string {
-  switch (status) {
-    case "in_progress":
-      return "Running";
-    case "completed":
-      return "Completed";
-    case "cancelled":
-      return "Cancelled";
-    default:
-      return "Pending";
-  }
-}
 
 function counts(todos: TodoItemUi[]) {
   let pending = 0;
@@ -74,18 +52,7 @@ export function PlanPanel({
   onRespondApproval,
   onRefreshPlan,
 }: Props) {
-  const [tab, setTab] = useState<PlanPanelTab>(
-    pendingApproval ? "plan" : todos.length > 0 ? "todos" : "plan",
-  );
-  const [hideDone, setHideDone] = useState(false);
-
   const c = useMemo(() => counts(todos), [todos]);
-  const visibleTodos = useMemo(() => {
-    if (!hideDone) return todos;
-    return todos.filter(
-      (t) => t.status !== "completed" && t.status !== "cancelled",
-    );
-  }, [todos, hideDone]);
 
   const planBody =
     pendingApproval?.planContent?.trim() ||
@@ -128,40 +95,6 @@ export function PlanPanel({
         </div>
       </div>
 
-      <div className="plan-panel-tabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "todos"}
-          className={`plan-panel-tab ${tab === "todos" ? "active" : ""}`}
-          onClick={() => setTab("todos")}
-        >
-          {m.planTabTodos}
-          {c.total > 0 ? (
-            <span className="plan-panel-tab-count">{c.total}</span>
-          ) : null}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "plan"}
-          className={`plan-panel-tab ${tab === "plan" ? "active" : ""}`}
-          onClick={() => setTab("plan")}
-        >
-          {m.planTabPlan}
-        </button>
-        {onRefreshPlan ? (
-          <button
-            type="button"
-            className="plan-panel-refresh"
-            title={m.planRefresh}
-            onClick={() => onRefreshPlan()}
-          >
-            ↻
-          </button>
-        ) : null}
-      </div>
-
       {approval ? (
         <div className="plan-approval-callout">
           <div className="plan-approval-callout-title">
@@ -176,76 +109,7 @@ export function PlanPanel({
       ) : null}
 
       <div className="plan-panel-body">
-        {tab === "todos" ? (
-          <div className="todo-list-wrap">
-            {c.total > 0 ? (
-              <div className="todo-list-toolbar">
-                <span className="todo-list-summary">
-                  {c.inProgress > 0
-                    ? m.planTodoInProgressCount.replace(
-                        "{n}",
-                        String(c.inProgress),
-                      )
-                    : null}
-                  {c.inProgress > 0 && c.pending > 0 ? " · " : null}
-                  {c.pending > 0
-                    ? m.planTodoPendingCount.replace(
-                        "{n}",
-                        String(c.pending),
-                      )
-                    : null}
-                  {c.completed > 0
-                    ? `${c.inProgress || c.pending ? " · " : ""}${m.planTodoDoneCount.replace("{n}", String(c.completed))}`
-                    : null}
-                </span>
-                <label className="todo-hide-done">
-                  <input
-                    type="checkbox"
-                    checked={hideDone}
-                    onChange={(e) => setHideDone(e.target.checked)}
-                  />
-                  {m.planTodoHideDone}
-                </label>
-              </div>
-            ) : null}
-            {visibleTodos.length === 0 ? (
-              <div className="plan-panel-empty">
-                {c.total === 0
-                  ? m.planTodoEmpty
-                  : hideDone
-                    ? m.planTodoAllDone
-                    : m.planTodoEmpty}
-              </div>
-            ) : (
-              <ul className="todo-list">
-                {visibleTodos.map((t) => (
-                  <li
-                    key={t.id}
-                    className={`todo-item status-${t.status} priority-${t.priority}`}
-                    data-status={t.status}
-                  >
-                    <span
-                      className={`todo-icon todo-icon-${t.status}`}
-                      aria-hidden
-                      title={t.status}
-                    >
-                      {statusIcon(t.status)}
-                    </span>
-                    <span className="todo-content">{t.content}</span>
-                    {t.priority === "high" ? (
-                      <span className="todo-priority" title={m.planTodoHigh}>
-                        !
-                      </span>
-                    ) : null}
-                    <span className="sr-only">
-                      {statusAriaLabel(t.status)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ) : planBody ? (
+        {planBody ? (
           <div className="plan-md-wrap">
             <div className="plan-md-label">plan.md</div>
             <div className="plan-md-body">

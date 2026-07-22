@@ -122,7 +122,10 @@ export interface Messages {
   you: string;
   grok: string;
   thought: string;
+  /** Streaming thought header (CLI: "Thinking…"). */
   thoughtStreaming: string;
+  /** Finished thought with duration (CLI: "Thought for {t}"). `{t}` = e.g. "2.6s". */
+  thoughtFor: string;
   /** Sticky bar: user turn for the scroll section; click jumps to it. */
   currentTurnPin: string;
   currentTurnPinHint: string;
@@ -137,6 +140,13 @@ export interface Messages {
   turnGroupInner: string;
   /** Short label shown when a turn has no intermediate thought/tool calls. */
   turnGroupEmpty: string;
+  /** Summary line for a folded "intermediate steps" block. `{n}` is the
+   *  number of thought / tool / partial-reply rows hidden inside. */
+  turnIntermediates: string;
+  /** Fold header for consecutive file read/write tools. `{n}` = count. */
+  turnFileIo: string;
+  /** Fold header for mixed / non-file tool runs. `{n}` = count. */
+  turnTools: string;
   /** Status text shown after a user message while the agent is preparing
    *  its first response (no timeline output yet, but the agent is busy). */
   turnPending: string;
@@ -191,7 +201,40 @@ export interface Messages {
   placeholderReady: string;
   placeholderWaiting: string;
   noMatches: string;
+  /** Composer `/` popup section: built-in commands. */
+  slashSectionCommands: string;
+  /** Composer `/` popup section: user-invocable skills. */
+  slashSectionSkills: string;
   attachFiles: string;
+  /** Composer + button popup menu items. */
+  composerAddFilesFolders: string;
+  composerAddGoalMode: string;
+  composerAddPlanMode: string;
+  /** Goal chip shown in composer toolbar when goal mode is active. */
+  goalChipLabel: string;
+  goalChipHint: string;
+  goalChipDismiss: string;
+  /** Badge shown under a user message that was a /goal command. */
+  goalMessageBadge: string;
+  /** Loop intent chip (composer toolbar). */
+  loopChipLabel: string;
+  loopChipHint: string;
+  loopChipDismiss: string;
+  loopIntervalPick: string;
+  /** Badge under user message for UI-initiated /loop — use {interval}. */
+  loopMessageBadge: string;
+  /** Goal progress bubble labels (above composer). */
+  goalStatusActive: string;
+  goalStatusPaused: string;
+  goalStatusBlocked: string;
+  goalStatusBudgetLimited: string;
+  goalStatusComplete: string;
+  goalPhasePlanning: string;
+  goalPhaseExecuting: string;
+  /** Action button tooltips on the goal progress bubble (hover-only). */
+  goalActionPause: string;
+  goalActionResume: string;
+  goalActionClear: string;
   cancel: string;
   send: string;
   /** Composer placeholder while a turn is running. */
@@ -481,6 +524,8 @@ export interface Messages {
   planProgressStep: string;
   /** "{n}" pending after the current step in the same pill. */
   planProgressPending: string;
+  /** Hover popup title on the task progress button. */
+  planProgressTasksTitle: string;
 
   // Folder-trust prompt (x.ai/folder_trust/request)
   trustKicker: string;
@@ -743,7 +788,8 @@ const en: Messages = {
   you: "You",
   grok: "Grok",
   thought: "Thought",
-  thoughtStreaming: "Thought · streaming",
+  thoughtStreaming: "Thinking…",
+  thoughtFor: "Thought for {t}",
   currentTurnPin: "You",
   currentTurnPinHint: "Jump to this message",
   historyTimelineTooltip: "Message history",
@@ -752,6 +798,9 @@ const en: Messages = {
   turnGroupToggle: "Thinking & tool calls",
   turnGroupInner: "Show thinking and tool calls",
   turnGroupEmpty: "No intermediate steps",
+  turnIntermediates: "Intermediate steps · {n}",
+  turnFileIo: "Read/Write · {n}",
+  turnTools: "Tools · {n}",
   turnPending: "Thinking…",
   loadingConversation: "Loading conversation…",
   compactRunning: "Compacting conversation…",
@@ -798,7 +847,31 @@ const en: Messages = {
   placeholderBusy:
     "Agent is working — Enter to queue · Ctrl+Enter to send now…",
   noMatches: "No matches for",
+  slashSectionCommands: "Commands",
+  slashSectionSkills: "Skills",
   attachFiles: "Attach files",
+  composerAddFilesFolders: "Files & folders",
+  composerAddGoalMode: "Goal mode",
+  composerAddPlanMode: "Plan mode",
+  goalChipLabel: "Goal",
+  goalChipHint: "Next send starts a goal — dismiss with ×",
+  goalChipDismiss: "Clear goal intent",
+  goalMessageBadge: "🎯 Goal",
+  loopChipLabel: "Loop",
+  loopChipHint: "Next send schedules a recurring prompt",
+  loopChipDismiss: "Clear loop intent",
+  loopIntervalPick: "Loop interval",
+  loopMessageBadge: "⏱ Loop · {interval}",
+  goalStatusActive: "active",
+  goalStatusPaused: "paused",
+  goalStatusBlocked: "blocked",
+  goalStatusBudgetLimited: "budget limited",
+  goalStatusComplete: "complete",
+  goalPhasePlanning: "planning",
+  goalPhaseExecuting: "executing",
+  goalActionPause: "Pause goal",
+  goalActionResume: "Resume goal",
+  goalActionClear: "Clear goal",
   cancel: "Cancel",
   send: "Send",
   queueTitle: "Queued messages",
@@ -1073,6 +1146,7 @@ const en: Messages = {
   planApprovalCancelFeedback: "Back",
   planProgressStep: "Step {n} / {total}",
   planProgressPending: "{n} more",
+  planProgressTasksTitle: "Tasks",
 
   trustKicker: "Trust folder",
   trustTitle: "Trust this workspace?",
@@ -1336,7 +1410,8 @@ const zh: Messages = {
   you: "你",
   grok: "Grok",
   thought: "思考",
-  thoughtStreaming: "思考 · 生成中",
+  thoughtStreaming: "思考中…",
+  thoughtFor: "思考 {t}",
   currentTurnPin: "你",
   currentTurnPinHint: "定位到这条消息",
   historyTimelineTooltip: "消息时间轴",
@@ -1345,6 +1420,9 @@ const zh: Messages = {
   turnGroupToggle: "思考与工具调用",
   turnGroupInner: "查看思考与工具调用",
   turnGroupEmpty: "没有中间步骤",
+  turnIntermediates: "中间步骤 · {n}",
+  turnFileIo: "读写文件 · {n}",
+  turnTools: "工具 · {n}",
   turnPending: "正在思考…",
   loadingConversation: "正在加载对话…",
   compactRunning: "正在压缩对话…",
@@ -1390,7 +1468,31 @@ const zh: Messages = {
   placeholderWaiting: "等待 agent…",
   placeholderBusy: "Agent 工作中 — Enter 排队 · Ctrl+Enter 立即发送…",
   noMatches: "没有匹配",
+  slashSectionCommands: "命令",
+  slashSectionSkills: "技能",
   attachFiles: "添加附件",
+  composerAddFilesFolders: "文件和文件夹",
+  composerAddGoalMode: "目标模式",
+  composerAddPlanMode: "计划模式",
+  goalChipLabel: "目标",
+  goalChipHint: "下一条发送将启动目标 — 点 × 取消",
+  goalChipDismiss: "取消目标意图",
+  goalMessageBadge: "🎯 目标",
+  loopChipLabel: "循环",
+  loopChipHint: "下一条发送将创建定时循环",
+  loopChipDismiss: "取消循环意图",
+  loopIntervalPick: "循环间隔",
+  loopMessageBadge: "⏱ 循环 · {interval}",
+  goalStatusActive: "运行中",
+  goalStatusPaused: "已暂停",
+  goalStatusBlocked: "已阻塞",
+  goalStatusBudgetLimited: "已达预算上限",
+  goalStatusComplete: "已完成",
+  goalPhasePlanning: "规划中",
+  goalPhaseExecuting: "执行中",
+  goalActionPause: "暂停目标",
+  goalActionResume: "恢复目标",
+  goalActionClear: "清除目标",
   cancel: "取消",
   send: "发送",
   queueTitle: "排队消息",
@@ -1658,6 +1760,7 @@ const zh: Messages = {
   planApprovalCancelFeedback: "返回",
   planProgressStep: "第 {n} / {total} 步",
   planProgressPending: "还有 {n} 步",
+  planProgressTasksTitle: "任务清单",
 
   trustKicker: "信任文件夹",
   trustTitle: "信任此工作区？",
