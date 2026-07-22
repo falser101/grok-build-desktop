@@ -5644,31 +5644,6 @@ html[data-theme="light"] .icon-btn.send {
   }
 }
 
-.right-panel-pin {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 4;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 16px;
-  line-height: 1;
-  transition: background 0.12s, color 0.12s;
-}
-
-.right-panel-pin:hover {
-  background: var(--accent-soft, rgba(217, 119, 87, 0.15));
-  color: var(--accent, #d97757);
-}
-
 .right-panel-head {
   flex: 0 0 auto;
   display: flex;
@@ -5725,10 +5700,13 @@ html[data-theme="light"] .icon-btn.send {
   box-shadow: 0 1px 0 var(--bg);
 }
 
-.right-panel-close {
-  /* Live inside the panel chrome rather than floating on the shell.
-     Pinned to top-right with a small inset so it visually anchors
-     against the resize handle without colliding with content. */
+/* Right-panel chrome buttons share the .sidebar-toggle-btn shape
+   (30×30, 1px border, 8px radius) so the close and pin icons feel
+   like the same affordance family as the left-sidebar collapse / pin
+   buttons. The buttons sit at top-right of the panel; hover lightens
+   the background and foreground to the standard hover tone. */
+.right-panel-close,
+.right-panel-pin {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -5736,21 +5714,28 @@ html[data-theme="light"] .icon-btn.send {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: 0;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   background: transparent;
-  cursor: pointer;
   color: var(--text-muted);
-  font-size: 16px;
-  line-height: 1;
-  transition: background 0.12s, color 0.12s;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
-.right-panel-close:hover {
+.right-panel-close:hover,
+.right-panel-pin:hover {
   background: var(--bg-hover);
   color: var(--text);
+  border-color: var(--border-soft);
+}
+
+.right-panel-close svg,
+.right-panel-pin svg {
+  display: block;
 }
 
 .right-panel-body {
