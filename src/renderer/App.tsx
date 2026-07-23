@@ -48,6 +48,7 @@ import { PlanPanel } from "./PlanPanel";
 import { PlanApprovalCard } from "./PlanApprovalCard";
 import { PlanProgressBubble } from "./PlanProgressBubble";
 import { GoalProgressBubble } from "./GoalProgressBubble";
+import { GoalDetailModal } from "./GoalDetailModal";
 import { WaitingSessionsBanner } from "./WaitingSessionsBanner";
 import { linearizeTimeline } from "./groupTurns";
 import { WindowTitleBar } from "./WindowTitleBar";
@@ -2187,6 +2188,11 @@ export function App() {
   const [loopActive, setLoopActive] = useState(false);
   const [loopInterval, setLoopInterval] = useState<string>("5m");
   const [loopIntervalMenuOpen, setLoopIntervalMenuOpen] = useState(false);
+  /** TUI-style goal detail overlay (click progress chip). */
+  const [goalDetailOpen, setGoalDetailOpen] = useState(false);
+  useEffect(() => {
+    if (!snap.goalState) setGoalDetailOpen(false);
+  }, [snap.goalState]);
   /**
    * Per-session follow-up queue. While a turn is busy, Enter enqueues here;
    * items auto-send when the session becomes idle (FIFO).
@@ -6979,19 +6985,30 @@ export function App() {
                   }}
                 />
               ) : null}
-              {/* Goal subsystem progress — mirrors the agent's
-                  xAI goal_updated notifications. Hidden when the
-                  goal has finished or been cleared. */}
+              {/* Goal subsystem progress — TUI-style chip; click opens detail. */}
               {snap.goalState ? (
                 <GoalProgressBubble
                   goal={snap.goalState}
                   m={m}
-                  onOpenPanel={() => {
-                    openPlanTab();
-                  }}
+                  onOpenDetail={() => setGoalDetailOpen(true)}
                   onPause={() => void onGoalAction("pause")}
                   onResume={() => void onGoalAction("resume")}
                   onClear={() => void onGoalAction("clear")}
+                />
+              ) : null}
+              {snap.goalState && goalDetailOpen ? (
+                <GoalDetailModal
+                  goal={snap.goalState}
+                  goalTodos={snap.goalTodos ?? []}
+                  m={m}
+                  open={goalDetailOpen}
+                  onClose={() => setGoalDetailOpen(false)}
+                  onPause={() => void onGoalAction("pause")}
+                  onResume={() => void onGoalAction("resume")}
+                  onClear={() => {
+                    setGoalDetailOpen(false);
+                    void onGoalAction("clear");
+                  }}
                 />
               ) : null}
 

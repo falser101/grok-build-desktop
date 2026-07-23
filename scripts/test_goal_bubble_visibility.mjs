@@ -49,6 +49,36 @@ const read = (rel) => fs.readFileSync(path.join(DESKTOP, rel), "utf8");
     props,
     "expected onPause/onResume/onClear → onGoalAction",
   );
+  check(
+    "renderer opens GoalDetailModal from chip",
+    /GoalDetailModal/.test(app) && /onOpenDetail/.test(app),
+    "expected GoalDetailModal + onOpenDetail",
+  );
+  check(
+    "GoalDetailModal uses goalTodos not snap.todos for Progress",
+    /goalTodos=\{snap\.goalTodos/.test(app),
+    "expected goalTodos={snap.goalTodos ?? []}",
+  );
+}
+
+// GoalDetailModal source contract
+{
+  const modal = read("src/renderer/GoalDetailModal.tsx");
+  check(
+    "GoalDetailModal exists",
+    /export function GoalDetailModal/.test(modal),
+    "missing GoalDetailModal export",
+  );
+  check(
+    "detail Progress section uses goalTodos prop",
+    /goalTodos/.test(modal) && /goalProgressSection/.test(modal),
+    "Progress must bind goalTodos",
+  );
+  check(
+    "detail does not import/use turn-scoped snap.todos",
+    !/snap\.todos/.test(modal),
+    "must not use snap.todos in detail",
+  );
 }
 
 // ── (2) Bubble lives above .composer-stack in the DOM ──────────────────
@@ -171,6 +201,22 @@ const read = (rel) => fs.readFileSync(path.join(DESKTOP, rel), "utf8");
     "applyGoalUpdate is a shared helper",
     /private\s+applyGoalUpdate\s*\(/.test(b),
     "expected private applyGoalUpdate(update) helper",
+  );
+  check(
+    "backend maintains goalTodos separate from todos",
+    /private\s+goalTodos/.test(b) &&
+      /this\.goalTodos\s*=\s*this\.todos\.map/.test(b),
+    "expected goalTodos field + mirror from plan while goal active",
+  );
+  const clearFn = b.match(
+    /private clearTurnPlanArtifacts\(\)[^{]*\{[^}]*\}/,
+  );
+  check(
+    "clearTurnPlanArtifacts does not clear goalTodos",
+    clearFn !== null &&
+      /this\.todos\s*=\s*\[\]/.test(clearFn[0]) &&
+      !/goalTodos/.test(clearFn[0]),
+    "turn cleanup must not wipe goalTodos",
   );
   // Snake + camel reading of every field
   const fields = [

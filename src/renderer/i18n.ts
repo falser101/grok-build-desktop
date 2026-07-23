@@ -226,11 +226,43 @@ export interface Messages {
   /** Goal progress bubble labels (above composer). */
   goalStatusActive: string;
   goalStatusPaused: string;
+  goalStatusPausedBackoff: string;
+  goalStatusPausedNoProgress: string;
+  goalStatusPausedError: string;
   goalStatusBlocked: string;
   goalStatusBudgetLimited: string;
   goalStatusComplete: string;
   goalPhasePlanning: string;
   goalPhaseExecuting: string;
+  goalPhaseIdle: string;
+  goalPhaseVerifying: string;
+  goalChipName: string;
+  goalTokensOnly: string;
+  goalTokensBudget: string;
+  goalDetailAria: string;
+  goalDetailClose: string;
+  goalDetailStatus: string;
+  goalDetailTokens: string;
+  goalDetailElapsed: string;
+  goalProgressSection: string;
+  goalNoProgressItems: string;
+  goalProgressMore: string;
+  goalRecentHistory: string;
+  goalActiveSubagent: string;
+  goalPausedResumeHint: string;
+  goalDetailEscHint: string;
+  goalEventCreated: string;
+  goalEventPlanningStarted: string;
+  goalEventPlanningCompleted: string;
+  goalEventPlanningFailed: string;
+  goalEventWorkerStarted: string;
+  goalEventWorkerCompleted: string;
+  goalEventWorkerFailed: string;
+  goalEventPaused: string;
+  goalEventResumed: string;
+  goalEventCompleted: string;
+  goalEventCleared: string;
+  goalEventBudgetExceeded: string;
   /** Action button tooltips on the goal progress bubble (hover-only). */
   goalActionPause: string;
   goalActionResume: string;
@@ -862,16 +894,48 @@ const en: Messages = {
   loopChipDismiss: "Clear loop intent",
   loopIntervalPick: "Loop interval",
   loopMessageBadge: "⏱ Loop · {interval}",
-  goalStatusActive: "active",
-  goalStatusPaused: "paused",
-  goalStatusBlocked: "blocked",
-  goalStatusBudgetLimited: "budget limited",
-  goalStatusComplete: "complete",
-  goalPhasePlanning: "planning",
-  goalPhaseExecuting: "executing",
-  goalActionPause: "Pause goal",
-  goalActionResume: "Resume goal",
-  goalActionClear: "Clear goal",
+  goalStatusActive: "Active",
+  goalStatusPaused: "Paused",
+  goalStatusPausedBackoff: "Paused (back-off)",
+  goalStatusPausedNoProgress: "Paused (no progress)",
+  goalStatusPausedError: "Paused (error)",
+  goalStatusBlocked: "Paused (verification blocked)",
+  goalStatusBudgetLimited: "Budget",
+  goalStatusComplete: "Done",
+  goalPhasePlanning: "Planning",
+  goalPhaseExecuting: "Executing",
+  goalPhaseIdle: "Idle",
+  goalPhaseVerifying: "Verifying",
+  goalChipName: "Goal",
+  goalTokensOnly: "{used} tokens",
+  goalTokensBudget: "{used}/{budget} tokens",
+  goalDetailAria: "Goal progress details",
+  goalDetailClose: "Close",
+  goalDetailStatus: "Status",
+  goalDetailTokens: "Tokens",
+  goalDetailElapsed: "Elapsed",
+  goalProgressSection: "Progress",
+  goalNoProgressItems: "No progress items yet",
+  goalProgressMore: "+{n} more",
+  goalRecentHistory: "Recent History",
+  goalActiveSubagent: "Active Subagent",
+  goalPausedResumeHint: "Goal paused — resume to continue",
+  goalDetailEscHint: "Esc to close",
+  goalEventCreated: "Goal created",
+  goalEventPlanningStarted: "Planning started",
+  goalEventPlanningCompleted: "Planning completed",
+  goalEventPlanningFailed: "Planning failed",
+  goalEventWorkerStarted: "Worker started",
+  goalEventWorkerCompleted: "Worker completed",
+  goalEventWorkerFailed: "Worker failed",
+  goalEventPaused: "Goal paused",
+  goalEventResumed: "Goal resumed",
+  goalEventCompleted: "Goal completed",
+  goalEventCleared: "Goal cleared",
+  goalEventBudgetExceeded: "Budget exceeded",
+  goalActionPause: "Pause",
+  goalActionResume: "Resume",
+  goalActionClear: "Clear",
   cancel: "Cancel",
   send: "Send",
   queueTitle: "Queued messages",
@@ -1485,14 +1549,46 @@ const zh: Messages = {
   loopMessageBadge: "⏱ 循环 · {interval}",
   goalStatusActive: "运行中",
   goalStatusPaused: "已暂停",
-  goalStatusBlocked: "已阻塞",
-  goalStatusBudgetLimited: "已达预算上限",
+  goalStatusPausedBackoff: "已暂停（退避）",
+  goalStatusPausedNoProgress: "已暂停（无进展）",
+  goalStatusPausedError: "已暂停（错误）",
+  goalStatusBlocked: "已暂停（验证阻塞）",
+  goalStatusBudgetLimited: "预算上限",
   goalStatusComplete: "已完成",
   goalPhasePlanning: "规划中",
   goalPhaseExecuting: "执行中",
-  goalActionPause: "暂停目标",
-  goalActionResume: "恢复目标",
-  goalActionClear: "清除目标",
+  goalPhaseIdle: "空闲",
+  goalPhaseVerifying: "验证中",
+  goalChipName: "目标",
+  goalTokensOnly: "{used} tokens",
+  goalTokensBudget: "{used}/{budget} tokens",
+  goalDetailAria: "目标进度详情",
+  goalDetailClose: "关闭",
+  goalDetailStatus: "状态",
+  goalDetailTokens: "Tokens",
+  goalDetailElapsed: "耗时",
+  goalProgressSection: "进度",
+  goalNoProgressItems: "暂无进度项",
+  goalProgressMore: "另有 {n} 项",
+  goalRecentHistory: "最近历史",
+  goalActiveSubagent: "活动子代理",
+  goalPausedResumeHint: "目标已暂停 — 恢复后继续",
+  goalDetailEscHint: "Esc 关闭",
+  goalEventCreated: "目标已创建",
+  goalEventPlanningStarted: "开始规划",
+  goalEventPlanningCompleted: "规划完成",
+  goalEventPlanningFailed: "规划失败",
+  goalEventWorkerStarted: "工作子代理已启动",
+  goalEventWorkerCompleted: "工作子代理完成",
+  goalEventWorkerFailed: "工作子代理失败",
+  goalEventPaused: "目标已暂停",
+  goalEventResumed: "目标已恢复",
+  goalEventCompleted: "目标已完成",
+  goalEventCleared: "目标已清除",
+  goalEventBudgetExceeded: "超出预算",
+  goalActionPause: "暂停",
+  goalActionResume: "恢复",
+  goalActionClear: "清除",
   cancel: "取消",
   send: "发送",
   queueTitle: "排队消息",

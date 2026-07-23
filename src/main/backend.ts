@@ -225,6 +225,12 @@ interface GoalStatePayload {
   elapsedMs?: number;
   pauseMessage?: string;
   lastEvent?: string;
+  lastEventDetail?: string;
+  lastEventTimestamp?: string;
+  verifyingCompletion?: boolean;
+  planning?: boolean;
+  classifierRunsAttempted?: number;
+  classifierMaxRuns?: number;
   updatedAt: number;
 }
 
@@ -1207,6 +1213,11 @@ export class AgentBackend {
    */
   private goalState: GoalStatePayload | null = null;
   /**
+   * Todo checklist mirrored only while a goal is active. Survives turn
+   * boundaries (unlike `this.todos`). Cleared with the goal.
+   */
+  private goalTodos: TodoItemUi[] = [];
+  /**
    * Live/parked runtimes for sessions that have been opened or are mid-turn.
    * The focused session is also mirrored on the fields above for the hot path.
    */
@@ -1394,9 +1405,22 @@ export class AgentBackend {
             elapsedMs: this.goalState.elapsedMs,
             pauseMessage: this.goalState.pauseMessage,
             lastEvent: this.goalState.lastEvent,
+            lastEventDetail: this.goalState.lastEventDetail,
+            lastEventTimestamp: this.goalState.lastEventTimestamp,
+            verifyingCompletion: this.goalState.verifyingCompletion,
+            planning: this.goalState.planning,
+            classifierRunsAttempted: this.goalState.classifierRunsAttempted,
+            classifierMaxRuns: this.goalState.classifierMaxRuns,
             updatedAt: this.goalState.updatedAt,
           }
         : undefined,
+      // Goal-scoped todos: always exposed while a goal is active (not gated on busy).
+      goalTodos:
+        this.goalState && this.goalTodos.length > 0
+          ? this.goalTodos.map((t) => ({ ...t }))
+          : this.goalState
+            ? []
+            : undefined,
       installerStatus: this.installerStatus,
       installerChannel: this.installerChannel,
       lastUpdateCheckAt: this.lastUpdateCheckAt,
@@ -1543,6 +1567,7 @@ export class AgentBackend {
     this.streamingThoughtId = null;
     this.clearReopenableThought();
     this.goalState = null;
+    this.goalTodos = [];
     this.inThinkTag = false;
     this.thinkHold = "";
     this.tokensUsed = undefined;
@@ -3042,6 +3067,7 @@ export class AgentBackend {
     this.streamingThoughtId = null;
     this.clearReopenableThought();
     this.goalState = null;
+    this.goalTodos = [];
     this.inThinkTag = false;
     this.thinkHold = "";
   }
@@ -4382,6 +4408,11 @@ export class AgentBackend {
         (update.entries as JsonValue | undefined) ??
         (update.planEntries as JsonValue | undefined);
       this.todos = parsePlanEntries(entries);
+      // While a goal is active, also mirror into goal-scoped todos so the
+      // Goal detail Progress list survives busy→idle turn boundaries.
+      if (this.goalState && this.goalState.status !== "complete") {
+        this.goalTodos = this.todos.map((t) => ({ ...t }));
+      }
       this.syncActiveIntoRuntimes();
       // Replay can restore the last plan list; live updates always emit.
       this.emitSnapshot();
@@ -4426,11 +4457,17 @@ export class AgentBackend {
         // never let the debug log break a live snapshot
       }
     }
-    // "complete" → drop the bubble (goal finished). The objective
-    // stays in the user-message badge, but no live progress chip.
-    if (status === "complete") {
+    // "complete" / "cleared" → drop the bubble and goal-scoped todos.
+    if (status === "complete" || status === "cleared") {
       this.goalState = null;
+      this.goalTodos = [];
     } else {
+      const verifying =
+        payload.verifying_completion === true ||
+        payload.verifyingCompletion === true;
+      const planning =
+        payload.planning === true ||
+        payload.planning_in_flight === true;
       this.goalState = {
         goalId:
           asString(payload.goal_id) ?? asString(payload.goalId) ?? "",
@@ -4464,8 +4501,26 @@ export class AgentBackend {
           payload.pause_message ?? payload.pauseMessage,
         ),
         lastEvent: asString(payload.last_event ?? payload.lastEvent),
+        lastEventDetail: asString(
+          payload.last_event_detail ?? payload.lastEventDetail,
+        ),
+        lastEventTimestamp: asString(
+          payload.last_event_timestamp ?? payload.lastEventTimestamp,
+        ),
+        verifyingCompletion: verifying || undefined,
+        planning: planning || undefined,
+        classifierRunsAttempted:
+          asNumber(payload.classifier_runs_attempted) ??
+          asNumber(payload.classifierRunsAttempted),
+        classifierMaxRuns:
+          asNumber(payload.classifier_max_runs) ??
+          asNumber(payload.classifierMaxRuns),
         updatedAt: Date.now(),
       };
+      // Seed goal todos from current turn todos if we just started and empty.
+      if (this.goalTodos.length === 0 && this.todos.length > 0) {
+        this.goalTodos = this.todos.map((t) => ({ ...t }));
+      }
     }
     this.emitSnapshot();
   }

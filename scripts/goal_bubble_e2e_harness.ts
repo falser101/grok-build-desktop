@@ -206,8 +206,36 @@ async function main(): Promise<void> {
     snap3?.goalState,
   );
 
-  // (d) status=complete clears the bubble
-  await drive(backend, "x.ai/session_notification", samplePayload);
+  // (d) goal-scoped todos: plan updates while goal active → goalTodos
+  await drive(backend, "_x.ai/session_notification", samplePayload);
+  const snapPlan = await drive(backend, "session/update", {
+    sessionId: "sess-TEST-1",
+    update: {
+      sessionUpdate: "plan",
+      entries: [
+        { content: "Update address markup", status: "in_progress" },
+        { content: "Fix CSS ellipsis", status: "pending" },
+        { content: "Smoke-check copy helper", status: "pending" },
+      ],
+    },
+  });
+  check(
+    "plan while goal active populates goalTodos",
+    Array.isArray(snapPlan?.goalTodos) && snapPlan.goalTodos.length === 3,
+    snapPlan?.goalTodos,
+  );
+  check(
+    "goalTodos[0] content preserved",
+    snapPlan?.goalTodos?.[0]?.content === "Update address markup",
+    snapPlan?.goalTodos?.[0],
+  );
+  check(
+    "goalTodos independent of busy-gated todos shape",
+    snapPlan?.goalTodos?.[1]?.status === "pending",
+    snapPlan?.goalTodos?.[1],
+  );
+
+  // (e) status=complete clears goalState and goalTodos
   const snapComplete = await drive(backend, "x.ai/session_notification", {
     sessionId: "sess-TEST-1",
     update: {
@@ -222,6 +250,13 @@ async function main(): Promise<void> {
     "status=complete clears goalState (bubble disappears)",
     snapComplete?.goalState === undefined,
     snapComplete?.goalState,
+  );
+  check(
+    "status=complete clears goalTodos",
+    snapComplete?.goalTodos === undefined ||
+      (Array.isArray(snapComplete?.goalTodos) &&
+        snapComplete.goalTodos.length === 0),
+    snapComplete?.goalTodos,
   );
 
   console.log(`\n${pass} passed, ${fail} failed`);

@@ -315,6 +315,14 @@ export interface GoalStateSnapshot {
   elapsedMs?: number;
   pauseMessage?: string;
   lastEvent?: string;
+  lastEventDetail?: string;
+  lastEventTimestamp?: string;
+  /** Transient: classifier verifying overlay (TUI "Verifying"). */
+  verifyingCompletion?: boolean;
+  /** Transient: planner subagent running. */
+  planning?: boolean;
+  classifierRunsAttempted?: number;
+  classifierMaxRuns?: number;
   /** Wall-clock ms when the agent last sent an update. */
   updatedAt: number;
 }
@@ -512,6 +520,12 @@ export interface AppSnapshot {
    * the composer. Undefined when no goal is active (or goal completed).
    */
   goalState?: GoalStateSnapshot;
+  /**
+   * Goal-scoped todo checklist (mirrors plan/todo_write while a goal is
+   * active). Independent of turn-scoped `todos` so Progress survives
+   * busy→idle turn boundaries. Cleared when the goal completes/clears.
+   */
+  goalTodos?: TodoItemUi[];
   /**
    * Installer state — surfaced to Settings → Agent and to the connection
    * error card so the user can see "absent / ready / update-available /
