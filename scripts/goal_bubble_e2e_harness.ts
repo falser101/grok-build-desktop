@@ -104,50 +104,69 @@ async function main(): Promise<void> {
     },
   };
 
-  // (a) x.ai/session_notification envelope
+  // (a) LIVE wire: ACP ExtNotification is encoded with a leading `_`
+  // (agent-client-protocol). This is the path real agent-serve uses.
+  const snapLive = await drive(
+    backend,
+    "_x.ai/session_notification",
+    samplePayload,
+  );
+  check(
+    "snapshot emitted after LIVE _x.ai/session_notification",
+    snapLive !== null,
+    "no snapshot captured for underscore-prefixed method",
+  );
+  const gsLive = snapLive?.goalState;
+  check(
+    "LIVE wire populates snapshot.goalState",
+    gsLive && typeof gsLive === "object",
+    gsLive,
+  );
+  check(
+    "LIVE goalState.objective = \"Migrate the auth module\"",
+    gsLive?.objective === "Migrate the auth module",
+    gsLive?.objective,
+  );
+  check(
+    "LIVE goalState.status = \"active\"",
+    gsLive?.status === "active",
+    gsLive?.status,
+  );
+  check(
+    "LIVE goalState.phase = \"executing\"",
+    gsLive?.phase === "executing",
+    gsLive?.phase,
+  );
+  check(
+    "LIVE goalState.completedDeliverables = 1",
+    gsLive?.completedDeliverables === 1,
+    gsLive?.completedDeliverables,
+  );
+  check(
+    "LIVE goalState.totalDeliverables = 3",
+    gsLive?.totalDeliverables === 3,
+    gsLive?.totalDeliverables,
+  );
+
+  // (a2) unprefixed x.ai/session_notification (tests / alternate transports)
   const snap1 = await drive(
     backend,
     "x.ai/session_notification",
     samplePayload,
   );
   check(
-    "snapshot emitted after x.ai/session_notification",
+    "snapshot emitted after x.ai/session_notification (unprefixed)",
     snap1 !== null,
     "no snapshot captured",
   );
   const gs1 = snap1?.goalState;
   check(
-    "snapshot.goalState populated",
-    gs1 && typeof gs1 === "object",
+    "unprefixed path also populates goalState",
+    gs1?.objective === "Migrate the auth module",
     gs1,
   );
-  check(
-    "goalState.objective = \"Migrate the auth module\"",
-    gs1?.objective === "Migrate the auth module",
-    gs1?.objective,
-  );
-  check(
-    "goalState.status = \"active\"",
-    gs1?.status === "active",
-    gs1?.status,
-  );
-  check(
-    "goalState.phase = \"executing\"",
-    gs1?.phase === "executing",
-    gs1?.phase,
-  );
-  check(
-    "goalState.completedDeliverables = 1",
-    gs1?.completedDeliverables === 1,
-    gs1?.completedDeliverables,
-  );
-  check(
-    "goalState.totalDeliverables = 3",
-    gs1?.totalDeliverables === 3,
-    gs1?.totalDeliverables,
-  );
 
-  // (b) x.ai/session/update envelope (legacy / replay path) — same shape
+  // (b) x.ai/session/update envelope (legacy / replay path) — both prefixes
   const snap2 = await drive(
     backend,
     "x.ai/session/update",
@@ -157,6 +176,16 @@ async function main(): Promise<void> {
     "x.ai/session/update (replay) also populates goalState",
     snap2?.goalState?.objective === "Migrate the auth module",
     snap2?.goalState,
+  );
+  const snap2u = await drive(
+    backend,
+    "_x.ai/session/update",
+    samplePayload,
+  );
+  check(
+    "LIVE _x.ai/session/update also populates goalState",
+    snap2u?.goalState?.objective === "Migrate the auth module",
+    snap2u?.goalState,
   );
 
   // (c) Defensive fallback: payload without sessionUpdate discriminator

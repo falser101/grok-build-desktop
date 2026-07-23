@@ -3782,15 +3782,16 @@ export class AgentBackend {
       return;
     }
     // xAI extension notifications used by the shell to push typed
-    // `SessionUpdate` payloads (goal_updated, loop_updated, todo_updated,
-    // …) without redefining the ACP wire. The pager TUI accepts both the
-    // canonical `x.ai/session_notification` (live path) and the legacy
-    // `x.ai/session/update` (replay path). Without these the desktop
-    // never sees goal progress — the standard `session/update` channel
-    // is reserved for the typed ACP `SessionUpdate` enums and the shell
-    // doesn't bother duplicating them onto the standard channel.
+    // `SessionUpdate` payloads (goal_updated, loop_updated, …).
+    // ACP wire-encodes ExtNotification methods with a leading `_`
+    // (agent-client-protocol strips `_` only inside the typed SDK;
+    // our JSON-RPC client sees the raw method string). Match both
+    // `_x.ai/...` (live serve wire) and unprefixed `x.ai/...` (tests /
+    // alternate transports), same pattern as sessions/models handlers.
     if (
+      method === "_x.ai/session_notification" ||
       method === "x.ai/session_notification" ||
+      method === "_x.ai/session/update" ||
       method === "x.ai/session/update"
     ) {
       this.handleSessionUpdate(asRecord(params));

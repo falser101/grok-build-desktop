@@ -114,21 +114,20 @@ const read = (rel) => fs.readFileSync(path.join(DESKTOP, rel), "utf8");
 {
   const b = read("src/main/backend.ts");
   const routes =
-    /method\s*===\s*"x\.ai\/session_notification"/.test(b) ||
-    /"x\.ai\/session_notification"\s*\|\|/.test(b);
+    /"_x\.ai\/session_notification"/.test(b) &&
+    /"x\.ai\/session_notification"/.test(b);
   check(
-    "backend routes x.ai/session_notification to handleSessionUpdate",
+    "backend routes LIVE _x.ai/session_notification AND unprefixed form",
     routes,
-    "expected `x.ai/session_notification` branch in handleNotification",
+    "expected both `_x.ai/session_notification` and `x.ai/session_notification`",
   );
   const routesLegacy =
-    /method\s*===\s*"x\.ai\/session\/update"/.test(b) ||
-    /"x\.ai\/session\/update"\s*\|\|/.test(b) ||
-    /x\.ai\/session_notification\s*\|\|/.test(b);
+    /"_x\.ai\/session\/update"/.test(b) &&
+    /"x\.ai\/session\/update"/.test(b);
   check(
-    "backend also routes x.ai/session/update (replay path)",
+    "backend routes _x.ai/session/update AND unprefixed session/update",
     routesLegacy,
-    "expected `x.ai/session/update` branch in handleNotification",
+    "expected both underscore and unprefixed session/update methods",
   );
   // Both should end up calling handleSessionUpdate (the standard
   // session/update branch already does).
