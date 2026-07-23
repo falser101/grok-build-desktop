@@ -4748,6 +4748,30 @@ html[data-theme="light"] .composer {
   color: var(--warn, #e8b86d);
   padding: 4px 0;
 }
+/* Block rendering the raw `pause_message` from the shell. Mirrors
+   TUI's `format_pause_reason()` "Reason: " prefix + wrap-by-width.
+   `white-space: pre-wrap` keeps any `\n` the shell embedded in the
+   message; `word-break: break-word` stops long URLs / tokens from
+   overflowing the modal on narrow windows. */
+.goal-detail-reason {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px dashed color-mix(in srgb, var(--warn, #e8b86d) 45%, var(--border));
+  background: color-mix(in srgb, var(--warn, #e8b86d) 8%, transparent);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.goal-detail-reason-label {
+  color: var(--text-muted);
+  margin-right: 4px;
+  font-weight: 550;
+}
+.goal-detail-reason-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .goal-detail-budget-bar {
   position: relative;
   height: 14px;

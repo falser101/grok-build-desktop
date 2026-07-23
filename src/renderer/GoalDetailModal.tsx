@@ -68,8 +68,16 @@ export function GoalDetailModal({
     isPaused ? goal.status : "active",
     m,
   );
-  const statusLine =
-    isActive || goal.phase
+  // TUI's `status_label()` returns an empty `phase_text` for any
+  // paused variant (see pager views/goal_detail.rs status_label);
+  // otherwise it would render `status_text` twice because
+  // `phaseChipLabel()` for paused statuses also returns the
+  // localised status label. Mirrors that here so the modal reads
+  // "Status: 已暂停（错误）" instead of
+  // "Status: 已暂停（错误） — 已暂停（错误）".
+  const statusLine = isPaused
+    ? statusText
+    : isActive || goal.phase
       ? `${statusText} — ${phase}`
       : statusText;
   const tokens = formatTokensLine(goal, m);
@@ -126,9 +134,31 @@ export function GoalDetailModal({
             </span>
           </div>
           {isPaused ? (
-            <div className="goal-detail-hint warn">
-              {goal.pauseMessage || m.goalPausedResumeHint}
-            </div>
+            <>
+              {/* Resume hint — mirrors the TUI's
+                  "Status: Paused (error) — type /goal resume to
+                  continue" line. Always rendered (independent of
+                  whether the shell sent a pause_message), so the
+                  user sees the recovery instruction even when the
+                  shell leaves `pause_message` empty. */}
+              <div className="goal-detail-hint warn">
+                {m.goalPausedResumeLine.replace("{status}", statusText)}
+              </div>
+              {goal.pauseMessage ? (
+                // Raw wire text — preserved verbatim so the user
+                // sees the real shell error. The CSS handles
+                // wrapping + `\n` preservation; the inline label
+                // is the TUI's `Reason:` prefix.
+                <div className="goal-detail-reason">
+                  <span className="goal-detail-reason-label">
+                    {m.goalPauseReasonLabel}
+                  </span>
+                  <span className="goal-detail-reason-text">
+                    {goal.pauseMessage}
+                  </span>
+                </div>
+              ) : null}
+            </>
           ) : null}
 
           <div className="goal-detail-row meta">

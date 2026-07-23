@@ -285,6 +285,14 @@ export interface Messages {
   goalActiveSubagent: string;
   goalPausedResumeHint: string;
   goalDetailEscHint: string;
+  /** Short label rendered before the raw `pause_message` text
+   *  in the goal detail modal — mirrors TUI `format_pause_reason()`'s
+   *  "Reason: " prefix. */
+  goalPauseReasonLabel: string;
+  /** One-line hint rendered in the paused section to remind the user
+   *  they can resume via `/goal resume`. `{status}` is replaced with the
+   *  localised paused status label (e.g. "Paused (error)"). */
+  goalPausedResumeLine: string;
   goalEventCreated: string;
   goalEventPlanningStarted: string;
   goalEventPlanningCompleted: string;
@@ -976,6 +984,8 @@ const en: Messages = {
   goalActiveSubagent: "Active Subagent",
   goalPausedResumeHint: "Goal paused — resume to continue",
   goalDetailEscHint: "Esc to close",
+  goalPauseReasonLabel: "Reason: ",
+  goalPausedResumeLine: "{status} — type /goal resume to continue",
   goalEventCreated: "Goal created",
   goalEventPlanningStarted: "Planning started",
   goalEventPlanningCompleted: "Planning completed",
@@ -1650,6 +1660,8 @@ const zh: Messages = {
   goalActiveSubagent: "活动子代理",
   goalPausedResumeHint: "目标已暂停 — 恢复后继续",
   goalDetailEscHint: "Esc 关闭",
+  goalPauseReasonLabel: "原因：",
+  goalPausedResumeLine: "{status} — 输入 /goal resume 继续",
   goalEventCreated: "目标已创建",
   goalEventPlanningStarted: "开始规划",
   goalEventPlanningCompleted: "规划完成",
