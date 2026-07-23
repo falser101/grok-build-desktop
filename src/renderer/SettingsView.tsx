@@ -55,6 +55,61 @@ export function OptionCard<T extends string>({
   );
 }
 
+interface SelectFieldProps<T extends string> {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (next: T) => void;
+  ariaLabel?: string;
+  id?: string;
+}
+
+/**
+ * Compact labelled <select> used by the General Settings cards. Replaces
+ * the multi-card option list to reclaim vertical space — a single native
+ * dropdown per setting is far shorter than a stacked radio-card list while
+ * remaining keyboard / screen-reader friendly. The arrow chrome is
+ * decorated via the parent `.settings-select-wrap` (see styles.css).
+ */
+function SelectField<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  id,
+}: SelectFieldProps<T>): React.ReactElement {
+  return (
+    <div className="settings-select-wrap">
+      <select
+        id={id}
+        className="settings-select"
+        value={value}
+        aria-label={ariaLabel}
+        onChange={(e) => onChange(e.target.value as T)}
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      <svg
+        className="settings-select-caret"
+        width="10"
+        height="10"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M3 6l5 5 5-5" />
+      </svg>
+    </div>
+  );
+}
+
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="settings-info-row">
@@ -988,26 +1043,20 @@ function GeneralCards(props: GeneralCardsProps): React.ReactElement {
           <h2>{m.languageSection}</h2>
           <p>{m.languageDesc}</p>
         </div>
-        <div
-          className="settings-options"
-          role="radiogroup"
-          aria-label={m.language}
-        >
-          {localeOptions.map((opt) => (
-            <OptionCard
-              key={opt.id}
-              value={opt.id}
-              selected={prefs.locale === opt.id}
-              title={opt.title}
-              description={
-                opt.id === "system"
-                  ? `${m.currentResolved}: ${systemLocaleLabel}`
-                  : undefined
-              }
-              onSelect={setLocale}
-            />
-          ))}
-        </div>
+        <SelectField
+          value={prefs.locale}
+          ariaLabel={m.language}
+          options={localeOptions.map((opt) => ({
+            value: opt.id,
+            label: opt.title,
+          }))}
+          onChange={setLocale}
+        />
+        {prefs.locale === "system" ? (
+          <p className="settings-help">
+            {m.currentResolved}: {systemLocaleLabel}
+          </p>
+        ) : null}
       </section>
 
       <section className="settings-card">
@@ -1015,26 +1064,20 @@ function GeneralCards(props: GeneralCardsProps): React.ReactElement {
           <h2>{m.appearanceSection}</h2>
           <p>{m.themeDesc}</p>
         </div>
-        <div
-          className="settings-options"
-          role="radiogroup"
-          aria-label={m.theme}
-        >
-          {themeOptions.map((opt) => (
-            <OptionCard
-              key={opt.id}
-              value={opt.id}
-              selected={prefs.theme === opt.id}
-              title={opt.title}
-              description={
-                opt.id === "system"
-                  ? `${m.currentResolved}: ${systemThemeLabel}`
-                  : undefined
-              }
-              onSelect={setTheme}
-            />
-          ))}
-        </div>
+        <SelectField
+          value={prefs.theme}
+          ariaLabel={m.theme}
+          options={themeOptions.map((opt) => ({
+            value: opt.id,
+            label: opt.title,
+          }))}
+          onChange={setTheme}
+        />
+        {prefs.theme === "system" ? (
+          <p className="settings-help">
+            {m.currentResolved}: {systemThemeLabel}
+          </p>
+        ) : null}
       </section>
 
       <section className="settings-card">
@@ -1042,52 +1085,35 @@ function GeneralCards(props: GeneralCardsProps): React.ReactElement {
           <h2>{m.permissionsSection}</h2>
           <p>{m.permissionsSectionDesc}</p>
         </div>
-        <div className="settings-card-head" style={{ marginBottom: 8 }}>
-          <h3 className="settings-subhead">{m.alwaysApproveSetting}</h3>
-          <p>{m.alwaysApproveSettingDesc}</p>
-        </div>
-        <div
-          className="settings-options"
-          role="radiogroup"
-          aria-label={m.alwaysApproveSetting}
-        >
-          <OptionCard
-            value="off"
-            selected={!alwaysApprove}
-            title={m.alwaysApproveDisabled}
-            onSelect={() => onSetAlwaysApprove(false)}
-          />
-          <OptionCard
-            value="on"
-            selected={alwaysApprove}
-            title={m.alwaysApproveEnabled}
-            onSelect={() => onSetAlwaysApprove(true)}
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <h3 className="settings-subhead">{m.alwaysApproveSetting}</h3>
+            <p>{m.alwaysApproveSettingDesc}</p>
+          </div>
+          <SelectField
+            value={alwaysApprove ? "on" : "off"}
+            ariaLabel={m.alwaysApproveSetting}
+            options={[
+              { value: "off", label: m.alwaysApproveDisabled },
+              { value: "on", label: m.alwaysApproveEnabled },
+            ]}
+            onChange={(v) => onSetAlwaysApprove(v === "on")}
           />
         </div>
 
-        <div
-          className="settings-card-head"
-          style={{ marginBottom: 8, marginTop: 16 }}
-        >
-          <h3 className="settings-subhead">{m.autoTrustSetting}</h3>
-          <p>{m.autoTrustSettingDesc}</p>
-        </div>
-        <div
-          className="settings-options"
-          role="radiogroup"
-          aria-label={m.autoTrustSetting}
-        >
-          <OptionCard
-            value="off"
-            selected={!autoTrustNewSessions}
-            title={m.autoTrustDisabled}
-            onSelect={() => onSetAutoTrustNewSessions(false)}
-          />
-          <OptionCard
-            value="on"
-            selected={autoTrustNewSessions}
-            title={m.autoTrustEnabled}
-            onSelect={() => onSetAutoTrustNewSessions(true)}
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <h3 className="settings-subhead">{m.autoTrustSetting}</h3>
+            <p>{m.autoTrustSettingDesc}</p>
+          </div>
+          <SelectField
+            value={autoTrustNewSessions ? "on" : "off"}
+            ariaLabel={m.autoTrustSetting}
+            options={[
+              { value: "off", label: m.autoTrustDisabled },
+              { value: "on", label: m.autoTrustEnabled },
+            ]}
+            onChange={(v) => onSetAutoTrustNewSessions(v === "on")}
           />
         </div>
       </section>

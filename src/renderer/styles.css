@@ -6093,6 +6093,93 @@ html[data-theme="light"] .icon-btn.send {
   gap: 6px;
 }
 
+/* Compact dropdown used in the General Settings cards — replaces the
+   stacked radio-card list to reclaim vertical space. The wrap positions
+   the caret icon absolutely over the native <select> so we keep OS-native
+   open behaviour while still matching the rest of the settings UI. */
+.settings-select-wrap {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  max-width: 320px;
+}
+
+.settings-select {
+  width: 100%;
+  padding: 7px 30px 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.settings-select:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.settings-select:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.settings-select-caret {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* Inline label + dropdown row used in the Permissions card so the
+   description text and the select sit side-by-side without stacking. */
+.settings-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.settings-row:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.settings-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-row-text h3 {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text);
+}
+
+.settings-row-text p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.settings-row .settings-select-wrap {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 160px;
+  max-width: 220px;
+}
+
 .settings-option {
   display: flex;
   align-items: flex-start;

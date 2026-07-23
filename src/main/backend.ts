@@ -1564,9 +1564,13 @@ export class AgentBackend {
       planContent: this.planContent,
       hydrated: prev?.hydrated ?? true,
       turnGeneration: prev?.turnGeneration ?? 0,
-      // goalState / goalTodos are owned by SessionRuntime directly.
-      // Do NOT overwrite the bag here — goal updates are written to the
-      // bag exclusively via applyGoalUpdateToRuntime().
+      // goalState / goalTodos are owned by SessionRuntime and written only
+      // via applyGoalUpdateToRuntime(). Preserve them from the previous bag
+      // — rebuilding without these fields would wipe them to undefined and
+      // crash applyGoalUpdateToRuntime on the next goal_updated (e.g. history
+      // replay when switching sessions).
+      goalState: prev?.goalState ?? null,
+      goalTodos: prev?.goalTodos ? prev.goalTodos.map((t) => ({ ...t })) : [],
     });
   }
 
@@ -1818,6 +1822,7 @@ export class AgentBackend {
       return;
     }
     const focusId = this.sessionId;
+    const focusPrev = focusId ? this.runtimes.get(focusId) : undefined;
     const focusSnap: SessionRuntime | null = focusId
       ? {
           sessionId: focusId,
@@ -1845,9 +1850,13 @@ export class AgentBackend {
           toolIndex: this.toolIndex,
           todos: this.todos,
           planContent: this.planContent,
-          // goalState / goalTodos are owned by SessionRuntime — not swapped
-          // during withParkedRuntime. snapshot() reads goal from the active
-          // runtime directly.
+          // goalState / goalTodos live on the bag; carry them through so the
+          // temporary focus snap stays a complete SessionRuntime.
+          turnGeneration: focusPrev?.turnGeneration ?? 0,
+          goalState: focusPrev?.goalState ?? null,
+          goalTodos: focusPrev?.goalTodos
+            ? focusPrev.goalTodos.map((t) => ({ ...t }))
+            : [],
           hydrated: true,
         }
       : null;
@@ -4732,6 +4741,8 @@ const streaming = !this.replaying && this.activity === "working";
       this.log("info", `[goal] applyGoalUpdateToRuntime: no runtime for ${sessionId.slice(0, 8)}`);
       return;
     }
+    // Older bags (or a prior sync bug) may lack goalTodos; never crash on .length.
+    if (!Array.isArray(rt.goalTodos)) rt.goalTodos = [];
     const payload = update as Record<string, JsonValue>;
     const status = asString(payload.status) ?? "";
     // Optional diagnostic: prints one line per goal update when the
@@ -5826,6 +5837,7 @@ const streaming = !this.replaying && this.activity === "working";
     // withParkedRuntime) because the work is async — the request promise
     // needs focus kept on the target session until it settles.
     const focusId = this.sessionId;
+    const focusPrev = focusId ? this.runtimes.get(focusId) : undefined;
     const focusSnap: SessionRuntime | null = focusId
       ? {
           sessionId: focusId,
@@ -5853,7 +5865,11 @@ const streaming = !this.replaying && this.activity === "working";
           toolIndex: this.toolIndex,
           todos: this.todos,
           planContent: this.planContent,
-          // goalState / goalTodos are owned by SessionRuntime — not swapped.
+          turnGeneration: focusPrev?.turnGeneration ?? 0,
+          goalState: focusPrev?.goalState ?? null,
+          goalTodos: focusPrev?.goalTodos
+            ? focusPrev.goalTodos.map((t) => ({ ...t }))
+            : [],
           hydrated: true,
         }
       : null;
