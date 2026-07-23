@@ -2643,6 +2643,17 @@ export function App() {
   /** Mirror of stickToBottomRef that triggers re-renders for the
       "jump to bottom" button visibility. */
   const [isAtBottom, setIsAtBottom] = useState(true);
+  /**
+   * Edge-detector for the `replaying → false` transition. The session-
+   * load path sets `stickToBottomRef.current = false` while the loading
+   * spinner is up so the user doesn't see a flicker-scroll mid-replay;
+   * once the full timeline arrives we have to re-arm the stick AND
+   * force `isAtBottom = true` — otherwise the jump-to-latest button
+   * would stay hidden (no `scroll` event fires between an empty DOM
+   * and a freshly-rendered transcript, so the React state never
+   * updates on its own).
+   */
+  const prevReplayingRef = useRef<boolean>(false);
   const prevSessionIdRef = useRef<string | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const contentEditableRef = useRef<HTMLDivElement | null>(null);
@@ -3559,6 +3570,13 @@ export function App() {
   const scrollToBottom = useCallback(() => {
     const pane = chatPaneRef.current;
     if (!pane) return;
+    // Empty timeline: nothing to scroll to. Reset the at-bottom
+    // mirror so the button hides and avoid noisy zero-scroll calls.
+    if (pane.scrollHeight <= 0) {
+      stickToBottomRef.current = true;
+      setIsAtBottom(true);
+      return;
+    }
     // Suppress the auto-stick override while programmatic scroll runs.
     pinIgnoreScrollRef.current = true;
     if (pinIgnoreScrollTimerRef.current) {
@@ -3573,6 +3591,19 @@ export function App() {
       pane.addEventListener("scrollend", endIgnore, { once: true });
     }
     pinIgnoreScrollTimerRef.current = setTimeout(endIgnore, 700);
+    // Post-render safety net: smooth-scroll captures `scrollHeight`
+    // at t=0, but if a later message arrives or markdown measurement
+    // grows the pane mid-scroll, the smooth animation lands short.
+    // A rAF after the smooth-scroll settles forces the final
+    // scrollTop = current scrollHeight so we end up exactly at the
+    // last message. One frame is enough for the common case; we
+    // also force isAtBottom=true unconditionally so the button hides
+    // even if the user happens to overshoot-then-undershoot.
+    requestAnimationFrame(() => {
+      const p = chatPaneRef.current;
+      if (!p) return;
+      if (p.scrollHeight > 0) p.scrollTop = p.scrollHeight;
+    });
     stickToBottomRef.current = true;
     setIsAtBottom(true);
   }, []);
@@ -3591,10 +3622,49 @@ export function App() {
       setLoopIntervalMenuOpen(false);
     }
     if (snap.replaying) {
-      // Prevent auto-scroll after history replay completes —
-      // the user should see the loaded conversation at rest, not
-      // a rapid scroll to the bottom.
+      // Prevent auto-scroll while the loading spinner is up — the
+      // user should see the loaded conversation arrive, not a rapid
+      // scroll to the bottom. Critically we also arm the edge-
+      // detector here so the transition below can re-engage stick.
       stickToBottomRef.current = false;
+      prevReplayingRef.current = true;
+      return;
+    }
+    // Replaying → not-replaying transition: the cold-load just
+    // finished. The earlier render deliberately disabled stick so the
+    // loading spinner stayed at rest; re-arm it now and force the view
+    // to the actual bottom of the freshly-arrived transcript. Without
+    // this the user lands at scrollTop=0 with no scroll event ever
+    // firing (an empty pane → full timeline swap doesn't emit one),
+    // so `isAtBottom` stays stale at `true` and the jump-to-latest
+    // button is silently hidden.
+    const justFinishedReplay = prevReplayingRef.current;
+    prevReplayingRef.current = false;
+    if (justFinishedReplay) {
+      stickToBottomRef.current = true;
+      setIsAtBottom(true);
+      // Two-phase: paint the new content first so scrollHeight is
+      // accurate, then snap. requestAnimationFrame is enough for the
+      // React commit; if the timeline includes async markdown
+      // measurement the second rAF + scrollHeight check catches that.
+      const pane = chatPaneRef.current;
+      const snapToBottom = () => {
+        const p = chatPaneRef.current;
+        if (!p) return;
+        if (p.scrollHeight > 0) {
+          p.scrollTop = p.scrollHeight;
+        } else {
+          bottomRef.current?.scrollIntoView({
+            behavior: "auto",
+            block: "end",
+          });
+        }
+      };
+      requestAnimationFrame(() => {
+        snapToBottom();
+        requestAnimationFrame(snapToBottom);
+      });
+      scheduleScrollPin();
       return;
     }
     if (!stickToBottomRef.current) return;
