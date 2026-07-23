@@ -197,17 +197,12 @@ export interface Messages {
   modeAutoHint: string;
   modeDontAsk: string;
   modeDontAskHint: string;
+  modeBypass: string;
+  modeBypassHint: string;
   modePlan: string;
   modePlanHint: string;
   modeGroupApproval: string;
   modeGroupWorkflow: string;
-  modeBypassActive: string;
-  // Legacy aliases — kept so old keys in existing translations don't
-  // silently break the type check before they are removed.
-  modeAgent?: string;
-  modeAgentHint?: string;
-  modeAsk?: string;
-  modeAskHint?: string;
   effort: string;
   /** Tooltip for context token usage chip (used / window). */
   tokenUsage: string;
@@ -887,11 +882,12 @@ const en: Messages = {
   modeAutoHint: "Classifier reviews tools",
   modeDontAsk: "Deny unknown",
   modeDontAskHint: "Silently deny unapproved tools",
+  modeBypass: "Bypass permissions",
+  modeBypassHint: "Auto-approve all tool calls (YOLO)",
   modePlan: "Plan",
   modePlanHint: "Plan before code",
   modeGroupApproval: "Approval policy",
   modeGroupWorkflow: "Workflow",
-  modeBypassActive: "All permissions auto-approved",
   effort: "Effort",
   tokenUsage: "Context tokens: {used} used / {total} window",
   placeholderReady: "Describe a task…  / commands  ·  @ files",
@@ -1548,11 +1544,12 @@ const zh: Messages = {
   modeAutoHint: "后台 classifier 审查",
   modeDontAsk: "拒绝未批",
   modeDontAskHint: "静默拒绝未批准工具",
+  modeBypass: "全部放行",
+  modeBypassHint: "自动批准所有工具调用 (YOLO)",
   modePlan: "Plan",
   modePlanHint: "先规划再改代码",
   modeGroupApproval: "审批策略",
   modeGroupWorkflow: "工作流",
-  modeBypassActive: "已全部放行",
   effort: "力度",
   tokenUsage: "上下文 tokens：已用 {used} / 窗口 {total}",
   placeholderReady: "描述任务…  / 命令  ·  @ 文件",

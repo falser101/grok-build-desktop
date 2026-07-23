@@ -71,9 +71,9 @@ if (Array.isArray(backendValidValues)) {
 
   // 3) Desktop must NOT list bypassPermissions in modeOptions (chip owns it).
   check(
-    "modeOptions excludes bypassPermissions",
-    !desktopSrc.includes('id: "bypassPermissions"'),
-    "bypassPermissions should be controlled by the always-approve chip",
+    "modeOptions includes bypassPermissions",
+    desktopSrc.includes('id: "bypassPermissions"'),
+    "bypassPermissions must be in the mode dropdown",
   );
 
   // 4) Both locales must define every label key referenced by the chip /

@@ -1,22 +1,21 @@
 // MUST stay in sync with `PermissionMode::VALID_VALUES` in
-//   grok-build crates/codegen/xai-grok-agent/src/config.rs
-// `bypassPermissions` is intentionally NOT exposed here — it is
-// controlled by the always-approve chip in the composer toolbar
-// (which atomically flips sessionMode ↔ "bypassPermissions" together
-// with the desktop's local auto-respond flag).
+//   grok-build crates/codegen/xai-grok-agent/src/config.rs.
+// All six values are exposed in the dropdown (no separate toggle).
 //
 // Whenever a new PermissionMode variant lands upstream, add it here and
 // bump `version` so the alignment contract test can flag drift.
 import type { SessionModeId } from "@shared/types";
 import type { Messages } from "./i18n";
 
-export const MODE_OPTIONS_VERSION = "1.0.0";
+export const MODE_OPTIONS_VERSION = "2.0.0";
 
 export interface ModeOption {
   id: SessionModeId;
   label: string;
   hint: string;
   group: "approval" | "workflow";
+  /** True for "destructive" / power-user modes (red accent). */
+  destructive?: boolean;
 }
 
 export function modeOptions(m: Messages): ModeOption[] {
@@ -44,6 +43,13 @@ export function modeOptions(m: Messages): ModeOption[] {
       label: m.modeDontAsk,
       hint: m.modeDontAskHint,
       group: "approval",
+    },
+    {
+      id: "bypassPermissions",
+      label: m.modeBypass,
+      hint: m.modeBypassHint,
+      group: "approval",
+      destructive: true,
     },
     {
       id: "plan",

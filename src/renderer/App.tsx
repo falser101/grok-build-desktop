@@ -33,8 +33,8 @@ import type {
   TimelineItem,
 } from "@shared/types";
 import type { Messages } from "./i18n";
-import { localizeEffort } from "./i18n";
 import { modeOptions as computeModeOptions } from "./modeOptions";
+import { localizeEffort } from "./i18n";
 import { AskUserQuestionModal } from "./AskUserQuestionModal";
 
 import { TrustPromptDialog } from "./TrustPromptDialog";
@@ -749,7 +749,7 @@ function savePanelLayout(layout: PanelLayout): void {
 }
 
 function modeOptions(m: Messages) {
-  // Re-exported from `./modeOptions` for backwards compat; new code
+  // Re-exported from './modeOptions' for backwards compat; new code
   // should import from the module directly so the sync-with-backend
   // contract test can read a single source of truth.
   return computeModeOptions(m);
@@ -4719,18 +4719,8 @@ export function App() {
   ]);
 
   const onToggleAlwaysApprove = useCallback(async () => {
-    // The always-approve chip owns the `bypassPermissions` mode
-    // axis (kept off the mode dropdown). Toggling it atomically flips
-    // both: sessionMode ↔ "bypassPermissions" + the desktop auto-respond
-    // flag. The chip's visual "on" state is `snap.alwaysApprove` so
-    // any agent-side / IPC rejection leaves the chip visible in its
-    // last-known state and the user sees a toast.
-    const turningOn = !snap.alwaysApprove;
     try {
-      await window.desktop.setAlwaysApprove(turningOn);
-      await window.desktop.setMode(
-        turningOn ? "bypassPermissions" : "default",
-      );
+      await window.desktop.setAlwaysApprove(!snap.alwaysApprove);
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
@@ -5080,6 +5070,7 @@ export function App() {
           if (!ok) return;
         }
         await window.desktop.setMode(modeId);
+        await window.desktop.setAlwaysApprove(modeId === "bypassPermissions");
       } catch (err) {
         setLocalError(err instanceof Error ? err.message : String(err));
       }
@@ -7495,18 +7486,17 @@ export function App() {
                                         <button
                                           key={mod.id}
                                           type="button"
-                                          className={`dropdown-item${
-                                            isActive ? " active" : ""
-                                          }`}
+                                          className={[
+                                            "dropdown-item",
+                                            isActive && "active",
+                                            mod.destructive && "destructive",
+                                          ].filter(Boolean).join(" ")}
                                           aria-pressed={isActive}
                                           onClick={() => {
                                             void onSetMode(mod.id);
                                             setMenu(null);
                                           }}
                                         >
-                                          <span className="di-check" aria-hidden>
-                                            {isActive ? "✓" : ""}
-                                          </span>
                                           <span className="di-text">
                                             <span className="di-title">
                                               {mod.label}
@@ -7514,6 +7504,9 @@ export function App() {
                                             <span className="di-desc">
                                               {mod.hint}
                                             </span>
+                                          </span>
+                                          <span className="di-check" aria-hidden="true">
+                                            {isActive ? "✓" : ""}
                                           </span>
                                         </button>
                                       );
@@ -7556,7 +7549,7 @@ export function App() {
                             : m.alwaysApproveOff}
                         </strong>
                       </button>
-                      {/* One-shot goal / loop intent chips (beside always-approve). */}
+                      {/* One-shot goal / loop intent chips. */}
                       {goalActive ? (
                         <span className="chip goal-chip" title={m.goalChipHint}>
                           <span className="chip-leading-icon" aria-hidden="true">
