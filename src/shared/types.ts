@@ -7,7 +7,20 @@ export type ConnectionState =
   | "stopped";
 
 /** ACP session mode wire ids. */
-export type SessionModeId = "default" | "plan" | "ask";
+/**
+ * Desktop-mapped PermissionMode surface. Includes `bypassPermissions`
+ * even though the desktop dropdown does not list it — that mode is
+ * owned by the always-approve chip and toggled atomically with the
+ * desktop's local auto-respond flag. The legacy `"ask"` value is
+ * accepted for read-back but should never be written.
+ */
+export type SessionModeId =
+  | "default"
+  | "acceptEdits"
+  | "auto"
+  | "dontAsk"
+  | "plan"
+  | "bypassPermissions";
 
 export type CompactStatus =
   | "running"

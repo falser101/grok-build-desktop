@@ -528,7 +528,15 @@ function registerIpc(): void {
   );
 
   ipcMain.handle("agent:setMode", async (_e, modeId: SessionModeId) => {
-    if (modeId !== "default" && modeId !== "plan" && modeId !== "ask") {
+    // The IPC contract mirrors `SessionModeId`; backend just forwards
+    // to the agent which validates against `PermissionMode::VALID_VALUES`.
+    if (
+      modeId !== "default" &&
+      modeId !== "acceptEdits" &&
+      modeId !== "auto" &&
+      modeId !== "dontAsk" &&
+      modeId !== "plan"
+    ) {
       throw new Error("invalid modeId");
     }
     await backend.setMode(modeId);

@@ -4391,14 +4391,10 @@ export class AgentBackend {
         asString(update.currentModeId) ??
         asString(update.current_mode_id) ??
         asString(update.modeId);
-      if (
-        modeId === "default" ||
-        modeId === "plan" ||
-        modeId === "ask"
-      ) {
-        this.sessionMode = modeId;
-        this.emitSnapshot();
-      }
+      // Any value in `SessionModeId` is forwarded; the agent validates against
+      // its own `PermissionMode::VALID_VALUES`.
+      this.sessionMode = modeId as SessionModeId;
+      this.emitSnapshot();
       return;
     }
 

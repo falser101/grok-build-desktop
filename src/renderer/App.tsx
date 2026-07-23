@@ -34,6 +34,7 @@ import type {
 } from "@shared/types";
 import type { Messages } from "./i18n";
 import { localizeEffort } from "./i18n";
+import { modeOptions as computeModeOptions } from "./modeOptions";
 import { AskUserQuestionModal } from "./AskUserQuestionModal";
 
 import { TrustPromptDialog } from "./TrustPromptDialog";
@@ -747,14 +748,11 @@ function savePanelLayout(layout: PanelLayout): void {
   }
 }
 
-function modeOptions(
-  m: Messages,
-): { id: SessionModeId; label: string; hint: string }[] {
-  return [
-    { id: "default", label: m.modeAgent, hint: m.modeAgentHint },
-    { id: "plan", label: m.modePlan, hint: m.modePlanHint },
-    { id: "ask", label: m.modeAsk, hint: m.modeAskHint },
-  ];
+function modeOptions(m: Messages) {
+  // Re-exported from `./modeOptions` for backwards compat; new code
+  // should import from the module directly so the sync-with-backend
+  // contract test can read a single source of truth.
+  return computeModeOptions(m);
 }
 
 function projectFromCwd(cwd: string): string {
@@ -3558,11 +3556,21 @@ export function App() {
     () => snap.availableModels.find((mod) => mod.modelId === snap.modelId),
     [snap.availableModels, snap.modelId],
   );
+  // Normalize the legacy `"ask"` value to the new `"dontAsk"` so the UI
+// always shows the rename target. The IPC layer does the same when
+// forwarding back to the agent.
+  const normalizedSessionMode = useMemo<SessionModeId>(() => {
+    const m = snap.sessionMode;
+    // Legacy "ask" → "dontAsk" rename. Treat any unknown value as
+    // "default" so the chip never breaks on a value the desktop
+    // does not yet know about.
+    if (m === ("ask" as string)) return "dontAsk";
+    return (m || "default") as SessionModeId;
+  }, [snap.sessionMode]);
   const modeLabel = useMemo(() => {
-    const hit = modes.find((mod) => mod.id === snap.sessionMode);
-    const label = (hit?.label || m.modeAgent || "Agent").trim();
-    return label || "Agent";
-  }, [modes, snap.sessionMode, m.modeAgent]);
+    const hit = modes.find((mod) => mod.id === normalizedSessionMode);
+    return hit?.label ?? "Agent";
+  }, [modes, normalizedSessionMode]);
 
   const connectionReady = snap.connection === "ready";
   const hasWorkspace = Boolean(snap.workspace);
@@ -4711,8 +4719,18 @@ export function App() {
   ]);
 
   const onToggleAlwaysApprove = useCallback(async () => {
+    // The always-approve chip owns the `bypassPermissions` mode
+    // axis (kept off the mode dropdown). Toggling it atomically flips
+    // both: sessionMode ↔ "bypassPermissions" + the desktop auto-respond
+    // flag. The chip's visual "on" state is `snap.alwaysApprove` so
+    // any agent-side / IPC rejection leaves the chip visible in its
+    // last-known state and the user sees a toast.
+    const turningOn = !snap.alwaysApprove;
     try {
-      await window.desktop.setAlwaysApprove(!snap.alwaysApprove);
+      await window.desktop.setAlwaysApprove(turningOn);
+      await window.desktop.setMode(
+        turningOn ? "bypassPermissions" : "default",
+      );
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
@@ -5301,13 +5319,10 @@ export function App() {
 
       if (s.action === "set_mode" && s.modeId) {
         try {
-          const mode =
-            s.modeId === "default"
-              ? ("default" as const)
-              : s.modeId === "plan"
-                ? ("plan" as const)
-                : ("ask" as const);
-          await window.desktop.setMode(mode);
+          // `set_mode` action values come from the slash menu catalog and
+          // are validated by the catalog itself; pass through any
+          // SessionModeId-shaped string the catalog advertised.
+          await window.desktop.setMode(s.modeId as SessionModeId);
         } catch (err) {
           setLocalError(err instanceof Error ? err.message : String(err));
         }
@@ -7424,7 +7439,7 @@ export function App() {
                       <div className="chip-menu-wrap mode-chip-wrap">
                         <button
                           type="button"
-                          className={`chip chip-btn mode-chip mode-${snap.sessionMode}${
+                          className={`chip chip-btn mode-chip mode-${normalizedSessionMode}${
                             menu === "mode" ? " open" : ""
                           }`}
                           disabled={!connectionReady}
@@ -7457,22 +7472,56 @@ export function App() {
                         </button>
                         {menu === "mode" ? (
                           <div className="dropdown mode-dropdown">
-                            {modes.map((mod) => (
-                              <button
-                                key={mod.id}
-                                type="button"
-                                className={`dropdown-item ${
-                                  mod.id === snap.sessionMode ? "active" : ""
-                                }`}
-                                onClick={() => {
-                                  void onSetMode(mod.id);
-                                  setMenu(null);
-                                }}
-                              >
-                                <span className="di-title">{mod.label}</span>
-                                <span className="di-desc">{mod.hint}</span>
-                              </button>
-                            ))}
+                            {(["approval", "workflow"] as const).map(
+                              (group) => {
+                                const items = modes.filter(
+                                  (mod) => mod.group === group,
+                                );
+                                if (items.length === 0) return null;
+                                return (
+                                  <div
+                                    key={group}
+                                    className="dropdown-group"
+                                  >
+                                    <div className="dropdown-group-title">
+                                      {group === "approval"
+                                        ? m.modeGroupApproval
+                                        : m.modeGroupWorkflow}
+                                    </div>
+                                    {items.map((mod) => {
+                                      const isActive =
+                                        mod.id === normalizedSessionMode;
+                                      return (
+                                        <button
+                                          key={mod.id}
+                                          type="button"
+                                          className={`dropdown-item${
+                                            isActive ? " active" : ""
+                                          }`}
+                                          aria-pressed={isActive}
+                                          onClick={() => {
+                                            void onSetMode(mod.id);
+                                            setMenu(null);
+                                          }}
+                                        >
+                                          <span className="di-check" aria-hidden>
+                                            {isActive ? "✓" : ""}
+                                          </span>
+                                          <span className="di-text">
+                                            <span className="di-title">
+                                              {mod.label}
+                                            </span>
+                                            <span className="di-desc">
+                                              {mod.hint}
+                                            </span>
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              },
+                            )}
                           </div>
                         ) : null}
                       </div>

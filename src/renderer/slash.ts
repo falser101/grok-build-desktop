@@ -650,7 +650,9 @@ export async function tryHandleLocalSlash(
   }
 
   if (name === "ask") {
-    await ctx.setMode("ask");
+    // Legacy alias — maps to the new `dontAsk` PermissionMode before
+    // crossing the IPC boundary.
+    await ctx.setMode("dontAsk");
     return {
       kind: "handled",
       message: t(

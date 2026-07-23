@@ -3608,6 +3608,31 @@ body.is-resizing-files-tree * {
   font-weight: 500;
 }
 
+/* Per-mode accent — five PermissionMode surfaces. */
+.mode-chip.mode-default {
+  /* neutral */
+}
+.mode-chip.mode-acceptEdits {
+  border-color: color-mix(in srgb, var(--ok, #6bcf7f) 35%, transparent);
+  background: color-mix(in srgb, var(--ok, #6bcf7f) 10%, transparent);
+}
+.mode-chip.mode-acceptEdits strong {
+  color: var(--ok, #6bcf7f);
+}
+.mode-chip.mode-auto {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.mode-chip.mode-auto strong {
+  color: var(--accent);
+}
+.mode-chip.mode-dontAsk {
+  border-color: color-mix(in srgb, var(--danger, #e06c75) 35%, transparent);
+  background: color-mix(in srgb, var(--danger, #e06c75) 10%, transparent);
+}
+.mode-chip.mode-dontAsk strong {
+  color: var(--danger, #e06c75);
+}
 .mode-chip.mode-plan {
   border-color: color-mix(in srgb, var(--warn, #e8b86d) 40%, transparent);
   background: color-mix(in srgb, var(--warn, #e8b86d) 14%, transparent);
@@ -3616,9 +3641,15 @@ body.is-resizing-files-tree * {
   color: var(--warn, #e8b86d);
 }
 
+/* Legacy "ask" kept as an alias of "dontAsk" so any in-flight renders
+   from persisted state don't lose their accent while the user settles
+   into the rename. */
 .mode-chip.mode-ask {
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger, #e06c75) 35%, transparent);
+  background: color-mix(in srgb, var(--danger, #e06c75) 10%, transparent);
+}
+.mode-chip.mode-ask strong {
+  color: var(--danger, #e06c75);
 }
 
 .mode-chip.open {
@@ -3632,8 +3663,66 @@ body.is-resizing-files-tree * {
   right: auto;
   bottom: calc(100% + 6px);
   z-index: 40;
-  min-width: 220px;
+  min-width: 260px;
   padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Grouped sections inside the dropdown. */
+.dropdown-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dropdown-group-title {
+  padding: 4px 10px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* Item layout: check column + two-line text column. */
+.mode-dropdown .dropdown-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px 6px 6px;
+  text-align: left;
+}
+.mode-dropdown .di-check {
+  flex: 0 0 auto;
+  width: 14px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ok, #6bcf7f);
+  text-align: center;
+}
+.mode-dropdown .di-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.mode-dropdown .di-title {
+  font-weight: 500;
+  color: var(--text);
+}
+.mode-dropdown .di-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.mode-dropdown .dropdown-item.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.mode-dropdown .dropdown-item.active .di-title {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .composer {

@@ -189,12 +189,25 @@ export interface Messages {
   sessionMode: string;
   reasoningEffort: string;
   openSessionForModels: string;
-  modeAgent: string;
-  modeAgentHint: string;
+  modeDefault: string;
+  modeDefaultHint: string;
+  modeAcceptEdits: string;
+  modeAcceptEditsHint: string;
+  modeAuto: string;
+  modeAutoHint: string;
+  modeDontAsk: string;
+  modeDontAskHint: string;
   modePlan: string;
   modePlanHint: string;
-  modeAsk: string;
-  modeAskHint: string;
+  modeGroupApproval: string;
+  modeGroupWorkflow: string;
+  modeBypassActive: string;
+  // Legacy aliases — kept so old keys in existing translations don't
+  // silently break the type check before they are removed.
+  modeAgent?: string;
+  modeAgentHint?: string;
+  modeAsk?: string;
+  modeAskHint?: string;
   effort: string;
   /** Tooltip for context token usage chip (used / window). */
   tokenUsage: string;
@@ -866,12 +879,19 @@ const en: Messages = {
   sessionMode: "Session mode",
   reasoningEffort: "Reasoning effort",
   openSessionForModels: "Open a session to load models",
-  modeAgent: "Agent",
-  modeAgentHint: "Full tools",
+  modeDefault: "Agent",
+  modeDefaultHint: "Prompt for each tool",
+  modeAcceptEdits: "Accept edits",
+  modeAcceptEditsHint: "Auto-approve file edits",
+  modeAuto: "Auto classifier",
+  modeAutoHint: "Classifier reviews tools",
+  modeDontAsk: "Deny unknown",
+  modeDontAskHint: "Silently deny unapproved tools",
   modePlan: "Plan",
   modePlanHint: "Plan before code",
-  modeAsk: "Ask",
-  modeAskHint: "Read-only Q&A",
+  modeGroupApproval: "Approval policy",
+  modeGroupWorkflow: "Workflow",
+  modeBypassActive: "All permissions auto-approved",
   effort: "Effort",
   tokenUsage: "Context tokens: {used} used / {total} window",
   placeholderReady: "Describe a task…  / commands  ·  @ files",
@@ -1520,12 +1540,19 @@ const zh: Messages = {
   sessionMode: "会话模式",
   reasoningEffort: "推理力度",
   openSessionForModels: "打开会话后可加载模型列表",
-  modeAgent: "Agent",
-  modeAgentHint: "完整工具",
+  modeDefault: "正常询问",
+  modeDefaultHint: "每步询问权限",
+  modeAcceptEdits: "接受编辑",
+  modeAcceptEditsHint: "自动批准文件编辑",
+  modeAuto: "自动审核",
+  modeAutoHint: "后台 classifier 审查",
+  modeDontAsk: "拒绝未批",
+  modeDontAskHint: "静默拒绝未批准工具",
   modePlan: "Plan",
   modePlanHint: "先规划再改代码",
-  modeAsk: "Ask",
-  modeAskHint: "只读问答",
+  modeGroupApproval: "审批策略",
+  modeGroupWorkflow: "工作流",
+  modeBypassActive: "已全部放行",
   effort: "力度",
   tokenUsage: "上下文 tokens：已用 {used} / 窗口 {total}",
   placeholderReady: "描述任务…  / 命令  ·  @ 文件",
