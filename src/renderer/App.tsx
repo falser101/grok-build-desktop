@@ -1779,6 +1779,57 @@ const TimelineRow = memo(function TimelineRow({
   if (item.kind === "tool") {
     return <ToolCard item={item} m={m} />;
   }
+  if (item.kind === "goal_action") {
+    const running = item.status === "running";
+    // Badge label per verb — mirrors `.compact-badge.mode-{auto,manual}`
+    // but scoped to the goal action namespace (`mode-pause/resume/clear`).
+    const badgeText =
+      item.verb === "pause"
+        ? m.goalActionBadgePause
+        : item.verb === "resume"
+          ? m.goalActionBadgeResume
+          : m.goalActionBadgeClear;
+    // Title: three running labels, three completed labels, plus shared
+    // failed / cancelled copy. `failed` surfaces the message so the user
+    // can see *why* the prompt RPC didn't land.
+    const titleText = (() => {
+      if (running) {
+        if (item.verb === "pause") return m.goalActionTitlePauseRunning;
+        if (item.verb === "resume") return m.goalActionTitleResumeRunning;
+        return m.goalActionTitleClearRunning;
+      }
+      if (item.status === "failed") {
+        return item.message
+          ? `${m.goalActionFailed}: ${item.message}`
+          : m.goalActionFailed;
+      }
+      if (item.status === "cancelled") return m.goalActionCancelled;
+      if (item.verb === "pause") return m.goalActionTitlePauseDone;
+      if (item.verb === "resume") return m.goalActionTitleResumeDone;
+      return m.goalActionTitleClearDone;
+    })();
+    // Reuse the compact-card chrome verbatim so this card visually
+    // matches `/compact` receipts. The `.goal-action` modifier is
+    // reserved for future per-verb tints (see styles.css).
+    return (
+      <div
+        className={`compact-card goal-action status-${item.status}${running ? " is-running" : ""}`}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="compact-card-row">
+          <span className={`compact-badge mode-${item.verb}`}>{badgeText}</span>
+          <span className="compact-title">{titleText}</span>
+          {running ? <span className="compact-spinner" aria-hidden /> : null}
+        </div>
+        {running ? (
+          <div className="compact-progress" aria-hidden>
+            <div className="compact-progress-bar" />
+          </div>
+        ) : null}
+      </div>
+    );
+  }
   return null;
 });
 

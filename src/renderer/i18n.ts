@@ -309,6 +309,22 @@ export interface Messages {
   goalActionPause: string;
   goalActionResume: string;
   goalActionClear: string;
+  /** Ephemeral `goal_action` card in the timeline (mirrors
+   *  `.compact-card` shape). `…Badge*` is the small badge label
+   *  next to the title; `…Running` is shown while the prompt RPC is
+   *  in flight; `…Done` is the post-completion receipt copy. The
+   *  card stays in the timeline after completion (no fade-out). */
+  goalActionBadgePause: string;
+  goalActionBadgeResume: string;
+  goalActionBadgeClear: string;
+  goalActionTitlePauseRunning: string;
+  goalActionTitleResumeRunning: string;
+  goalActionTitleClearRunning: string;
+  goalActionTitlePauseDone: string;
+  goalActionTitleResumeDone: string;
+  goalActionTitleClearDone: string;
+  goalActionFailed: string;
+  goalActionCancelled: string;
   cancel: string;
   send: string;
   /** Composer placeholder while a turn is running. */
@@ -1001,6 +1017,17 @@ const en: Messages = {
   goalActionPause: "Pause",
   goalActionResume: "Resume",
   goalActionClear: "Clear",
+  goalActionBadgePause: "Pause",
+  goalActionBadgeResume: "Resume",
+  goalActionBadgeClear: "Clear",
+  goalActionTitlePauseRunning: "Pausing goal…",
+  goalActionTitleResumeRunning: "Resuming goal…",
+  goalActionTitleClearRunning: "Clearing goal…",
+  goalActionTitlePauseDone: "Goal paused",
+  goalActionTitleResumeDone: "Goal resumed",
+  goalActionTitleClearDone: "Goal cleared",
+  goalActionFailed: "Action failed",
+  goalActionCancelled: "Action cancelled",
   cancel: "Cancel",
   send: "Send",
   queueTitle: "Queued messages",
@@ -1677,6 +1704,17 @@ const zh: Messages = {
   goalActionPause: "暂停",
   goalActionResume: "恢复",
   goalActionClear: "清除",
+  goalActionBadgePause: "暂停",
+  goalActionBadgeResume: "恢复",
+  goalActionBadgeClear: "清除",
+  goalActionTitlePauseRunning: "正在暂停目标…",
+  goalActionTitleResumeRunning: "正在恢复目标…",
+  goalActionTitleClearRunning: "正在清除目标…",
+  goalActionTitlePauseDone: "目标已暂停",
+  goalActionTitleResumeDone: "目标已恢复",
+  goalActionTitleClearDone: "目标已清除",
+  goalActionFailed: "操作失败",
+  goalActionCancelled: "操作已取消",
   cancel: "取消",
   send: "发送",
   queueTitle: "排队消息",

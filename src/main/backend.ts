@@ -286,6 +286,13 @@ interface SessionRuntime {
   replaying: boolean;
   compacting: boolean;
   compactTimelineId: string | null;
+  /**
+   * Timeline id of the most recently-pushed `goal_action` card, set
+   * when the user triggers `/goal (pause|resume|clear)` and cleared
+   * once that card transitions out of `running`. Mirrors the
+   * `compactTimelineId` pattern.
+   */
+  goalActionTimelineId: string | null;
   streamingAssistantId: string | null;
   streamingThoughtId: string | null;
   suppressStreamingAfterCancel: boolean;
@@ -325,6 +332,7 @@ function emptyRuntime(sessionId: string, cwd: string): SessionRuntime {
     replaying: false,
     compacting: false,
     compactTimelineId: null,
+    goalActionTimelineId: null,
     streamingAssistantId: null,
     streamingThoughtId: null,
     suppressStreamingAfterCancel: false,
@@ -1212,6 +1220,11 @@ export class AgentBackend {
   private replaying = false;
   private compacting = false;
   private compactTimelineId: string | null = null;
+  /** Mirror of {@link compactTimelineId} but for the ephemeral
+   *  `goal_action` card. Set by `beginGoalAction`, cleared by
+   *  `finishGoalAction`. Survives across the focused-session window
+   *  so a mid-flight cancel / session switch still finishes the card. */
+  private goalActionTimelineId: string | null = null;
   private streamingAssistantId: string | null = null;
   private streamingThoughtId: string | null = null;
   /**
@@ -1550,6 +1563,7 @@ export class AgentBackend {
       replaying: this.replaying,
       compacting: this.compacting,
       compactTimelineId: this.compactTimelineId,
+      goalActionTimelineId: this.goalActionTimelineId,
       streamingAssistantId: this.streamingAssistantId,
       streamingThoughtId: this.streamingThoughtId,
       suppressStreamingAfterCancel: this.suppressStreamingAfterCancel,
@@ -1720,6 +1734,7 @@ export class AgentBackend {
     this.replaying = false;
     this.compacting = false;
     this.compactTimelineId = null;
+    this.goalActionTimelineId = null;
     this.streamingAssistantId = null;
     this.streamingThoughtId = null;
     this.clearReopenableThought();
@@ -1838,6 +1853,7 @@ export class AgentBackend {
           replaying: this.replaying,
           compacting: this.compacting,
           compactTimelineId: this.compactTimelineId,
+          goalActionTimelineId: this.goalActionTimelineId,
           streamingAssistantId: this.streamingAssistantId,
           streamingThoughtId: this.streamingThoughtId,
           suppressStreamingAfterCancel: this.suppressStreamingAfterCancel,
@@ -2594,6 +2610,7 @@ export class AgentBackend {
     this.streamingThoughtId = null;
     this.clearReopenableThought();
     this.compactTimelineId = null;
+    this.goalActionTimelineId = null;
     this.compacting = false;
     this.tokensUsed = undefined;
     // Only drop permissions for the focused session — keep other sessions' queues.
@@ -2670,6 +2687,47 @@ export class AgentBackend {
     }
     this.compactTimelineId = null;
     this.emitSnapshot();
+  }
+
+  /** Push a `goal_action` card into the timeline mirroring the user's
+   *  intent to run `/goal (pause|resume|clear)`. Called from
+   *  `sendPrompt` after detecting the verb so the user sees an
+   *  immediate visual receipt (like `/compact`'s running card).
+   *  Status starts as `running` and flips to `completed` /
+   *  `failed` / `cancelled` via `finishGoalAction`.
+   *
+   *  We always push a fresh id (no coalescing): a Pause issued while
+   *  a previous Resume is still in flight should be a separate card.
+   *  If a stale card is still tracked, transition it to `cancelled`
+   *  first so the timeline doesn't leak an unclosed running entry. */
+  private beginGoalAction(verb: "pause" | "resume" | "clear"): string {
+    if (this.goalActionTimelineId) {
+      this.finishGoalAction("cancelled", "superseded by newer action");
+    }
+    const id = newId("goalact");
+    this.goalActionTimelineId = id;
+    this.pushTimeline({ id, kind: "goal_action", verb, status: "running" });
+    return id;
+  }
+
+  private finishGoalAction(
+    status: "completed" | "failed" | "cancelled",
+    message?: string,
+  ): void {
+    const id = this.goalActionTimelineId;
+    if (!id) return;
+    this.updateTimeline(id, (item) =>
+      item.kind === "goal_action"
+        ? {
+            ...item,
+            status,
+            message: message ?? item.message,
+          }
+        : item,
+    );
+    this.goalActionTimelineId = null;
+    // No emitSnapshot here — callers (sendPrompt success path,
+    // cancel path, finally fallback) typically emit their own.
   }
 
   /** Mark open stream bubbles as finished and drop stream tracking ids. */
@@ -3297,6 +3355,7 @@ export class AgentBackend {
     this.replaying = false;
     this.compacting = false;
     this.compactTimelineId = null;
+    this.goalActionTimelineId = null;
     this.streamingAssistantId = null;
     this.streamingThoughtId = null;
     this.clearReopenableThought();
@@ -3336,6 +3395,7 @@ export class AgentBackend {
       rt.replaying = false;
       rt.compacting = false;
       rt.compactTimelineId = null;
+      rt.goalActionTimelineId = null;
       rt.streamingAssistantId = null;
       rt.streamingThoughtId = null;
     }
@@ -3712,6 +3772,7 @@ export class AgentBackend {
       this.inThinkTag = false;
       this.thinkHold = "";
       this.compactTimelineId = null;
+      this.goalActionTimelineId = null;
       this.compacting = false;
       this.sessionMode = "default";
       this.sessionTitle =
@@ -5547,6 +5608,18 @@ const streaming = !this.replaying && this.activity === "working";
       this.beginCompact("manual");
     }
 
+    // /goal (pause|resume|clear): emit an ephemeral `goal_action`
+    // card so the user gets a visual receipt before the shell's
+    // `GoalUpdated` notification lands. Same idiom as compact above.
+    const goalVerbMatch = /^\/goal\s+(pause|resume|clear)\s*$/i.exec(trimmed);
+    const goalVerb =
+      goalVerbMatch && imageBlocks.length === 0
+        ? (goalVerbMatch[1].toLowerCase() as "pause" | "resume" | "clear")
+        : null;
+    if (goalVerb) {
+      this.beginGoalAction(goalVerb);
+    }
+
     this.markRuntimeHydrated(promptSessionId, true);
     // A new turn starts — clear any terminal stain from the previous turn.
     this.lastTurnResult = undefined;
@@ -5607,6 +5680,15 @@ const streaming = !this.replaying && this.activity === "working";
         if (isManualCompact && this.compacting) {
           this.finishCompact("completed", { mode: "manual" });
         }
+        // Close the goal_action receipt card started in beginGoalAction.
+        // The shell's actual `goalState.status` flips asynchronously via
+        // a subsequent `GoalUpdated` notification — that path goes
+        // through `applyGoalUpdateToRuntime` and updates the goal chip.
+        // This card just records "the prompt was accepted"; it stays in
+        // the timeline as a visual receipt (no fade-out, per UX spec).
+        if (goalVerb && this.goalActionTimelineId) {
+          this.finishGoalAction("completed");
+        }
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -5617,6 +5699,15 @@ const streaming = !this.replaying && this.activity === "working";
             mode: "manual",
             message: cancelled ? undefined : message,
           });
+        }
+        // Mark the goal_action receipt card failed/cancelled. Same
+        // cancel heuristic as the compact branch above.
+        if (goalVerb && this.goalActionTimelineId) {
+          const cancelled = /cancel/i.test(message);
+          this.finishGoalAction(
+            cancelled ? "cancelled" : "failed",
+            cancelled ? undefined : message,
+          );
         }
         this.pushTimeline({
           id: newId("sys"),
@@ -5675,6 +5766,20 @@ const streaming = !this.replaying && this.activity === "working";
         // Prompt settled while a compact card is still open (cancel / missed event).
         if (this.compacting) {
           this.finishCompact(isManualCompact ? "cancelled" : "completed");
+        }
+        // Same defensive fallback for the goal_action receipt card.
+        // If neither the success path nor the catch block finished it
+        // (e.g. early return from the absorbed-by-stream branch above),
+        // close it here so the timeline doesn't leak a running entry.
+        if (goalVerb && this.goalActionTimelineId) {
+          this.finishGoalAction(
+            turnError
+              ? /cancel/i.test(turnError.message)
+                ? "cancelled"
+                : "failed"
+              : "completed",
+            turnError?.message,
+          );
         }
       });
       // Only the focused session needs a full conversation snapshot. A parked
@@ -5853,6 +5958,7 @@ const streaming = !this.replaying && this.activity === "working";
           replaying: this.replaying,
           compacting: this.compacting,
           compactTimelineId: this.compactTimelineId,
+          goalActionTimelineId: this.goalActionTimelineId,
           streamingAssistantId: this.streamingAssistantId,
           streamingThoughtId: this.streamingThoughtId,
           suppressStreamingAfterCancel: this.suppressStreamingAfterCancel,

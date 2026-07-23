@@ -3730,6 +3730,42 @@ body.is-resizing-files-tree * {
   }
 }
 
+/* ── Goal action receipt card ────────────────────────
+ * Reuses the `.compact-card` chrome verbatim (status-driven colors,
+ * spinner, progress bar). The per-verb tints below are intentionally
+ * light — the user's mental model is "this is a compact card, but
+ * for a goal action". When status flips to completed the card stays
+ * in the timeline (no fade-out) so the user has a visual receipt
+ * of what they did. */
+.compact-card.goal-action {
+  /* marker class for future per-verb styling; layout comes from
+     the parent .compact-card */
+}
+
+.compact-badge.mode-pause {
+  background: color-mix(in srgb, #e8b86d 22%, transparent);
+  color: #e8b86d;
+}
+
+.compact-badge.mode-resume {
+  background: color-mix(in srgb, #6bcf7f 22%, transparent);
+  color: #6bcf7f;
+}
+
+.compact-badge.mode-clear {
+  background: color-mix(in srgb, #c97aff 22%, transparent);
+  color: #c97aff;
+}
+
+/* Failed action cards mirror the failed compact-card palette so
+   the user can spot a broken prompt at a glance. The `status-failed`
+   class is on the parent .compact-card; this is a redundancy rule
+   that adds the message-styled accent specifically for goal actions
+   so it stays visually distinct from a generic system error. */
+.compact-card.goal-action.status-failed {
+  border-color: color-mix(in srgb, #e35d6a 50%, var(--border-soft));
+}
+
 /* ── Composer ──────────────────────────────────────── */
 
 .composer-wrap {

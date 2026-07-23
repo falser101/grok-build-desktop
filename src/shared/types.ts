@@ -99,6 +99,23 @@ export type TimelineItem =
       message?: string;
       createdAt?: number;
     }
+  /**
+   * Ephemeral card emitted into the timeline when the user triggers
+   * a goal-mode action (Pause / Resume / Clear). Mirrors the
+   * `.compact-card` shape — running while the prompt RPC is in
+   * flight, then transitions to completed / failed / cancelled. The
+   * completed card stays in the timeline as a visual receipt so the
+   * user can see what they did (no fade-out).
+   */
+  | {
+      id: string;
+      kind: "goal_action";
+      verb: "pause" | "resume" | "clear";
+      status: "running" | "completed" | "failed" | "cancelled";
+      /** Failure reason when status === "failed". */
+      message?: string;
+      createdAt?: number;
+    }
   | { id: string; kind: "system"; text: string; createdAt?: number };
 
 /**
