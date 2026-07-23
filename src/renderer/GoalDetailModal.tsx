@@ -174,7 +174,11 @@ export function GoalDetailModal({
                     className={`goal-detail-todo status-${t.status}`}
                   >
                     <span className="goal-detail-todo-icon" aria-hidden>
-                      {todoIcon(t.status)}
+                      {t.status === "in_progress" ? (
+                        <span className="goal-detail-todo-spinner" />
+                      ) : (
+                        todoIcon(t.status)
+                      )}
                     </span>
                     <span className="goal-detail-todo-text">{t.content}</span>
                   </li>
@@ -241,7 +245,8 @@ export function GoalDetailModal({
 function todoIcon(status: string): string {
   switch (status) {
     case "in_progress":
-      return "▶";
+      // Spinner is a CSS element (`.goal-detail-todo-spinner`), not a glyph.
+      return "";
     case "completed":
       return "✓";
     case "cancelled":

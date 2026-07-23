@@ -16,10 +16,12 @@ import {
 } from "react";
 import type {
   AccountStatus,
+  AgentActivity,
   AppSnapshot,
   AskUserQuestionResponse,
   ModelConfigKeyIndex,
   ModelInfo,
+  NeedsInputReason,
   PathSuggestion,
   PermissionOptionKind,
   PermissionRequestUi,
@@ -27,11 +29,11 @@ import type {
   PromptAttachment,
   ProviderUsageResult,
   SessionModeId,
-  SessionRunStatus,
   SessionSearchHit,
   SessionSummary,
   TimelineItem,
 } from "@shared/types";
+import { isBusyLike, isTerminal } from "@shared/types";
 import type { Messages } from "./i18n";
 import { modeOptions as computeModeOptions } from "./modeOptions";
 import { localizeEffort } from "./i18n";
@@ -85,7 +87,7 @@ const initial: AppSnapshot = {
   availableCommands: [],
   sessionMode: "default",
   acceptsImages: true,
-  busy: false,
+  activity: "idle",
   alwaysApprove: false,
   autoTrustNewSessions: false,
   todos: [],
@@ -753,6 +755,80 @@ function modeOptions(m: Messages) {
   // should import from the module directly so the sync-with-backend
   // contract test can read a single source of truth.
   return computeModeOptions(m);
+}
+
+/**
+ * Inline-SVG icon for each session mode shown in the mode-selection
+ * dropdown. Stroked (line-art) to match the rest of the app.
+ *
+ *   default          → Agent        — shield-question ("review each")
+ *   acceptEdits      → Accept edits — pencil
+ *   auto             → Auto class.  — sparkles
+ *   dontAsk          → Deny unknown — circle with diagonal slash
+ *   bypassPermissions→ Bypass       — shield with warning (destructive)
+ *   plan             → Plan         — clipboard with list
+ */
+function ModeOptionIcon({ id }: { id: SessionModeId }) {
+  const svgProps = {
+    width: 16,
+    height: 16,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.75,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true as const,
+  };
+  switch (id) {
+    case "default":
+      return (
+        <svg {...svgProps}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M9.5 10a2.5 2.5 0 0 1 5 .3c-.2 1.4-2.5 1.8-2.5 3.2" />
+          <circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "acceptEdits":
+      return (
+        <svg {...svgProps}>
+          <path d="M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4Z" />
+          <path d="M14 6l4 4" />
+        </svg>
+      );
+    case "auto":
+      return (
+        <svg {...svgProps}>
+          <path d="M12 3l1.6 3.6L17 8.2l-3.4 1.6L12 13.4l-1.6-3.6L7 8.2l3.4-1.6Z" />
+          <path d="M18.5 14l.7 1.5L20.7 16l-1.5.7L18.5 18.2l-.7-1.5L16.3 16l1.5-.7Z" />
+        </svg>
+      );
+    case "dontAsk":
+      return (
+        <svg {...svgProps}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M6 6l12 12" />
+        </svg>
+      );
+    case "bypassPermissions":
+      return (
+        <svg {...svgProps}>
+          <path d="M12 3l-7 3.5v5.2c0 4.3 2.9 8.2 7 9.3 4.1-1.1 7-5 7-9.3V6.5Z" />
+          <path d="M12 9v4" />
+          <circle cx="12" cy="16" r="0.6" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    case "plan":
+      return (
+        <svg {...svgProps}>
+          <rect x="6" y="4" width="12" height="17" rx="2" />
+          <path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1" />
+          <path d="M9 10h6M9 14h6M9 18h4" />
+        </svg>
+      );
+    default:
+      return null;
+  }
 }
 
 function projectFromCwd(cwd: string): string {
@@ -1567,18 +1643,20 @@ const TimelineRow = memo(function TimelineRow({
         data-prev-count={previewableImages.length}
         data-chips-count={fileChips.length}
       >
+        {/* Images sit outside the bubble, above it — keeps the bubble
+            compact and the thumbnails aligned to the right edge. */}
+        {previewableImages.length > 0 ? (
+          <div className="msg-attachments msg-attachments-outside">
+            {previewableImages.map((a) => (
+              <UserImageThumb
+                key={a.id}
+                attachment={a}
+                onOpenLightbox={onOpenLightbox}
+              />
+            ))}
+          </div>
+        ) : null}
         <div className="msg-bubble">
-          {previewableImages.length > 0 ? (
-            <div className="msg-attachments">
-              {previewableImages.map((a) => (
-                <UserImageThumb
-                  key={a.id}
-                  attachment={a}
-                  onOpenLightbox={onOpenLightbox}
-                />
-              ))}
-            </div>
-          ) : null}
           {fileChips.length > 0 ? (
             <div className="msg-attachments msg-attachments-files">
               {fileChips.map((a) => (
@@ -1605,34 +1683,34 @@ const TimelineRow = memo(function TimelineRow({
           <div className="msg-actions">
             <MsgCopyButton item={item} m={m} />
           </div>
-          {isGoalCommand ? (
-            <div className="user-msg-goal-badge" aria-label={m.goalMessageBadge}>
-              <span className="user-msg-goal-badge-icon" aria-hidden="true">
-                🎯
-              </span>
-              <span>{m.goalMessageBadge}</span>
-            </div>
-          ) : null}
-          {isLoopCommand ? (
-            <div
-              className="user-msg-loop-badge"
-              aria-label={m.loopMessageBadge.replace(
+        </div>
+        {/* Goal / loop badges sit outside the bubble, below it.
+            i18n text already includes the icon glyph — no duplicate
+            `<span className="...-icon">` needed. */}
+        {isGoalCommand ? (
+          <div className="user-msg-goal-badge" aria-label={m.goalMessageBadge}>
+            <span>{m.goalMessageBadge}</span>
+          </div>
+        ) : null}
+        {isLoopCommand ? (
+          <div
+            className="user-msg-loop-badge"
+            aria-label={m.loopMessageBadge.replace(
+              "{interval}",
+              item.loopInterval || "5m",
+            )}
+          >
+            <span className="user-msg-loop-badge-icon" aria-hidden="true">
+              ⏱
+            </span>
+            <span>
+              {m.loopMessageBadge.replace(
                 "{interval}",
                 item.loopInterval || "5m",
               )}
-            >
-              <span className="user-msg-loop-badge-icon" aria-hidden="true">
-                ⏱
-              </span>
-              <span>
-                {m.loopMessageBadge.replace(
-                  "{interval}",
-                  item.loopInterval || "5m",
-                )}
-              </span>
-            </div>
-          ) : null}
-        </div>
+            </span>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -1940,40 +2018,71 @@ function newAttId(): string {
 }
 
 function sessionStatusLabel(
-  status: SessionRunStatus | undefined,
+  status: AgentActivity | undefined,
+  reason: NeedsInputReason | undefined,
   m: Messages,
 ): string | undefined {
   if (!status || status === "idle") return undefined;
-  if (status === "running") return m.sessionStatusRunning;
+  if (status === "working") return m.sessionStatusWorking;
   if (status === "loading") return m.sessionStatusLoading;
-  if (status === "needs_question") return m.sessionStatusNeedsQuestion;
-  if (status === "needs_permission") return m.sessionStatusNeedsPermission;
-  if (status === "needs_trust") return m.sessionStatusNeedsTrust;
+  if (status === "needsInput") {
+    if (reason === "permission") return m.needsInputReasonPermission;
+    if (reason === "question") return m.needsInputReasonQuestion;
+    if (reason === "trust") return m.needsInputReasonTrust;
+    if (reason === "plan") return m.needsInputReasonPlan;
+    return m.sessionStatusNeedsInput;
+  }
+  if (status === "completed") return m.sessionStatusCompleted;
+  if (status === "failed") return m.sessionStatusFailed;
+  if (status === "cancelled") return m.sessionStatusCancelled;
+  if (status === "blocked") return m.sessionStatusBlocked;
   return undefined;
 }
 
 function SessionStatusIcon({
   status,
+  reason,
   label,
+  isFocused,
 }: {
-  status: SessionRunStatus | undefined;
+  status: AgentActivity | undefined;
+  reason?: NeedsInputReason;
   label?: string;
+  /** When true (session is the one the user is viewing), terminal stains
+   *  are suppressed — the user clicked the session, so the notification
+   *  has been "seen". */
+  isFocused?: boolean;
 }) {
   if (!status || status === "idle") return null;
-  if (
-    status === "needs_permission" ||
-    status === "needs_question" ||
-    status === "needs_trust"
-  ) {
+  if (status === "needsInput") {
+    // plan 单独配色(蓝灰),与 permission(橙)/question(紫)/trust(黄)区分
     const variant =
-      status === "needs_question"
+      reason === "question"
         ? "question"
-        : status === "needs_trust"
+        : reason === "trust"
           ? "trust"
-          : "";
+          : reason === "plan"
+            ? "plan"
+            : reason === "permission"
+              ? "permission"
+              : "";
     return (
       <span
         className={`session-status-dot${variant ? ` ${variant}` : ""}`}
+        title={label}
+        aria-label={label}
+        role="status"
+      />
+    );
+  }
+  // Terminal stains (completed/failed/cancelled/blocked):
+  // - Focused session → user clicked in, clear the notification
+  // - Unfocused session → pulsing dot to alert user something finished
+  if (isTerminal(status)) {
+    if (isFocused) return null;
+    return (
+      <span
+        className={`session-status-dot terminal ${status}`}
         title={label}
         aria-label={label}
         role="status"
@@ -1988,6 +2097,132 @@ function SessionStatusIcon({
       role="status"
     />
   );
+}
+
+/**
+ * Header status badge for the focused session.
+ *
+ * Aligned with TUI `RowState` — see `AgentActivity`. Renders a small
+ * animated dot or ring next to the connection state so the user can
+ * tell at a glance whether the agent is working, loading history,
+ * waiting for input, or has just finished a turn.
+ *
+ * Terminal stains (completed/failed/cancelled/blocked) auto-fade after
+ * the matching duration (2s for success/cancel, 5s for failure/blocked)
+ * without mutating `snap.activity` — purely renderer-local.
+ */
+function AgentActivityBadge({
+  activity,
+  reason,
+  m,
+}: {
+  activity: AgentActivity;
+  reason?: NeedsInputReason;
+  m: Messages;
+}) {
+  // Auto-fade duration per terminal state (ms).
+  const FADE_MS: Partial<Record<AgentActivity, number>> = {
+    completed: 2000,
+    cancelled: 2000,
+    failed: 5000,
+    blocked: 5000,
+  };
+
+  const [faded, setFaded] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Prevent re-showing terminal stains on mount (session switch back).
+  // When the component mounts with a terminal activity, it's a "stale"
+  // stain from the previous time the user had this session open; the
+  // real turn finished while the user was elsewhere. Skip it entirely.
+  // When activity *transitions* to terminal while already mounted
+  // (fresh turn finish while user is watching), show the badge normally.
+  const wasMountedWithNonTerminal = useRef(false);
+  useEffect(() => {
+    if (!isTerminal(activity)) {
+      wasMountedWithNonTerminal.current = true;
+    }
+  }, [activity]);
+
+  // Stale terminal stain on mount → hide.
+  if (!wasMountedWithNonTerminal.current && isTerminal(activity)) {
+    return null;
+  }
+
+  useEffect(() => {
+    // Any activity change resets the fade and clears any pending timer.
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    const fadeMs = FADE_MS[activity];
+    if (fadeMs === undefined) {
+      // Live state — never fade (idle/working/loading/needsInput).
+      setFaded(false);
+      return;
+    }
+    // Terminal stain — show immediately, fade after `fadeMs`.
+    setFaded(false);
+    timerRef.current = setTimeout(() => {
+      setFaded(true);
+      timerRef.current = null;
+    }, fadeMs);
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [activity]);
+
+  if (faded) return null;
+
+  // idle → no badge (only connection state is shown)
+  if (activity === "idle") return null;
+
+  const label = sessionStatusLabel(activity, reason, m);
+
+  // Pick class + glyph per activity.
+  let cls = "agent-activity-badge";
+  let glyph: ReactNode = null;
+
+  if (activity === "working") {
+    cls += " working";
+    glyph = <span className="badge-dot" aria-hidden />;
+  } else if (activity === "loading") {
+    cls += " loading";
+    glyph = <span className="badge-ring" aria-hidden />;
+  } else if (activity === "needsInput") {
+    cls += ` needs-input ${reason ?? "permission"}`;
+    glyph = <span className="badge-glyph" aria-hidden>{glyphForReason(reason)}</span>;
+  } else {
+    // Terminal stains — render as small static glyph + label.
+    cls += ` terminal ${activity}`;
+    glyph = <span className="badge-glyph" aria-hidden>{glyphForTerminal(activity)}</span>;
+  }
+
+  return (
+    <span className={cls} title={label} role="status" aria-label={label}>
+      {glyph}
+      {label ? <span className="badge-label">{label}</span> : null}
+    </span>
+  );
+}
+
+function glyphForReason(reason: NeedsInputReason | undefined): string {
+  if (reason === "permission") return "!";
+  if (reason === "question") return "?";
+  if (reason === "trust") return "🔒";
+  if (reason === "plan") return "☑";
+  return "!";
+}
+
+function glyphForTerminal(activity: AgentActivity): string {
+  if (activity === "completed") return "✓";
+  if (activity === "failed") return "✗";
+  if (activity === "cancelled") return "—";
+  if (activity === "blocked") return "⊘";
+  return "•";
 }
 
 /**
@@ -3305,7 +3540,11 @@ export function App() {
       setLoopIntervalMenuOpen(false);
     }
     if (snap.replaying) {
-      stickToBottomRef.current = true;
+      // Prevent auto-scroll after history replay completes —
+      // the user should see the loaded conversation at rest, not
+      // a rapid scroll to the bottom.
+      stickToBottomRef.current = false;
+      return;
     }
     if (!stickToBottomRef.current) return;
     if (snap.timeline.length === 0 && !snap.replaying) return;
@@ -3321,7 +3560,7 @@ export function App() {
     scheduleScrollPin();
   }, [
     snap.timeline.length,
-    snap.busy,
+    snap.activity,
     snap.replaying,
     snap.sessionId,
     view,
@@ -3588,10 +3827,12 @@ export function App() {
     snap.connection === "starting" ||
     snap.connection === "connecting" ||
     snap.replaying ||
-    snap.busy ||
+    isBusyLike(snap.activity) ||
     Boolean(snap.compacting);
 
-  /** Top-left new chat: empty workspace until the user picks one. */
+  /** Top-left new chat: prepare empty chat, then pop folder picker so
+   *  the user chooses a workspace. `prepareNewChat()` always clears
+   *  `snap.workspace` — without the picker the user is stuck deadlocked. */
   const onNewSession = useCallback(async () => {
     setLocalError(null);
     setView("chat");
@@ -3604,6 +3845,10 @@ export function App() {
     });
     try {
       await window.desktop.prepareNewChat();
+      // `prepareNewChat()` clears workspace → deadlock without a picker.
+      const folder = await window.desktop.pickFolder();
+      if (!folder) return;
+      await window.desktop.newSession(folder);
       contentEditableRef.current?.focus();
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
@@ -3881,7 +4126,6 @@ export function App() {
     if (snap.sessionId) return true;
     if (!snap.workspace) {
       setLocalError(m.chooseWorkspaceFirst);
-      setWsMenuOpen(true);
       return false;
     }
     await window.desktop.newSession(snap.workspace);
@@ -4089,8 +4333,12 @@ export function App() {
     }
   }
 
+  /** Stable ref so onInput never calls a stale syncContentEditable closure. */
+  const syncContentEditableRef = useRef(syncContentEditable);
+  syncContentEditableRef.current = syncContentEditable;
+
   const handleContentEditableInput = useCallback(() => {
-    syncContentEditable();
+    syncContentEditableRef.current();
   }, []);
 
   const rememberPrompt = useCallback((text: string) => {
@@ -4343,7 +4591,7 @@ export function App() {
             }
           : undefined;
       // Mid-turn on this session: park payload, cancel, drain on idle.
-      if (snap.busy && sid && sid === snap.sessionId) {
+      if (isBusyLike(snap.activity) && sid && sid === snap.sessionId) {
         pendingImmediateRef.current = {
           sessionId: sid,
           text,
@@ -4367,7 +4615,7 @@ export function App() {
         setLocalError(err instanceof Error ? err.message : String(err));
       }
     },
-    [snap.sessionId, snap.busy, dispatchAgentPrompt],
+    [snap.sessionId, snap.activity, dispatchAgentPrompt],
   );
 
   const onSend = useCallback(async () => {
@@ -4419,7 +4667,7 @@ export function App() {
           setAttachments([]);
           if (!follow) return;
           rememberPrompt(follow);
-          if (snap.busy && snap.sessionId) {
+          if (isBusyLike(snap.activity) && snap.sessionId) {
             enqueuePrompt(snap.sessionId, follow, []);
             return;
           }
@@ -4460,7 +4708,7 @@ export function App() {
     if (frozen) clearComposerIntent();
 
     // Busy turn: queue follow-up (FIFO, auto-sends when idle).
-    if (snap.busy) {
+    if (isBusyLike(snap.activity)) {
       if (!snap.sessionId) {
         setLocalError(m.chooseWorkspaceFirst);
         return;
@@ -4490,7 +4738,7 @@ export function App() {
     snap.modelId,
     snap.workspace,
     snap.alwaysApprove,
-    snap.busy,
+    isBusyLike(snap.activity),
     snap.sessionId,
     m.chooseWorkspaceFirst,
   ]);
@@ -4641,7 +4889,7 @@ export function App() {
   // When the active session goes idle, deliver pendingImmediate then FIFO queue.
   useEffect(() => {
     if (drainLockRef.current) return;
-    if (snap.busy || snap.replaying) return;
+    if (isBusyLike(snap.activity) || snap.replaying) return;
     if (snap.connection !== "ready") return;
     const sid = snap.sessionId;
     if (!sid) return;
@@ -4710,21 +4958,13 @@ export function App() {
         : undefined;
     void run(next.text, next.attachments, next, frozen);
   }, [
-    snap.busy,
+    snap.activity,
     snap.replaying,
     snap.connection,
     snap.sessionId,
     queuesBySession,
     dispatchAgentPrompt,
   ]);
-
-  const onToggleAlwaysApprove = useCallback(async () => {
-    try {
-      await window.desktop.setAlwaysApprove(!snap.alwaysApprove);
-    } catch (err) {
-      setLocalError(err instanceof Error ? err.message : String(err));
-    }
-  }, [snap.alwaysApprove]);
 
   const onSetAlwaysApprove = useCallback(async (enabled: boolean) => {
     try {
@@ -5640,7 +5880,7 @@ export function App() {
         void onSendNow();
         return;
       }
-      if (snap.busy) {
+      if (isBusyLike(snap.activity)) {
         const text = (textareaRef.current?.value ?? draftRef.current).trim();
         if (!text && attachments.length === 0) {
           // Empty composer mid-turn → force-send top queued follow-up.
@@ -5975,10 +6215,12 @@ export function App() {
                 <span className="name">{m.searchHits}</span>
               </div>
               {searchHits.map((hit) => {
-                const hitStatus = snap.sessions.find(
+                const hitSummary = snap.sessions.find(
                   (s) => s.sessionId === hit.sessionId,
-                )?.status;
-                const statusLabel = sessionStatusLabel(hitStatus, m);
+                );
+                const hitStatus = hitSummary?.status;
+                const hitReason = hitSummary?.needsInputReason;
+                const statusLabel = sessionStatusLabel(hitStatus, hitReason, m);
                 return (
                   <button
                     key={`hit-${hit.sessionId}`}
@@ -6005,7 +6247,12 @@ export function App() {
                     }
                   >
                     <span className="session-item-row">
-                      <SessionStatusIcon status={hitStatus} label={statusLabel} />
+                      <SessionStatusIcon
+                        status={hitStatus}
+                        reason={hitReason}
+                        label={statusLabel}
+                        isFocused={hit.sessionId === snap.sessionId}
+                      />
                       <span className="session-title">
                         {hit.summary || m.untitledSession}
                       </span>
@@ -6102,7 +6349,11 @@ export function App() {
                           }`}
                           title={
                             (() => {
-                              const st = sessionStatusLabel(s.status, m);
+                              const st = sessionStatusLabel(
+                                s.status,
+                                s.needsInputReason,
+                                m,
+                              );
                               const base = s.title || m.untitledSession;
                               return st ? `${base} · ${st}` : base;
                             })()
@@ -6116,12 +6367,18 @@ export function App() {
                         >
                           <SessionStatusIcon
                             status={s.status}
-                            label={sessionStatusLabel(s.status, m)}
+                            reason={s.needsInputReason}
+                            label={sessionStatusLabel(
+                              s.status,
+                              s.needsInputReason,
+                              m,
+                            )}
+                            isFocused={s.sessionId === snap.sessionId}
                           />
                           <span className="session-title">
                             {s.title || m.untitledSession}
                           </span>
-                          {s.status === "running" || s.status === "loading" ? (
+                          {s.status === "working" || s.status === "loading" ? (
                             <span
                               className="session-cancel-btn"
                               role="button"
@@ -6533,6 +6790,13 @@ export function App() {
                 <span className="chat-pane-caret" aria-hidden>
                   ▾
                 </span>
+                {hasSession ? (
+                  <AgentActivityBadge
+                    activity={snap.activity}
+                    reason={snap.needsInputReason}
+                    m={m}
+                  />
+                ) : null}
                 {hasSession && !showHome ? (
                   <div
                     className="chat-actions-wrap"
@@ -6776,6 +7040,14 @@ export function App() {
                       {m.greeting}
                     </div>
                     <p className="hint">{m.homeHint}</p>
+                    {!snap.workspace && connectionReady ? (
+                      <button
+                        className="btn primary workspace-pick-btn"
+                        onClick={() => void onBrowseWorkspace()}
+                      >
+                        {m.workspaceBrowse}
+                      </button>
+                    ) : null}
                     {errorText ? (
                       <div className="error-card">
                         <strong>
@@ -6867,12 +7139,19 @@ export function App() {
                       </div>
                     ) : null}
                   </div>
+                ) : snap.replaying ? (
+                  <div className="session-loading-wrap">
+                    <span className="session-loading-spinner" aria-hidden />
+                    <span className="session-loading-text">
+                      {m.loadingConversation}
+                    </span>
+                  </div>
                 ) : (
                   <ChatTimeline
                     timeline={snap.timeline}
                     replaying={Boolean(snap.replaying)}
                     flashMsgId={flashMsgId}
-                    busy={Boolean(snap.busy)}
+                    busy={Boolean(isBusyLike(snap.activity))}
                     m={m}
                     bottomRef={bottomRef}
                     onOpenAtFile={handleOpenAtFile}
@@ -6914,7 +7193,17 @@ export function App() {
                 </button>
               ) : null}
               {errorText && !showHome ? (
-                <div className="composer-error">{errorText}</div>
+                <div className="composer-error">
+                  {errorText}
+                  {!snap.workspace ? (
+                    <button
+                      className="composer-error-action"
+                      onClick={() => void onBrowseWorkspace()}
+                    >
+                      {m.workspaceBrowse}
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
               {/* Questionnaires take priority over permission prompts. */}
               {!snap.pendingQuestion && snap.pendingPermission ? (
@@ -6971,7 +7260,7 @@ export function App() {
               {/* Running-plan step pill — appears once approval has been
                   granted (or in non-plan sessions) and there is an
                   in-progress / pending todo. */}
-              {!snap.pendingPlanApproval && snap.todos?.length ? (
+              {!snap.pendingPlanApproval && snap.todos?.length && !(snap.goalState && snap.goalTodos?.length) ? (
                 <PlanProgressBubble
                   todos={snap.todos}
                   m={m}
@@ -7021,7 +7310,7 @@ export function App() {
                           String(promptQueue.length),
                         )}
                       </span>
-                      {snap.busy ? (
+                      {isBusyLike(snap.activity) ? (
                         <span className="prompt-queue-hint">
                           {m.queueHintBusy}
                         </span>
@@ -7295,7 +7584,7 @@ export function App() {
                             ? m.placeholderWaiting
                             : !hasWorkspace
                               ? m.placeholderNeedWorkspace
-                              : snap.busy
+                              : isBusyLike(snap.activity)
                                 ? m.placeholderBusy
                                 : m.placeholderReady
                         }
@@ -7462,93 +7751,54 @@ export function App() {
                           <strong>{modeLabel}</strong>
                         </button>
                         {menu === "mode" ? (
-                          <div className="dropdown mode-dropdown">
-                            {(["approval", "workflow"] as const).map(
-                              (group) => {
-                                const items = modes.filter(
-                                  (mod) => mod.group === group,
-                                );
-                                if (items.length === 0) return null;
-                                return (
-                                  <div
-                                    key={group}
-                                    className="dropdown-group"
+                          <div
+                            className="dropdown mode-dropdown"
+                            role="dialog"
+                            aria-label={m.sessionMode}
+                          >
+                            {/* Flat list — no approval/workflow split.
+                                Render every mode as a single compact row. */}
+                            {modes.map((mod) => {
+                              const isActive =
+                                mod.id === normalizedSessionMode;
+                              return (
+                                <button
+                                  key={mod.id}
+                                  type="button"
+                                  className={[
+                                    "dropdown-item",
+                                    isActive && "active",
+                                    mod.destructive && "destructive",
+                                  ].filter(Boolean).join(" ")}
+                                  aria-pressed={isActive}
+                                  onClick={() => {
+                                    void onSetMode(mod.id);
+                                    setMenu(null);
+                                  }}
+                                >
+                                  <span
+                                    className="di-icon"
+                                    aria-hidden="true"
                                   >
-                                    <div className="dropdown-group-title">
-                                      {group === "approval"
-                                        ? m.modeGroupApproval
-                                        : m.modeGroupWorkflow}
-                                    </div>
-                                    {items.map((mod) => {
-                                      const isActive =
-                                        mod.id === normalizedSessionMode;
-                                      return (
-                                        <button
-                                          key={mod.id}
-                                          type="button"
-                                          className={[
-                                            "dropdown-item",
-                                            isActive && "active",
-                                            mod.destructive && "destructive",
-                                          ].filter(Boolean).join(" ")}
-                                          aria-pressed={isActive}
-                                          onClick={() => {
-                                            void onSetMode(mod.id);
-                                            setMenu(null);
-                                          }}
-                                        >
-                                          <span className="di-text">
-                                            <span className="di-title">
-                                              {mod.label}
-                                            </span>
-                                            <span className="di-desc">
-                                              {mod.hint}
-                                            </span>
-                                          </span>
-                                          <span className="di-check" aria-hidden="true">
-                                            {isActive ? "✓" : ""}
-                                          </span>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                );
-                              },
-                            )}
+                                    <ModeOptionIcon id={mod.id} />
+                                  </span>
+                                  <span className="di-text">
+                                    <span className="di-title">
+                                      {mod.label}
+                                    </span>
+                                    <span className="di-desc">
+                                      {mod.hint}
+                                    </span>
+                                  </span>
+                                  <span className="di-check" aria-hidden="true">
+                                    {isActive ? "✓" : ""}
+                                  </span>
+                                </button>
+                              );
+                            })}
                           </div>
                         ) : null}
                       </div>
-                      <button
-                        type="button"
-                        className={`chip chip-btn always-approve-chip ${
-                          snap.alwaysApprove ? "on" : ""
-                        }`}
-                        disabled={!connectionReady}
-                        onClick={() => void onToggleAlwaysApprove()}
-                        title={m.alwaysApproveHint}
-                        aria-pressed={snap.alwaysApprove}
-                      >
-                        <span className="chip-leading-icon" aria-hidden="true">
-                          <svg
-                            width="13"
-                            height="13"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.75"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M12 3 5 6.5v5.2c0 4.3 2.9 8.2 7 9.3 4.1-1.1 7-5 7-9.3V6.5L12 3Z" />
-                            <path d="m9.2 12 1.9 1.9 3.7-3.8" />
-                          </svg>
-                        </span>
-                        <strong>
-                          {snap.alwaysApprove
-                            ? m.alwaysApproveOn
-                            : m.alwaysApproveOff}
-                        </strong>
-                      </button>
                       {/* One-shot goal / loop intent chips. */}
                       {goalActive ? (
                         <span className="chip goal-chip" title={m.goalChipHint}>
@@ -7855,7 +8105,7 @@ export function App() {
                         </div>
                       ) : null}
 
-                      {snap.busy ? (
+                      {isBusyLike(snap.activity) ? (
                         <button
                           type="button"
                           className="icon-btn stop"
@@ -7865,7 +8115,7 @@ export function App() {
                           ■
                         </button>
                       ) : null}
-                      {snap.busy &&
+                      {isBusyLike(snap.activity) &&
                       (hasDraft || attachments.length > 0) ? (
                         <button
                           type="button"
@@ -7893,7 +8143,7 @@ export function App() {
                             <path d="M5 7v10" opacity="0.45" />
                           </svg>
                         </button>
-                      ) : !snap.busy ? (
+                      ) : !isBusyLike(snap.activity) ? (
                         <button
                           type="button"
                           className="icon-btn send"

@@ -28,11 +28,14 @@ const backend = read("src/main/backend.ts");
 const app = read("src/renderer/App.tsx");
 const md = read("src/renderer/MarkdownBody.tsx");
 
-// Backend: live caret only while busy
+// Backend: live caret only while a turn is in flight. After the
+// activity-class refactor, "busy" maps to `activity === "working"`
+// (loading is intentionally excluded — caret never shows during
+// history replay).
 check(
-  "streaming gated on busy (not just !replaying)",
-  /const streaming = !this\.replaying && this\.busy/.test(backend),
-  "expected streaming = !replaying && busy",
+  "streaming gated on activity (not just !replaying)",
+  /const streaming = !this\.replaying && this\.activity === "working"/.test(backend),
+  'expected streaming = !replaying && activity === "working"',
 );
 
 // Backend: orphan sweep exists and is used by finalizeStreaming

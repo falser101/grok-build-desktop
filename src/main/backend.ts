@@ -42,11 +42,12 @@ import type {
   PromptPayload,
   SearchSessionsOptions,
   SessionModeId,
-  SessionRunStatus,
   SessionSearchHit,
   SessionSummary,
   TimelineItem,
   TodoItemUi,
+  AgentActivity,
+  NeedsInputReason,
   TodoPriority,
   TodoStatus,
   ToolDiff,
@@ -262,7 +263,26 @@ interface SessionRuntime {
   cwd: string;
   title: string;
   timeline: TimelineItem[];
+  /**
+   * DEPRECATED — replaced by `activity: AgentActivity`. Kept as a
+   * mirror of `activity === "working" || activity === "loading"`
+   * for the duration of the rename window.
+   */
   busy: boolean;
+  /**
+   * Activity classification for this session — mirrors
+   * `RendererState.activity` and the TUI `RowState`. See
+   * {@link AgentActivity}.
+   */
+  activity: AgentActivity;
+  /** Reason for `activity === "needsInput"`. */
+  needsInputReason?: NeedsInputReason;
+  /**
+   * Last terminal state (completed / failed / cancelled / blocked)
+   * from the most recent turn that landed on this session. Cleared
+   * when the next turn starts.
+   */
+  lastTurnResult?: Exclude<AgentActivity, "idle" | "working" | "loading" | "needsInput">;
   replaying: boolean;
   compacting: boolean;
   compactTimelineId: string | null;
@@ -280,6 +300,18 @@ interface SessionRuntime {
   planContent?: string;
   /** True once session/new or session/load finished (or prompt started). */
   hydrated: boolean;
+  /**
+   * Monotonically increasing turn counter for this session. Incremented
+   * each time `sendPrompt()` starts a new turn. Used by the `finally`
+   * block to detect when a newer turn has already started — analogous
+   * to TUI's shell-level `Effect::SendPromptNow` atomicity.
+   */
+  turnGeneration: number;
+  /** Goal subsystem state — persisted so the goal bubble survives
+   *  session switches. Mirrors `Backend.goalState`. */
+  goalState?: GoalStatePayload | null;
+  /** Goal-scoped todos — persisted alongside `goalState`. */
+  goalTodos: TodoItemUi[];
 }
 
 function emptyRuntime(sessionId: string, cwd: string): SessionRuntime {
@@ -289,6 +321,7 @@ function emptyRuntime(sessionId: string, cwd: string): SessionRuntime {
     title: "New session",
     timeline: [],
     busy: false,
+    activity: "idle",
     replaying: false,
     compacting: false,
     compactTimelineId: null,
@@ -300,6 +333,8 @@ function emptyRuntime(sessionId: string, cwd: string): SessionRuntime {
     toolIndex: new Map(),
     todos: [],
     hydrated: false,
+    turnGeneration: 0,
+    goalTodos: [],
   };
 }
 
@@ -1157,7 +1192,23 @@ export class AgentBackend {
   private usage?: UsageInfo;
   private timeline: TimelineItem[] = [];
   private sessions: SessionSummary[] = [];
-  private busy = false;
+  /**
+   * Activity classification for the focused session. Aligned with TUI
+   * `RowState`. See {@link AgentActivity}.
+   *
+   * `busy` / `replaying` / `compacting` on `SessionRuntime` are the
+   * canonical per-session source of truth; `activity` is derived via
+   * `classifyActive()` + `refreshActivity()` and serialized in the
+   * `AppSnapshot`.
+   */
+  private activity: AgentActivity = "idle";
+  /** Reason for `activity === "needsInput"`. */
+  private needsInputReason?: NeedsInputReason;
+  /**
+   * Last terminal state for the focused session — recorded when
+   * `sendPrompt()` finally settles, cleared when the next prompt starts.
+   */
+  private lastTurnResult?: Exclude<AgentActivity, "idle" | "working" | "loading" | "needsInput">;
   private replaying = false;
   private compacting = false;
   private compactTimelineId: string | null = null;
@@ -1206,17 +1257,8 @@ export class AgentBackend {
   /** plan.md body for the focused session. */
   private planContent?: string;
   /**
-   * Latest goal subsystem state pushed by the agent via the xAI
-   * `goal_updated` notification (sent at most 1/s). Drives the
-   * 🎯 progress bubble above the composer. Cleared on session/turn
-   * boundaries so it never shows stale state from a prior session.
-   */
-  private goalState: GoalStatePayload | null = null;
-  /**
-   * Todo checklist mirrored only while a goal is active. Survives turn
-   * boundaries (unlike `this.todos`). Cleared with the goal.
-   */
-  private goalTodos: TodoItemUi[] = [];
+  // goalState / goalTodos are now owned by SessionRuntime directly
+  // (per-session bag). See applyGoalUpdateToRuntime() and snapshot().
   /**
    * Live/parked runtimes for sessions that have been opened or are mid-turn.
    * The focused session is also mirrored on the fields above for the hot path.
@@ -1346,11 +1388,16 @@ export class AgentBackend {
       usage: this.usage ? { ...this.usage, summaryLines: [...this.usage.summaryLines] } : undefined,
       // slice is enough — Electron IPC structured-clones; avoid per-item spreads.
       timeline: this.timeline.slice(),
-      sessions: this.sessions.map((s) => ({
-        ...s,
-        status: this.sessionRunStatus(s.sessionId),
-      })),
-      busy: this.busy,
+      sessions: this.sessions.map((s) => {
+        const { activity, needsInputReason } = this.classifyActive(s.sessionId);
+        return {
+          ...s,
+          status: activity,
+          needsInputReason: activity === "needsInput" ? needsInputReason : undefined,
+        };
+      }),
+      activity: this.activity,
+      needsInputReason: this.activity === "needsInput" ? this.needsInputReason : undefined,
       compacting: this.compacting,
       binaryPath: this.binaryPath || undefined,
       agentInstallUrl: GROK_INSTALL_URL_SH_EXPORTED,
@@ -1382,45 +1429,59 @@ export class AgentBackend {
       // false, the previous turn's checklist must not linger in the UI
       // (matches codex / claude desktop behavior). plan.md on disk is
       // untouched — see planFilePath().
-      todos: this.busy ? this.todos.map((t) => ({ ...t })) : [],
-      planContent: this.busy ? this.planContent : undefined,
+      todos:
+        this.activity === "working" || this.activity === "loading"
+          ? this.todos.map((t) => ({ ...t }))
+          : [],
+      planContent:
+        this.activity === "working" || this.activity === "loading"
+          ? this.planContent
+          : undefined,
       pendingPlanApproval: this.activePlanApproval()
         ? { ...this.activePlanApproval()! }
         : undefined,
-      // Goal subsystem snapshot (from xAI `goal_updated`). Cleared on
-      // session/turn boundaries inside the handler that processes the
-      // event, so it never leaks across sessions.
-      goalState: this.goalState
-        ? {
-            goalId: this.goalState.goalId,
-            objective: this.goalState.objective,
-            status: this.goalState.status,
-            phase: this.goalState.phase,
-            currentDeliverableTitle: this.goalState.currentDeliverableTitle,
-            currentSubagentRole: this.goalState.currentSubagentRole,
-            totalDeliverables: this.goalState.totalDeliverables,
-            completedDeliverables: this.goalState.completedDeliverables,
-            tokensUsed: this.goalState.tokensUsed,
-            tokenBudget: this.goalState.tokenBudget,
-            elapsedMs: this.goalState.elapsedMs,
-            pauseMessage: this.goalState.pauseMessage,
-            lastEvent: this.goalState.lastEvent,
-            lastEventDetail: this.goalState.lastEventDetail,
-            lastEventTimestamp: this.goalState.lastEventTimestamp,
-            verifyingCompletion: this.goalState.verifyingCompletion,
-            planning: this.goalState.planning,
-            classifierRunsAttempted: this.goalState.classifierRunsAttempted,
-            classifierMaxRuns: this.goalState.classifierMaxRuns,
-            updatedAt: this.goalState.updatedAt,
-          }
-        : undefined,
-      // Goal-scoped todos: always exposed while a goal is active (not gated on busy).
-      goalTodos:
-        this.goalState && this.goalTodos.length > 0
-          ? this.goalTodos.map((t) => ({ ...t }))
-          : this.goalState
+      // Goal subsystem snapshot — read directly from the active session's
+      // SessionRuntime (per-session, not a global singleton). Mirrors TUI's
+      // per-AgentView.goal_state pattern.
+      goalState: (() => {
+        const rt = this.sessionId ? this.runtimes.get(this.sessionId) : undefined;
+        const gs = rt?.goalState;
+        return gs
+          ? {
+              goalId: gs.goalId,
+              objective: gs.objective,
+              status: gs.status,
+              phase: gs.phase,
+              currentDeliverableTitle: gs.currentDeliverableTitle,
+              currentSubagentRole: gs.currentSubagentRole,
+              totalDeliverables: gs.totalDeliverables,
+              completedDeliverables: gs.completedDeliverables,
+              tokensUsed: gs.tokensUsed,
+              tokenBudget: gs.tokenBudget,
+              elapsedMs: gs.elapsedMs,
+              pauseMessage: gs.pauseMessage,
+              lastEvent: gs.lastEvent,
+              lastEventDetail: gs.lastEventDetail,
+              lastEventTimestamp: gs.lastEventTimestamp,
+              verifyingCompletion: gs.verifyingCompletion,
+              planning: gs.planning,
+              classifierRunsAttempted: gs.classifierRunsAttempted,
+              classifierMaxRuns: gs.classifierMaxRuns,
+              updatedAt: gs.updatedAt,
+            }
+          : undefined;
+      })(),
+      // Goal-scoped todos: read from active session's runtime.
+      goalTodos: (() => {
+        const rt = this.sessionId ? this.runtimes.get(this.sessionId) : undefined;
+        const gs = rt?.goalState;
+        const gt = rt?.goalTodos;
+        return gs && gt && gt.length > 0
+          ? gt.map((t) => ({ ...t }))
+          : gs
             ? []
-            : undefined,
+            : undefined;
+      })(),
       installerStatus: this.installerStatus,
       installerChannel: this.installerChannel,
       lastUpdateCheckAt: this.lastUpdateCheckAt,
@@ -1475,7 +1536,17 @@ export class AgentBackend {
       cwd: this.workspace ?? prev?.cwd ?? "",
       title: this.sessionTitle ?? prev?.title ?? "Session",
       timeline: this.timeline,
-      busy: this.busy,
+      // `busy` is the canonical "turn-in-flight" flag, managed
+      // exclusively by `setFocusedBusy()` + `emptyRuntime()`.
+      // Do NOT derive it from `this.activity` — that creates a
+      // self-reinforcing cycle: stale activity → sync writes
+      // busy=true → classify reads busy=true → returns "working".
+      // Preserve whatever the bag already has; if the bag has
+      // never been set, default to false (idle).
+      busy: prev?.busy ?? false,
+      activity: this.activity,
+      needsInputReason: this.needsInputReason,
+      lastTurnResult: this.lastTurnResult,
       replaying: this.replaying,
       compacting: this.compacting,
       compactTimelineId: this.compactTimelineId,
@@ -1492,51 +1563,127 @@ export class AgentBackend {
       todos: this.todos,
       planContent: this.planContent,
       hydrated: prev?.hydrated ?? true,
+      turnGeneration: prev?.turnGeneration ?? 0,
+      // goalState / goalTodos are owned by SessionRuntime directly.
+      // Do NOT overwrite the bag here — goal updates are written to the
+      // bag exclusively via applyGoalUpdateToRuntime().
     });
   }
 
-  private sessionRunStatus(sessionId: string): SessionRunStatus {
-    if (
-      this.trustPromptQueue.some(
-        (e) => e.sessionId === sessionId,
-      )
-    ) {
-      return "needs_trust";
+  /**
+   * Classify a session's activity state. Aligned with TUI's
+   * `classify_top_level` / `crates/codegen/xai-grok-pager/src/views/dashboard/row.rs`.
+   *
+   * Priority (short-circuit):
+   *   1. trust / question / plan / permission  → `needsInput` (with reason)
+   *   2. `replaying`                            → `loading`
+   *   3. `busy` ∨ `compacting`                  → `working`
+   *   4. last turn terminal result              → that result (染色)
+   *   5. else                                   → `idle`
+   *
+   * Pure / no side effects — safe to call per-session in `snapshot()`
+   * without affecting `this.activity`.
+   */
+  private classifyActive(sessionId: string): {
+    activity: AgentActivity;
+    needsInputReason?: NeedsInputReason;
+  } {
+    if (this.trustPromptQueue.some((e) => e.sessionId === sessionId)) {
+      this.log("info", `[activity] classifyActive ${sessionId.slice(0, 8)} → needsInput (trust)`);
+      return { activity: "needsInput", needsInputReason: "trust" };
+    }
+    if (this.questionQueue.some((e) => e.ui.sessionId === sessionId)) {
+      this.log("info", `[activity] classifyActive ${sessionId.slice(0, 8)} → needsInput (question)`);
+      return { activity: "needsInput", needsInputReason: "question" };
     }
     if (
-      this.questionQueue.some(
-        (e) => e.ui.sessionId === sessionId,
-      )
+      this.planApprovalQueue.some((e) => e.ui.sessionId === sessionId)
     ) {
-      return "needs_question";
+      this.log("info", `[activity] classifyActive ${sessionId.slice(0, 8)} → needsInput (plan)`);
+      return { activity: "needsInput", needsInputReason: "plan" };
     }
-    if (
-      this.permissionQueue.some(
-        (e) => e.sessionId === sessionId,
-      ) ||
-      this.planApprovalQueue.some(
-        (e) => e.ui.sessionId === sessionId,
-      )
-    ) {
-      return "needs_permission";
+    if (this.permissionQueue.some((e) => e.sessionId === sessionId)) {
+      this.log("info", `[activity] classifyActive ${sessionId.slice(0, 8)} → needsInput (permission)`);
+      return { activity: "needsInput", needsInputReason: "permission" };
     }
-    const rt =
-      this.sessionId === sessionId
-        ? {
-            busy: this.busy,
-            replaying: this.replaying,
-            compacting: this.compacting,
-          }
-        : this.runtimes.get(sessionId);
-    if (!rt) return "idle";
-    if (rt.replaying) return "loading";
-    if (rt.busy || rt.compacting) return "running";
-    return "idle";
+    // Pull from the runtime bag — it's the canonical per-session store
+    // for busy / replaying / compacting / lastTurnResult, kept fresh by
+    // `syncActiveIntoRuntimes()` before every `emitSnapshot()`.
+    const rt = this.runtimes.get(sessionId);
+    if (!rt) {
+      this.log("info", `[activity] classifyActive ${sessionId.slice(0, 8)} → idle (no runtime bag)`);
+      return { activity: "idle" };
+    }
+    if (rt.replaying) {
+      this.log("info", `[activity] classifyActive ${sessionId.slice(0, 8)} → loading (replaying)`);
+      return { activity: "loading" };
+    }
+    if (rt.busy || rt.compacting) {
+      this.log(
+        "info",
+        `[activity] classifyActive ${sessionId.slice(0, 8)} → working ` +
+          `(bag.busy=${rt.busy} compacting=${rt.compacting} replaying=${rt.replaying} lastTurnResult=${rt.lastTurnResult})`,
+      );
+      return { activity: "working" };
+    }
+    const terminal = rt.lastTurnResult;
+    if (terminal) {
+      this.log("info", `[activity] classifyActive ${sessionId.slice(0, 8)} → ${terminal} (terminal stain)`);
+    } else {
+      this.log("info", `[activity] classifyActive ${sessionId.slice(0, 8)} → idle`);
+    }
+    return { activity: rt.lastTurnResult ?? "idle" };
+  }
+
+  /**
+   * Refresh `this.activity` / `this.needsInputReason` from current
+   * queues + busy + replaying + compacting + lastTurnResult. Call
+   * after any mutation that affects those, before emitting a snapshot.
+   */
+  private refreshActivity(): void {
+    if (!this.sessionId) {
+      this.log("info", `[activity] refreshActivity → idle (no sessionId)`);
+      this.activity = "idle";
+      this.needsInputReason = undefined;
+      return;
+    }
+    const { activity, needsInputReason } = this.classifyActive(this.sessionId);
+    this.log(
+      "info",
+      `[activity] refreshActivity ${this.sessionId.slice(0, 8)} → ${activity}` +
+        (needsInputReason ? ` (reason=${needsInputReason})` : ""),
+    );
+    this.activity = activity;
+    this.needsInputReason = needsInputReason;
+  }
+
+  /**
+   * Write `busy` for the focused session's runtime bag.
+   * After any call, `syncActiveIntoRuntimes()` is invoked so the next
+   * `classifyActive()` (e.g. inside `emitSnapshot()`) sees the change.
+   */
+  private setFocusedBusy(value: boolean): void {
+    if (!this.sessionId) return;
+    const rt = this.runtimes.get(this.sessionId);
+    if (rt) {
+      this.log(
+        "info",
+        `[activity] setFocusedBusy ${this.sessionId.slice(0, 8)} → ${value}`,
+      );
+      rt.busy = value;
+      // No need to also mirror into a Backend field — `rt.busy` is the
+      // canonical source for `classifyActive()`.
+    }
   }
 
   /** Capture focused session into the map, then clear focus fields. */
   private parkActiveSession(): void {
     if (!this.sessionId) return;
+    this.log(
+      "info",
+      `[activity] parkActiveSession ${this.sessionId.slice(0, 8)} ` +
+        `(was: activity=${this.activity} lastTurnResult=${this.lastTurnResult})`,
+    );
     this.syncActiveIntoRuntimes();
     // Detach field references so the parked bag keeps its own arrays/maps.
     const rt = this.runtimes.get(this.sessionId);
@@ -1559,15 +1706,22 @@ export class AgentBackend {
     this.toolIndex = new Map();
     this.todos = [];
     this.planContent = undefined;
-    this.busy = false;
+    this.setFocusedBusy(false);
+    // Reset the derived activity fields so stale values from the
+    // parked session don't leak into the next session's Backend
+    // state before the first `emitSnapshot` recomputes them.
+    this.activity = "idle";
+    this.needsInputReason = undefined;
+    this.lastTurnResult = undefined;
     this.replaying = false;
     this.compacting = false;
     this.compactTimelineId = null;
     this.streamingAssistantId = null;
     this.streamingThoughtId = null;
     this.clearReopenableThought();
-    this.goalState = null;
-    this.goalTodos = [];
+    // goalState / goalTodos are owned by SessionRuntime — no clearing needed.
+    // snapshot() reads them from the active runtime, and parkActiveSession()
+    // detaches the Backend from the session (sessionId = undefined).
     this.inThinkTag = false;
     this.thinkHold = "";
     this.tokensUsed = undefined;
@@ -1575,13 +1729,62 @@ export class AgentBackend {
   }
 
   private hydrateFromRuntime(rt: SessionRuntime): void {
+    this.log(
+      "info",
+      `[activity] hydrateFromRuntime ${rt.sessionId.slice(0, 8)} ` +
+        `(bag: activity=${rt.activity} busy=${rt.busy} replaying=${rt.replaying} ` +
+        `lastTurnResult=${rt.lastTurnResult})`,
+    );
     this.sessionId = rt.sessionId;
     this.workspace = rt.cwd || this.workspace;
     this.sessionTitle = rt.title;
     this.timeline = rt.timeline;
-    this.busy = rt.busy;
+    // Restore the activity / needsInputReason / lastTurnResult stamp
+    // from the runtime bag; `busy` lives in the bag only — read it via
+    // `rt.busy` from `classifyActive()` instead of mirroring here.
+    this.activity = rt.activity;
+    this.needsInputReason = rt.needsInputReason;
+    this.lastTurnResult = rt.lastTurnResult;
     this.replaying = rt.replaying;
     this.compacting = rt.compacting;
+    // Heal stale `busy` flag: when the bag claims the turn is still
+    // in flight (busy=true) but lastTurnResult proves it already
+    // finished, and the session is neither replaying nor compacting,
+    // the busy flag was left behind by a pre-fix `syncActiveIntoRuntimes`
+    // that derived busy from a stale `activity`. Clear it so
+    // `classifyActive()` sees the true idle/terminal state.
+    if (rt.busy && rt.lastTurnResult && !rt.replaying && !rt.compacting) {
+      this.log(
+        "info",
+        `[activity] hydrateFromRuntime: HEALING stale busy=true ` +
+          `for ${rt.sessionId.slice(0, 8)} ` +
+          `(lastTurnResult=${rt.lastTurnResult} activity=${rt.activity})`,
+      );
+      rt.busy = false;
+      // Also refresh `this.activity` so the renderer shows
+      // idle / terminal instead of the stale "working".
+      this.activity = rt.lastTurnResult === "completed" ||
+        rt.lastTurnResult === "failed" ||
+        rt.lastTurnResult === "cancelled" ||
+        rt.lastTurnResult === "blocked"
+        ? rt.lastTurnResult
+        : "idle";
+    }
+    // Clear terminal stain on re-entry: the user clicked into this
+    // session, so the notification has been "seen". The stain was
+    // already displayed (either as the header badge while focused,
+    // or as a breathing sidebar dot while backgrounded). Re-entering
+    // means the user is ready to interact — show idle.
+    if (rt.lastTurnResult && !rt.replaying && !rt.compacting) {
+      this.log(
+        "info",
+        `[activity] hydrateFromRuntime: clearing terminal stain ` +
+          `${rt.lastTurnResult} for ${rt.sessionId.slice(0, 8)}`,
+      );
+      rt.lastTurnResult = undefined;
+      this.lastTurnResult = undefined;
+      this.activity = "idle";
+    }
     this.compactTimelineId = rt.compactTimelineId;
     this.streamingAssistantId = rt.streamingAssistantId;
     this.streamingThoughtId = rt.streamingThoughtId;
@@ -1599,6 +1802,9 @@ export class AgentBackend {
     this.toolIndex = rt.toolIndex;
     this.todos = rt.todos;
     this.planContent = rt.planContent;
+    // goalState / goalTodos are now read directly from SessionRuntime
+    // by snapshot() — no hydration needed. They survive session switches
+    // because they live in the per-session runtime bag.
   }
 
   /**
@@ -1618,7 +1824,12 @@ export class AgentBackend {
           cwd: this.workspace ?? "",
           title: this.sessionTitle ?? "Session",
           timeline: this.timeline,
-          busy: this.busy,
+          // Derived from activity so callers reading the bag see the
+          // same truth `classifyActive()` would compute.
+          busy: this.activity === "working" || this.activity === "loading",
+          activity: this.activity,
+          needsInputReason: this.needsInputReason,
+          lastTurnResult: this.lastTurnResult,
           replaying: this.replaying,
           compacting: this.compacting,
           compactTimelineId: this.compactTimelineId,
@@ -1634,6 +1845,9 @@ export class AgentBackend {
           toolIndex: this.toolIndex,
           todos: this.todos,
           planContent: this.planContent,
+          // goalState / goalTodos are owned by SessionRuntime — not swapped
+          // during withParkedRuntime. snapshot() reads goal from the active
+          // runtime directly.
           hydrated: true,
         }
       : null;
@@ -1654,7 +1868,7 @@ export class AgentBackend {
         this.toolIndex = new Map();
         this.todos = [];
         this.planContent = undefined;
-        this.busy = false;
+        this.setFocusedBusy(false);
         this.replaying = false;
         this.compacting = false;
         this.compactTimelineId = null;
@@ -2269,11 +2483,12 @@ export class AgentBackend {
   private setState(partial: {
     connection?: ConnectionState;
     error?: string;
+    /** @deprecated routed to {@link setFocusedBusy} for back-compat. */
     busy?: boolean;
   }): void {
     if (partial.connection !== undefined) this.connection = partial.connection;
     if (partial.error !== undefined) this.error = partial.error;
-    if (partial.busy !== undefined) this.busy = partial.busy;
+    if (partial.busy !== undefined) this.setFocusedBusy(partial.busy);
     this.emitSnapshot();
   }
 
@@ -2301,7 +2516,17 @@ export class AgentBackend {
       this.parkedEmitPending = true;
       return;
     }
-    this.emit({ type: "snapshot", snapshot: this.snapshot() });
+    // Keep activity / needsInputReason / busy mirror fresh before
+    // every snapshot so the renderer never sees stale activity.
+    this.refreshActivity();
+    const snap = this.snapshot();
+    this.log(
+      "info",
+      `[activity] emitSnapshot sid=${this.sessionId?.slice(0, 8) ?? "none"} ` +
+        `activity=${snap.activity} ` +
+        `reason=${snap.needsInputReason ?? "none"}`,
+    );
+    this.emit({ type: "snapshot", snapshot: snap });
   }
 
   /** Throttled emit for token-stream text deltas (agent/thought chunks). */
@@ -3059,15 +3284,14 @@ export class AgentBackend {
 
   /** Clear busy / replay / compact flags (does not touch session id or timeline). */
   private resetTurnFlags(): void {
-    this.busy = false;
+    this.setFocusedBusy(false);
     this.replaying = false;
     this.compacting = false;
     this.compactTimelineId = null;
     this.streamingAssistantId = null;
     this.streamingThoughtId = null;
     this.clearReopenableThought();
-    this.goalState = null;
-    this.goalTodos = [];
+    // goalState / goalTodos are owned by SessionRuntime — no clearing needed.
     this.inThinkTag = false;
     this.thinkHold = "";
   }
@@ -3085,7 +3309,9 @@ export class AgentBackend {
 
     const isActive = this.sessionId === sessionId;
     const rt = this.runtimes.get(sessionId);
-    const wasBusy = isActive ? this.busy : Boolean(rt?.busy);
+    // Bag is the canonical source — focused session's busy lives there
+    // too, mirrored by `syncActiveIntoRuntimes()` / `setFocusedBusy()`.
+    const wasBusy = Boolean(rt?.busy);
 
     // Drop permission prompts / questionnaires belonging to this session only.
     this.cancelPermissionsForSession(sessionId, reason);
@@ -3435,10 +3661,17 @@ export class AgentBackend {
       // Warm switch: reuse in-memory runtime (including live streaming state).
       const warm = this.runtimes.get(sessionId);
       if (warm?.hydrated) {
+        this.log(
+          "info",
+          `[activity] loadSession ${sessionId.slice(0, 8)} → WARM ` +
+            `(bag: activity=${warm.activity} busy=${warm.busy} ` +
+            `replaying=${warm.replaying} lastTurnResult=${warm.lastTurnResult})`,
+        );
         this.hydrateFromRuntime(warm);
         this.workspace = warm.cwd || cwd;
         const known = this.sessions.find((s) => s.sessionId === sessionId);
         if (known?.title) this.sessionTitle = known.title;
+        this.log("info", `[activity] loadSession after hydrate: activity=${this.activity}`);
         this.emitSnapshot();
         void this.refreshCommands();
         void this.refreshContextUsage();
@@ -3447,12 +3680,22 @@ export class AgentBackend {
       }
 
       // Cold load from agent.
+      this.log("info", `[activity] loadSession ${sessionId.slice(0, 8)} → COLD`);
+      // Emit a loading snapshot IMMEDIATELY — before any setup that
+      // doesn't affect the snapshot. This transitions the renderer
+      // from old content to the loading spinner within the same
+      // render frame, eliminating the "flash of old session" flicker.
       this.replaying = true;
-      this.busy = false;
+      this.setFocusedBusy(false);
+      this.sessionId = sessionId;
+      this.workspace = cwd;
       this.timeline = [];
       this.toolIndex = new Map();
       this.todos = [];
       this.planContent = undefined;
+      this.emitSnapshot();
+
+      // Remaining non-visual setup (doesn't affect the loading snapshot).
       this.streamingAssistantId = null;
       this.streamingThoughtId = null;
       this.replayOpenUserId = null;
@@ -3461,8 +3704,6 @@ export class AgentBackend {
       this.thinkHold = "";
       this.compactTimelineId = null;
       this.compacting = false;
-      this.workspace = cwd;
-      this.sessionId = sessionId;
       this.sessionMode = "default";
       this.sessionTitle =
         this.sessions.find((s) => s.sessionId === sessionId)?.title ??
@@ -3473,7 +3714,6 @@ export class AgentBackend {
         replaying: true,
         hydrated: false,
       });
-      this.emitSnapshot();
 
       try {
         const loadParams: Record<string, JsonValue> = {
@@ -3495,7 +3735,7 @@ export class AgentBackend {
             this.applyModelsFromSession(result?.models);
             this.finalizeStreaming();
             this.replaying = false;
-            this.busy = false;
+            this.setFocusedBusy(false);
             this.compacting = false;
             if (planBody?.trim()) this.planContent = planBody;
             const known = this.sessions.find((s) => s.sessionId === sessionId);
@@ -3525,7 +3765,7 @@ export class AgentBackend {
       } finally {
         if (this.sessionId === sessionId) {
           this.replaying = false;
-          this.busy = false;
+          this.setFocusedBusy(false);
           this.compacting = false;
           this.replayOpenUserId = null;
           this.syncActiveIntoRuntimes();
@@ -3860,6 +4100,46 @@ export class AgentBackend {
     const updateSessionId =
       asString(params.sessionId) ?? asString(params.session_id);
 
+    // Detect goal-shaped updates early so they can be routed to the
+    // correct SessionRuntime (per-session, not global singleton).
+    // Mirrors TUI's find_session_match routing.
+    const update = asRecord(params.update);
+    const goalId = update
+      ? (asString(update.goal_id) ?? asString(update.goalId))
+      : undefined;
+    const isGoalUpdate =
+      update &&
+      (asString(update.sessionUpdate) === "goal_updated" ||
+        asString(update.sessionUpdate) === "GoalUpdated" ||
+        (!asString(update.sessionUpdate) &&
+          Boolean(asString(update.objective)) &&
+          Boolean(asString(update.status))));
+
+    // Goal updates: always route to a specific SessionRuntime.
+    if (isGoalUpdate) {
+      // 1) Explicit sessionId in params — exact match.
+      if (updateSessionId) {
+        this.applyGoalUpdateToRuntime(updateSessionId, update);
+        return;
+      }
+      // 2) No sessionId — try goalId match across all runtime bags.
+      if (goalId) {
+        for (const [sid, rt] of this.runtimes) {
+          if (rt.goalState?.goalId === goalId) {
+            this.applyGoalUpdateToRuntime(sid, update);
+            return;
+          }
+        }
+      }
+      // 3) No match found — drop (TUI "load-race: DROPPED" pattern).
+      this.log(
+        "info",
+        `[goal] DROPPED goal update without sessionId match ` +
+          `goalId=${goalId ?? "(none)"}`,
+      );
+      return;
+    }
+
     // Route background-session updates into the parked runtime.
     if (
       updateSessionId &&
@@ -3915,7 +4195,9 @@ export class AgentBackend {
       Boolean(asString(update.objective)) &&
       Boolean(asString(update.status));
     if (looksLikeGoalUpdate) {
-      this.applyGoalUpdate(update);
+      if (this.sessionId) {
+        this.applyGoalUpdateToRuntime(this.sessionId, update);
+      }
       return;
     }
     // Most `session/update` envelopes carry an explicit discriminator;
@@ -3924,7 +4206,11 @@ export class AgentBackend {
 
     // Streaming caret only while a live turn is in flight. Replay and
     // post-turn late chunks must not leave a blinking ▍ after the RPC ends.
-    const streaming = !this.replaying && this.busy;
+    // Streaming caret only while a live turn is in flight. `loading`
+// (replaying history) is intentionally excluded — during history
+// replay we never have an in-flight assistant text being streamed
+// into the focused bubble, so the blinking caret would be a lie.
+const streaming = !this.replaying && this.activity === "working";
 
     if (kind === "user_message_chunk") {
       // Live prompts already append the user bubble in sendPrompt — skip echo.
@@ -4406,8 +4692,9 @@ export class AgentBackend {
       this.todos = parsePlanEntries(entries);
       // While a goal is active, also mirror into goal-scoped todos so the
       // Goal detail Progress list survives busy→idle turn boundaries.
-      if (this.goalState && this.goalState.status !== "complete") {
-        this.goalTodos = this.todos.map((t) => ({ ...t }));
+      const activeRt = this.sessionId ? this.runtimes.get(this.sessionId) : undefined;
+      if (activeRt?.goalState && activeRt.goalState.status !== "complete") {
+        activeRt.goalTodos = this.todos.map((t) => ({ ...t }));
       }
       this.syncActiveIntoRuntimes();
       // Replay can restore the last plan list; live updates always emit.
@@ -4418,8 +4705,11 @@ export class AgentBackend {
     // Goal subsystem progress — emitted by the agent's goal orchestrator
     // via the xAI `goal_updated` notification (rate-limited to 1/s).
     // Drives the 🎯 progress bubble above the composer.
+    // Routes to the correct SessionRuntime (per-session, not global singleton).
     if (kind === "goal_updated" || kind === "GoalUpdated") {
-      this.applyGoalUpdate(update);
+      if (this.sessionId) {
+        this.applyGoalUpdateToRuntime(this.sessionId, update);
+      }
       return;
     }
 
@@ -4427,17 +4717,25 @@ export class AgentBackend {
   }
 
   /**
-   * Populate / clear `goalState` from a goal-shaped update payload, then
-   * emit a snapshot. Pulled out as a method so the defensive catch-all
-   * at the top of `handleSessionUpdateOnActive` can reuse the same logic
-   * when an envelope arrives without the `sessionUpdate` discriminator.
+   * Populate / clear goal state on a specific SessionRuntime (per-session,
+   * not a global singleton). Mirrors TUI's per-AgentView.goal_state pattern:
+   * the update is routed by session_id and written directly to the bag.
+   *
+   * Emits a snapshot only when the target session is the currently active one.
    */
-  private applyGoalUpdate(update: Record<string, JsonValue>): void {
+  private applyGoalUpdateToRuntime(
+    sessionId: string,
+    update: Record<string, JsonValue>,
+  ): void {
+    const rt = this.runtimes.get(sessionId);
+    if (!rt) {
+      this.log("info", `[goal] applyGoalUpdateToRuntime: no runtime for ${sessionId.slice(0, 8)}`);
+      return;
+    }
     const payload = update as Record<string, JsonValue>;
     const status = asString(payload.status) ?? "";
     // Optional diagnostic: prints one line per goal update when the
-    // operator sets GROK_DEBUG_GOAL=1. Useful to confirm the wire is
-    // reaching the desktop without leaving noise in normal logs.
+    // operator sets GROK_DEBUG_GOAL=1.
     if (
       process.env.GROK_DEBUG_GOAL === "1" ||
       process.env.GROK_DEBUG_GOAL === "true"
@@ -4445,7 +4743,7 @@ export class AgentBackend {
       try {
         this.log(
           "info",
-          `[goal_updated] status=${status} phase=${asString(
+          `[goal_updated] session=${sessionId.slice(0, 8)} status=${status} phase=${asString(
             payload.phase,
           )} obj=${asString(payload.objective)?.slice(0, 60)}`,
         );
@@ -4455,8 +4753,8 @@ export class AgentBackend {
     }
     // "complete" / "cleared" → drop the bubble and goal-scoped todos.
     if (status === "complete" || status === "cleared") {
-      this.goalState = null;
-      this.goalTodos = [];
+      rt.goalState = null;
+      rt.goalTodos = [];
     } else {
       const verifying =
         payload.verifying_completion === true ||
@@ -4464,7 +4762,7 @@ export class AgentBackend {
       const planning =
         payload.planning === true ||
         payload.planning_in_flight === true;
-      this.goalState = {
+      rt.goalState = {
         goalId:
           asString(payload.goal_id) ?? asString(payload.goalId) ?? "",
         objective: asString(payload.objective) ?? "",
@@ -4514,11 +4812,15 @@ export class AgentBackend {
         updatedAt: Date.now(),
       };
       // Seed goal todos from current turn todos if we just started and empty.
-      if (this.goalTodos.length === 0 && this.todos.length > 0) {
-        this.goalTodos = this.todos.map((t) => ({ ...t }));
+      if (rt.goalTodos.length === 0 && this.todos.length > 0) {
+        rt.goalTodos = this.todos.map((t) => ({ ...t }));
       }
     }
-    this.emitSnapshot();
+    // Only emit a full snapshot when the target session is the active one.
+    // Background sessions' goal updates are visible on next switch (TUI pattern).
+    if (sessionId === this.sessionId) {
+      this.emitSnapshot();
+    }
   }
 
   private async handleReverseRequest(
@@ -5119,7 +5421,25 @@ export class AgentBackend {
     // that error bubble up; the dropdown notice in the renderer already
     // nudges the user to switch to a custom provider.
     const client = this.requireClient();
-    if (this.busy) throw new Error("A prompt is already running in this session");
+    // Read busy from the focused session's runtime bag — that's the
+    // canonical source `classifyActive()` consults.
+    const focusedRt = this.sessionId
+      ? this.runtimes.get(this.sessionId)
+      : undefined;
+    if (focusedRt?.busy) {
+      throw new Error("A prompt is already running in this session");
+    }
+
+    // Atomically bump the turn generation for this session (per-session
+    // monotonically increasing counter, analogous to TUI's shell-level
+    // `Effect::SendPromptNow` atomicity). The `finally` block below uses
+    // this to detect when a newer turn has already started on this session
+    // so it doesn't corrupt the new turn's state (race condition between
+    // a late-arriving cancel RPC and a subsequent prompt RPC).
+    const promptRt = this.runtimes.get(this.sessionId);
+    if (!promptRt) throw new Error("No runtime");
+    promptRt.turnGeneration++;
+    const thisTurnGen = promptRt.turnGeneration;
 
     // Capture so a mid-flight session switch does not let this turn corrupt
     // the next session's busy flag / timeline. Other sessions may run in parallel.
@@ -5136,7 +5456,7 @@ export class AgentBackend {
       this.withParkedRuntime(bag, fn);
     };
 
-    this.busy = true;
+    this.setFocusedBusy(true);
     // Re-enable streaming chunks for the new turn. Cancel arms this
     // guard so in-flight model chunks don't keep appending to the
     // timeline after the user clicks stop.
@@ -5217,6 +5537,8 @@ export class AgentBackend {
     }
 
     this.markRuntimeHydrated(promptSessionId, true);
+    // A new turn starts — clear any terminal stain from the previous turn.
+    this.lastTurnResult = undefined;
     this.syncActiveIntoRuntimes();
     this.emitSnapshot();
 
@@ -5233,6 +5555,10 @@ export class AgentBackend {
       if (img.path) block.uri = `file://${img.path}`;
       prompt.push(block);
     }
+
+    // Capture whether the prompt RPC threw so the finally block can
+    // record the terminal `cancelled` / `failed` stain on activity.
+    let turnError: { message: string } | undefined;
 
     try {
       const promptResult = await client.request(
@@ -5287,11 +5613,50 @@ export class AgentBackend {
           text: `Prompt error: ${message}`,
         });
       });
+      // Surface the error to the outer finally block so it can record
+      // the terminal `failed` / `cancelled` stain on `lastTurnResult`.
+      turnError = { message };
       throw err;
     } finally {
       applyToPromptSession(() => {
+        // ── Atomicity guard (TUI-aligned) ──────────────────────────
+        // If a newer turn has already started on this session (e.g.
+        // Ctrl+Enter: cancel + immediate send), the generation counter
+        // was bumped by the new sendPrompt. Skip cleanup so we don't
+        // corrupt the new turn's busy flag / activity / lastTurnResult.
+        // Mirrors TUI's `Effect::SendPromptNow` atomicity at the shell
+        // level — the old turn's completion must not interfere with
+        // the new turn's state.
+        const guardRt = this.runtimes.get(promptSessionId);
+        if (guardRt && guardRt.turnGeneration !== thisTurnGen) {
+          this.log(
+            "info",
+            `[activity] sendPrompt finally: stale finally for gen=${thisTurnGen}, ` +
+              `current gen=${guardRt.turnGeneration} — skipping (new turn already started)`,
+          );
+          return;
+        }
+        // ──────────────────────────────────────────────────────────
         this.finalizeStreaming();
-        this.busy = false;
+        this.setFocusedBusy(false);
+        // Record terminal state for the badge / sidebar coloring.
+        // `completed` when RPC returned cleanly; `cancelled` when the
+        // user explicitly cancelled; otherwise `failed`.
+        if (turnError) {
+          this.lastTurnResult = /cancel/i.test(turnError.message)
+            ? "cancelled"
+            : "failed";
+        } else {
+          this.lastTurnResult = "completed";
+        }
+        // Reflect the terminal state into `this.activity` and the
+        // `busy` mirror **before** `syncActiveIntoRuntimes()` runs
+        // (the call is outside `fn()` inside `withParkedRuntime`).
+        // This ensures the bag written by `syncActiveIntoRuntimes`
+        // carries `activity === "completed"` etc., so the next
+        // warm-load of this session doesn't resurrect a stale
+        // `activity === "working"` and show a spurious Stop button.
+        this.refreshActivity();
         // Drop turn-scoped todo checklist so the next snapshot reports an
         // empty list. plan.md on disk is preserved; only the UI mirror is
         // cleared (plan mode approvals in planApprovalQueue stay).
@@ -5305,7 +5670,17 @@ export class AgentBackend {
       // session has already updated its runtime bag; publishing here would
       // needlessly re-render the conversation the user is currently reading.
       if (stillThisSession()) {
+        this.log(
+          "info",
+          `[activity] sendPrompt finally: focused=${stillThisSession()} emitting snapshot (lastTurnResult=${this.lastTurnResult})`,
+        );
         this.emitSnapshot();
+      } else {
+        this.log(
+          "info",
+          `[activity] sendPrompt finally: background session, skip emit ` +
+            `(lastTurnResult=${this.lastTurnResult})`,
+        );
       }
       void this.refreshHistory();
       if (stillThisSession()) {
@@ -5379,11 +5754,13 @@ export class AgentBackend {
   }
 
   async cancel(): Promise<void> {
+    this.log("info", `[activity] cancel() called`);
     if (!this.client || !this.sessionId || this.connection !== "ready") {
       // No active session to cancel — force-clear busy so the UI stop
       // button does not stay stuck even if the prompt RPC never settles.
       this.finalizeStreaming();
-      this.busy = false;
+      this.setFocusedBusy(false);
+      this.lastTurnResult = "cancelled";
       this.clearTurnPlanArtifacts();
       this.emitSnapshot();
       return;
@@ -5413,7 +5790,10 @@ export class AgentBackend {
     // Drop the streaming caret immediately — suppressStreamingAfterCancel
     // only blocks new chunks; open bubbles still need streaming:false.
     this.finalizeStreaming();
-    this.busy = false;
+    this.setFocusedBusy(false);
+    // Record the terminal stain so the badge briefly shows "cancelled"
+    // after the user clicked Stop.
+    this.lastTurnResult = "cancelled";
     this.clearTurnPlanArtifacts();
     this.emitSnapshot();
   }
@@ -5426,6 +5806,7 @@ export class AgentBackend {
    * is already idle / unknown.
    */
   async cancelSession(targetSessionId: string): Promise<void> {
+    this.log("info", `[activity] cancelSession(${targetSessionId.slice(0, 8)}) called`);
     if (!this.client || !this.client.connected || this.connection !== "ready") {
       return;
     }
@@ -5451,7 +5832,12 @@ export class AgentBackend {
           cwd: this.workspace ?? "",
           title: this.sessionTitle ?? "Session",
           timeline: this.timeline,
-          busy: this.busy,
+          // Derived from activity so callers reading the bag see the
+          // same truth `classifyActive()` would compute.
+          busy: this.activity === "working" || this.activity === "loading",
+          activity: this.activity,
+          needsInputReason: this.needsInputReason,
+          lastTurnResult: this.lastTurnResult,
           replaying: this.replaying,
           compacting: this.compacting,
           compactTimelineId: this.compactTimelineId,
@@ -5467,6 +5853,7 @@ export class AgentBackend {
           toolIndex: this.toolIndex,
           todos: this.todos,
           planContent: this.planContent,
+          // goalState / goalTodos are owned by SessionRuntime — not swapped.
           hydrated: true,
         }
       : null;
@@ -5484,7 +5871,8 @@ export class AgentBackend {
         this.finishCompact("cancelled");
       }
       this.finalizeStreaming();
-      this.busy = false;
+      this.setFocusedBusy(false);
+      this.lastTurnResult = "cancelled";
       this.clearTurnPlanArtifacts();
       this.emitSnapshot();
     } finally {
@@ -5498,7 +5886,7 @@ export class AgentBackend {
         this.toolIndex = new Map();
         this.todos = [];
         this.planContent = undefined;
-        this.busy = false;
+        this.setFocusedBusy(false);
         this.replaying = false;
         this.compacting = false;
         this.compactTimelineId = null;
@@ -5552,7 +5940,7 @@ export class AgentBackend {
 
   async stop(): Promise<void> {
     this.connection = "stopped";
-    this.busy = false;
+    this.setFocusedBusy(false);
     this.sessionId = undefined;
     this.runtimes.clear();
     this.cancelAllPermissions("stop");

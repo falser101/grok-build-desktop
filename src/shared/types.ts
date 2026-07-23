@@ -101,17 +101,62 @@ export type TimelineItem =
     }
   | { id: string; kind: "system"; text: string; createdAt?: number };
 
-/** Live status for a session in the sidebar (desktop multi-session). */
-export type SessionRunStatus =
+/**
+ * Activity classification for an agent session, aligned with TUI
+ * `crates/codegen/xai-grok-pager/src/views/dashboard/state.rs::RowState`.
+ *
+ * - `idle`        — session 安静,无 turn / 无等待(对照 TUI Idle)
+ * - `working`     — agent 正在跑 turn / compact(对照 TUI Working)
+ * - `loading`     — replaying=true,在加载历史(对照 TUI loading_replay 子状态)
+ * - `needsInput`  — 等用户决策(trust / 权限 / 提问 / plan 审批),用 reason 细分
+ * - `completed` / `failed` / `cancelled` / `blocked`
+ *                 — 上一 turn 终态染色(对照 TUI Completed / Failed)。
+ *                   这几个不进 idle 桶,只是染色,不替代 idle 的语义。
+ *
+ * TUI 的 Inactive / roster / has_background_work / 子 agent 分类**不引入**
+ * (desktop 单进程 + 没有 monitor / scheduled loop 数据源)。
+ */
+export type AgentActivity =
   | "idle"
-  | "running"
+  | "working"
   | "loading"
-  | "needs_permission"
-  /** Waiting on `x.ai/ask_user_question` (interview / structured Q&A). */
-  | "needs_question"
-  /** Waiting on `x.ai/folder_trust/request` (workspace has repo-local
-   *  hooks/MCP/plugins/LSP/etc. that need an explicit trust grant). */
-  | "needs_trust";
+  | "needsInput"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "blocked";
+
+/** Why `activity === "needsInput"`. plan 单独配色。 */
+export type NeedsInputReason =
+  | "permission"
+  | "question"
+  | "trust"
+  | "plan";
+
+/**
+ * Helper: turn 真正在跑(`working`)。**不包括 `loading`**:replaying
+ * 历史期间 `snap.busy === false`,渲染端 Send 按钮照常显示,只是
+ * loading 条在动 —— 这是和 TUI `loading_replay` 行为有意区分的:
+ * loading 不打断用户输入,只是 UI 上提示"还在读盘"。
+ */
+export function isBusyLike(a: AgentActivity | undefined): boolean {
+  return a === "working";
+}
+
+/** Helper: 等用户决策。 */
+export function isNeedsInput(a: AgentActivity | undefined): boolean {
+  return a === "needsInput";
+}
+
+/** Helper: 终态染色(短暂显示,随后归 idle)。 */
+export function isTerminal(a: AgentActivity | undefined): boolean {
+  return (
+    a === "completed" ||
+    a === "failed" ||
+    a === "cancelled" ||
+    a === "blocked"
+  );
+}
 
 export interface SessionSummary {
   sessionId: string;
@@ -121,10 +166,20 @@ export interface SessionSummary {
   updatedAt: string;
   modelId?: string;
   /**
-   * Whether this session has an in-flight turn (or is loading / waiting on
-   * permission). Populated by the desktop backend from live runtime state.
+   * Activity classification for this session, populated by the backend
+   * for every session in the sidebar list. Aligned with TUI `RowState` —
+   * see {@link AgentActivity}.
+   *
+   *   idle / working / loading / needsInput  → live state
+   *   completed / failed / cancelled / blocked → terminal stain
+   *
+   * Sidebar typically collapses terminal stains back to `idle` for
+   * display, but the value is preserved here for callers that want to
+   * distinguish.
    */
-  status?: SessionRunStatus;
+  status?: AgentActivity;
+  /** Why `status === "needsInput"`. */
+  needsInputReason?: NeedsInputReason;
 }
 
 /** Outcome string accepted by the agent for `x.ai/folder_trust/request`. */
@@ -473,7 +528,17 @@ export interface AppSnapshot {
   usage?: UsageInfo;
   timeline: TimelineItem[];
   sessions: SessionSummary[];
-  busy: boolean;
+  /**
+   * Activity classification for the focused session. Aligned with TUI
+   * `RowState`. See {@link AgentActivity} for the full taxonomy.
+   *
+   * Renderer-side consumers should use `isBusyLike(snap.activity)` to
+   * test for the work-in-flight boolean and inspect
+   * `snap.needsInputReason` for the reason behind `needsInput`.
+   */
+  activity: AgentActivity;
+  /** Reason for `activity === "needsInput"`. */
+  needsInputReason?: NeedsInputReason;
   /** True while conversation compaction is in progress. */
   compacting?: boolean;
   binaryPath?: string;

@@ -1,4 +1,8 @@
-import type { SessionRunStatus, SessionSummary } from "@shared/types";
+import type {
+  AgentActivity,
+  NeedsInputReason,
+  SessionSummary,
+} from "@shared/types";
 import type { Messages } from "./i18n";
 
 type Props = {
@@ -28,16 +32,20 @@ export function WaitingSessionsBanner({
   const waiting = sessions.filter(
     (
       s,
-    ): s is SessionSummary & { status: Exclude<SessionRunStatus, "idle" | "running" | "loading"> } =>
-      s.sessionId !== focusedSessionId &&
-      (s.status === "needs_question" ||
-        s.status === "needs_permission" ||
-        s.status === "needs_trust"),
+    ): s is SessionSummary & {
+      status: "needsInput";
+      needsInputReason: NeedsInputReason;
+    } =>
+      s.sessionId !== focusedSessionId && s.status === "needsInput",
   );
   if (waiting.length === 0) return null;
 
   return (
-    <div className="waiting-sessions-banner" role="region" aria-label={m.waitingSessionsBannerLabel}>
+    <div
+      className="waiting-sessions-banner"
+      role="region"
+      aria-label={m.waitingSessionsBannerLabel}
+    >
       <div className="waiting-sessions-banner-head">
         <span className="waiting-sessions-banner-title">
           {waiting.length === 1
@@ -52,14 +60,21 @@ export function WaitingSessionsBanner({
               type="button"
               className="waiting-session-jump"
               onClick={() => onJumpToSession(s)}
-              title={`${s.title || m.untitledSession} · ${labelForStatus(s.status, m)}`}
+              title={`${s.title || m.untitledSession} · ${labelForStatus(
+                s.status,
+                s.needsInputReason,
+                m,
+              )}`}
             >
-              <SessionStatusGlyph status={s.status} />
+              <SessionStatusGlyph
+                status={s.status}
+                reason={s.needsInputReason}
+              />
               <span className="waiting-session-name">
                 {s.title || m.untitledSession}
               </span>
               <span className="waiting-session-status">
-                {labelForStatus(s.status, m)}
+                {labelForStatus(s.status, s.needsInputReason, m)}
               </span>
             </button>
           </li>
@@ -70,33 +85,58 @@ export function WaitingSessionsBanner({
 }
 
 function labelForStatus(
-  status: SessionRunStatus,
+  status: AgentActivity,
+  reason: NeedsInputReason | undefined,
   m: Messages,
 ): string {
   switch (status) {
-    case "running":
-      return m.sessionStatusRunning;
+    case "working":
+      return m.sessionStatusWorking;
     case "loading":
       return m.sessionStatusLoading;
-    case "needs_question":
-      return m.sessionStatusNeedsQuestion;
-    case "needs_permission":
-      return m.sessionStatusNeedsPermission;
-    case "needs_trust":
-      return m.sessionStatusNeedsTrust;
+    case "needsInput":
+      if (reason === "permission") return m.needsInputReasonPermission;
+      if (reason === "question") return m.needsInputReasonQuestion;
+      if (reason === "trust") return m.needsInputReasonTrust;
+      if (reason === "plan") return m.needsInputReasonPlan;
+      return m.sessionStatusNeedsInput;
+    case "completed":
+      return m.sessionStatusCompleted;
+    case "failed":
+      return m.sessionStatusFailed;
+    case "cancelled":
+      return m.sessionStatusCancelled;
+    case "blocked":
+      return m.sessionStatusBlocked;
     default:
       return "";
   }
 }
 
-function SessionStatusGlyph({ status }: { status: SessionRunStatus }) {
-  if (
-    status === "needs_permission" ||
-    status === "needs_question" ||
-    status === "needs_trust"
-  ) {
+function SessionStatusGlyph({
+  status,
+  reason,
+}: {
+  status: AgentActivity;
+  reason?: NeedsInputReason;
+}) {
+  if (status === "needsInput") {
+    // plan 单独配色(蓝灰),与 permission(橙)/question(紫)/trust(黄)区分
+    const variant =
+      reason === "question"
+        ? "question"
+        : reason === "trust"
+          ? "trust"
+          : reason === "plan"
+            ? "plan"
+            : reason === "permission"
+              ? "permission"
+              : "";
     return (
-      <span className="waiting-session-glyph warn" aria-hidden>
+      <span
+        className={`waiting-session-glyph warn${variant ? ` ${variant}` : ""}`}
+        aria-hidden
+      >
         !
       </span>
     );

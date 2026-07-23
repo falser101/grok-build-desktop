@@ -303,7 +303,12 @@ function createWindow(): void {
   // macOS keeps the OS-painted traffic lights via `titleBarStyle` so
   // users still get the standard close/min/max affordances; we hide
   // our own min/max/close controls there.
-  mainWindow = new BrowserWindow({
+  // Build BrowserWindow options conditionally to avoid passing
+  // macOS-only `titleBarStyle` on Linux / Windows, which can cause
+  // the window to be treated as override-redirect (unmanaged) by the
+  // window manager and prevent keyboard input from reaching
+  // contentEditable elements.
+  const bwOptions: Electron.BrowserWindowConstructorOptions = {
     width: 1280,
     height: 820,
     minWidth: 960,
@@ -312,8 +317,6 @@ function createWindow(): void {
     backgroundColor: "#1a1a1a",
     show: false,
     frame: false,
-    titleBarStyle:
-      process.platform === "darwin" ? "hiddenInset" : "hidden",
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, "../preload/index.mjs"),
@@ -321,7 +324,11 @@ function createWindow(): void {
       nodeIntegration: false,
       sandbox: false,
     },
-  });
+  };
+  if (process.platform === "darwin") {
+    bwOptions.titleBarStyle = "hiddenInset";
+  }
+  mainWindow = new BrowserWindow(bwOptions);
 
   attachEditContextMenu(mainWindow);
 
@@ -530,11 +537,15 @@ function registerIpc(): void {
   ipcMain.handle("agent:setMode", async (_e, modeId: SessionModeId) => {
     // The IPC contract mirrors `SessionModeId`; backend just forwards
     // to the agent which validates against `PermissionMode::VALID_VALUES`.
+    // Keep this allowlist in sync with `src/shared/types.ts#SessionModeId`
+    // and `PermissionMode::VALID_VALUES` in
+    // crates/codegen/xai-grok-agent/src/config.rs.
     if (
       modeId !== "default" &&
       modeId !== "acceptEdits" &&
       modeId !== "auto" &&
       modeId !== "dontAsk" &&
+      modeId !== "bypassPermissions" &&
       modeId !== "plan"
     ) {
       throw new Error("invalid modeId");

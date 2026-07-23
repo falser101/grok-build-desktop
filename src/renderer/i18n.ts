@@ -25,15 +25,39 @@ export interface Messages {
   untitledSession: string;
   sessionActions: string;
   searchIndexing: string;
-  /** Sidebar: session is generating / tools running. */
-  sessionStatusRunning: string;
-  /** Sidebar: session history is loading. */
+  /** Sidebar / badge: agent is generating / tools running (TUI `Working`). */
+  sessionStatusWorking: string;
+  /** Sidebar / badge: session history is loading (TUI `loading_replay`). */
   sessionStatusLoading: string;
-  /** Sidebar: session is waiting for a permission decision. */
+  /** Badge only: "Idle" label, mostly unused — sidebar collapses idle. */
+  sessionStatusIdle: string;
+  /** Sidebar / banner parent fallback when no reason sub-label is set. */
+  sessionStatusNeedsInput: string;
+  /** Reason sub-label: agent is waiting for a permission decision. */
+  needsInputReasonPermission: string;
+  /** Reason sub-label: agent is waiting for structured Q&A answers. */
+  needsInputReasonQuestion: string;
+  /** Reason sub-label: agent is waiting for a folder-trust grant. */
+  needsInputReasonTrust: string;
+  /** Reason sub-label: agent is waiting for plan-mode exit approval. */
+  needsInputReasonPlan: string;
+  /** Terminal stain: last turn completed cleanly. */
+  sessionStatusCompleted: string;
+  /** Terminal stain: last turn ended with an error. */
+  sessionStatusFailed: string;
+  /** Terminal stain: last turn was cancelled by the user. */
+  sessionStatusCancelled: string;
+  /** Terminal stain: last turn was blocked (permission denied etc.). */
+  sessionStatusBlocked: string;
+  // Legacy aliases kept during the rename window. Old callers reading
+  // `m.sessionStatusRunning` will still compile until they migrate.
+  /** @deprecated Use {@link sessionStatusWorking}. */
+  sessionStatusRunning: string;
+  /** @deprecated Use {@link needsInputReasonPermission}. */
   sessionStatusNeedsPermission: string;
-  /** Sidebar: session is waiting for structured Q&A answers. */
+  /** @deprecated Use {@link needsInputReasonQuestion}. */
   sessionStatusNeedsQuestion: string;
-  /** Sidebar: session is waiting for a folder-trust grant. */
+  /** @deprecated Use {@link needsInputReasonTrust}. */
   sessionStatusNeedsTrust: string;
   /** Composer-anchored banner: another session needs your attention (singular). */
   waitingSessionsBannerSingle: string;
@@ -203,6 +227,8 @@ export interface Messages {
   modePlanHint: string;
   modeGroupApproval: string;
   modeGroupWorkflow: string;
+  /** Header hint sentence inside the session-mode dropdown. */
+  modeDropdownHint: string;
   effort: string;
   /** Tooltip for context token usage chip (used / window). */
   tokenUsage: string;
@@ -773,8 +799,20 @@ const en: Messages = {
   untitledSession: "Untitled",
   sessionActions: "Session actions",
   searchIndexing: "Search index is still building…",
-  sessionStatusRunning: "Running",
+  sessionStatusWorking: "Working",
   sessionStatusLoading: "Loading",
+  sessionStatusIdle: "Idle",
+  sessionStatusNeedsInput: "Awaiting input",
+  needsInputReasonPermission: "Awaiting permission",
+  needsInputReasonQuestion: "Awaiting answer",
+  needsInputReasonTrust: "Awaiting trust",
+  needsInputReasonPlan: "Plan approval",
+  sessionStatusCompleted: "Completed",
+  sessionStatusFailed: "Failed",
+  sessionStatusCancelled: "Cancelled",
+  sessionStatusBlocked: "Blocked",
+  // Legacy aliases kept during the rename window.
+  sessionStatusRunning: "Running",
   sessionStatusNeedsPermission: "Needs approval",
   sessionStatusNeedsQuestion: "Needs answers",
   sessionStatusNeedsTrust: "Needs trust",
@@ -888,6 +926,7 @@ const en: Messages = {
   modePlanHint: "Plan before code",
   modeGroupApproval: "Approval policy",
   modeGroupWorkflow: "Workflow",
+  modeDropdownHint: "Choose how tools get permission to run.",
   effort: "Effort",
   tokenUsage: "Context tokens: {used} used / {total} window",
   placeholderReady: "Describe a task…  / commands  ·  @ files",
@@ -1436,8 +1475,20 @@ const zh: Messages = {
   untitledSession: "未命名",
   sessionActions: "会话操作",
   searchIndexing: "搜索索引仍在构建…",
-  sessionStatusRunning: "运行中",
+  sessionStatusWorking: "运行中",
   sessionStatusLoading: "加载中",
+  sessionStatusIdle: "空闲",
+  sessionStatusNeedsInput: "等待输入",
+  needsInputReasonPermission: "等待权限",
+  needsInputReasonQuestion: "等待回答",
+  needsInputReasonTrust: "等待信任",
+  needsInputReasonPlan: "等待计划审批",
+  sessionStatusCompleted: "已完成",
+  sessionStatusFailed: "失败",
+  sessionStatusCancelled: "已取消",
+  sessionStatusBlocked: "已阻塞",
+  // Legacy aliases kept during the rename window.
+  sessionStatusRunning: "运行中",
   sessionStatusNeedsPermission: "等待审批",
   sessionStatusNeedsQuestion: "等待回答",
   sessionStatusNeedsTrust: "等待信任",
@@ -1550,6 +1601,7 @@ const zh: Messages = {
   modePlanHint: "先规划再改代码",
   modeGroupApproval: "审批策略",
   modeGroupWorkflow: "工作流",
+  modeDropdownHint: "选择工具运行前如何申请权限。",
   effort: "力度",
   tokenUsage: "上下文 tokens：已用 {used} / 窗口 {total}",
   placeholderReady: "描述任务…  / 命令  ·  @ 文件",
