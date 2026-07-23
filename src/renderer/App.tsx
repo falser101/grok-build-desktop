@@ -2190,6 +2190,12 @@ export function App() {
   const [loopIntervalMenuOpen, setLoopIntervalMenuOpen] = useState(false);
   /** TUI-style goal detail overlay (click progress chip). */
   const [goalDetailOpen, setGoalDetailOpen] = useState(false);
+
+  // ── Workspace picker UI removed from composer (request). The agent still
+  //    has a workspace (snap.workspace); `onBrowseWorkspace` /
+  //    `onSelectWorkspace` / `recentWorkspaces` remain available for the
+  //    sidebar or settings future work. State below was tied to the
+  //    composer dropdown only and is now unused.
   useEffect(() => {
     if (!snap.goalState) setGoalDetailOpen(false);
   }, [snap.goalState]);
@@ -2279,7 +2285,13 @@ export function App() {
     loadPanelLayout(),
   );
   /** Workspace picker menu above the composer. */
+  // Workspace picker UI removed from composer (request). The agent still
+  // has a workspace (snap.workspace); `onBrowseWorkspace` /
+// `onSelectWorkspace` / `recentWorkspaces` remain defined below for the
+  // sidebar or settings future work. The composer-local menu state is
+  // retained so the handlers below keep compiling cleanly.
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
+  void wsMenuOpen;
   const [accountStatus, setAccountStatus] = useState<AccountStatus | null>(
     null,
   );
@@ -2352,6 +2364,7 @@ export function App() {
   const contentEditableRef = useRef<HTMLDivElement | null>(null);
   const selectsRef = useRef<HTMLDivElement | null>(null);
   const wsMenuRef = useRef<HTMLDivElement | null>(null);
+  void wsMenuRef;
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const slashListRef = useRef<HTMLDivElement | null>(null);
   const atListRef = useRef<HTMLDivElement | null>(null);
@@ -3363,9 +3376,7 @@ export function App() {
     const onDoc = (e: MouseEvent) => {
       const t = e.target as Node;
       const inSelects = selectsRef.current?.contains(t);
-      // Mode menu lives in the floating workspace bar.
-      const inWsBar = wsMenuRef.current?.contains(t);
-      if (!inSelects && !inWsBar) {
+      if (!inSelects) {
         setMenu(null);
       }
     };
@@ -3382,28 +3393,6 @@ export function App() {
       document.removeEventListener("keydown", onKey);
     };
   }, [menu]);
-
-  // Close workspace picker on outside click or Escape
-  useEffect(() => {
-    if (!wsMenuOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (wsMenuRef.current && !wsMenuRef.current.contains(e.target as Node)) {
-        setWsMenuOpen(false);
-      }
-    };
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setWsMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [wsMenuOpen]);
 
   // Close @-mention dropdown on outside click or Escape.
   useEffect(() => {
@@ -7013,142 +7002,6 @@ export function App() {
               ) : null}
 
               <div className="composer-stack">
-                <div className="workspace-bar" ref={wsMenuRef}>
-                  <button
-                    type="button"
-                    className={`workspace-picker-btn ${
-                      !hasWorkspace ? "empty" : ""
-                    } ${wsMenuOpen ? "open" : ""}`}
-                    onClick={() => setWsMenuOpen((v) => !v)}
-                    title={snap.workspace || m.workspacePick}
-                    disabled={!connectionReady}
-                  >
-                    <span className="ws-icon" aria-hidden="true">
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.75"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2a1.5 1.5 0 0 1 1.2.6l1.2 1.6a1.5 1.5 0 0 0 1.2.6H19.5A1.5 1.5 0 0 1 21 10.2v6.3A1.5 1.5 0 0 1 19.5 18h-15A1.5 1.5 0 0 1 3 16.5v-9Z" />
-                      </svg>
-                    </span>
-                    <span className="ws-name">
-                      {workspaceName || m.workspaceEmpty}
-                    </span>
-                  </button>
-                  <span className="ws-meta-chip" title={m.local}>
-                    <span className="ws-icon" aria-hidden="true">
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.75"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <rect x="3" y="4" width="18" height="13" rx="2" />
-                        <path d="M8 21h8M12 17v4" />
-                      </svg>
-                    </span>
-                    <span>{m.local}</span>
-                  </span>
-                  <div className="chip-menu-wrap ws-mode-wrap">
-                    <button
-                      type="button"
-                      className={`ws-meta-chip ws-meta-btn ws-mode-btn ${
-                        menu === "mode" ? "open" : ""
-                      }`}
-                      disabled={!connectionReady}
-                      onClick={() =>
-                        setMenu((cur) => (cur === "mode" ? null : "mode"))
-                      }
-                      title={`${m.sessionMode}: ${modeLabel}`}
-                      aria-label={`${m.sessionMode}: ${modeLabel}`}
-                    >
-                      <span className="ws-icon" aria-hidden="true">
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.75"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <circle cx="6" cy="6" r="2.25" />
-                          <circle cx="18" cy="18" r="2.25" />
-                          <path d="M8 7.2c4.5 0 5.5 3.3 5.5 6.3V15" />
-                          <path d="M13.5 13.5 18 18" />
-                        </svg>
-                      </span>
-                      <span className="ws-mode-label">{modeLabel}</span>
-                    </button>
-                    {menu === "mode" ? (
-                      <div className="dropdown">
-                        {modes.map((mod) => (
-                          <button
-                            key={mod.id}
-                            type="button"
-                            className={`dropdown-item ${
-                              mod.id === snap.sessionMode ? "active" : ""
-                            }`}
-                            onClick={() => {
-                              void onSetMode(mod.id);
-                              setMenu(null);
-                            }}
-                          >
-                            <span className="di-title">{mod.label}</span>
-                            <span className="di-desc">{mod.hint}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                  {wsMenuOpen ? (
-                    <div className="workspace-dropdown" role="menu">
-                      <button
-                        type="button"
-                        className="dropdown-item"
-                        role="menuitem"
-                        onClick={() => void onBrowseWorkspace()}
-                      >
-                        <span className="di-title">{m.workspaceBrowse}</span>
-                        <span className="di-desc">{m.workspacePick}</span>
-                      </button>
-                      {recentWorkspaces.length > 0 ? (
-                        <>
-                          <div className="workspace-dropdown-sep">
-                            {m.workspaceRecent}
-                          </div>
-                          {recentWorkspaces.map((w) => (
-                            <button
-                              key={w.cwd}
-                              type="button"
-                              className={`dropdown-item ${
-                                w.cwd === snap.workspace ? "active" : ""
-                              }`}
-                              role="menuitem"
-                              title={w.cwd}
-                              onClick={() => void onSelectWorkspace(w.cwd)}
-                            >
-                              <span className="di-title">{w.project}</span>
-                              <span className="di-desc">{w.cwd}</span>
-                            </button>
-                          ))}
-                        </>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-
                 {promptQueue.length > 0 ? (
                   <div
                     className="prompt-queue"
@@ -7565,6 +7418,64 @@ export function App() {
                           Boolean(snap.pendingPermission)
                         }
                       />
+                      {/* Session-mode chip (Agent / Plan / Ask) — moved from
+                          the workspace bar above the composer into the
+                          composer toolbar so the workspace picker can go. */}
+                      <div className="chip-menu-wrap mode-chip-wrap">
+                        <button
+                          type="button"
+                          className={`chip chip-btn mode-chip mode-${snap.sessionMode}${
+                            menu === "mode" ? " open" : ""
+                          }`}
+                          disabled={!connectionReady}
+                          onClick={() =>
+                            setMenu((cur) =>
+                              cur === "mode" ? null : "mode",
+                            )
+                          }
+                          title={`${m.sessionMode}: ${modeLabel}`}
+                          aria-label={`${m.sessionMode}: ${modeLabel}`}
+                        >
+                          <span className="chip-leading-icon" aria-hidden="true">
+                            <svg
+                              width="13"
+                              height="13"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.75"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <circle cx="6" cy="6" r="2.25" />
+                              <circle cx="18" cy="18" r="2.25" />
+                              <path d="M8 7.2c4.5 0 5.5 3.3 5.5 6.3V15" />
+                              <path d="M13.5 13.5 18 18" />
+                            </svg>
+                          </span>
+                          <strong>{modeLabel}</strong>
+                        </button>
+                        {menu === "mode" ? (
+                          <div className="dropdown mode-dropdown">
+                            {modes.map((mod) => (
+                              <button
+                                key={mod.id}
+                                type="button"
+                                className={`dropdown-item ${
+                                  mod.id === snap.sessionMode ? "active" : ""
+                                }`}
+                                onClick={() => {
+                                  void onSetMode(mod.id);
+                                  setMenu(null);
+                                }}
+                              >
+                                <span className="di-title">{mod.label}</span>
+                                <span className="di-desc">{mod.hint}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                       <button
                         type="button"
                         className={`chip chip-btn always-approve-chip ${

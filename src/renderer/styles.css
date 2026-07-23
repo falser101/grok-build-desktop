@@ -3589,167 +3589,57 @@ body.is-resizing-files-tree * {
 }
 
 /*
- * Workspace context bar: a bit narrower than the composer, shorter height.
- * Fully above the input (no overlap / negative margin).
- * Keep z-index below .composer so model / effort menus that open upward
- * are not covered by this bar.
+ * Session-mode chip (Agent / Plan / Ask) lives in the composer toolbar.
+ * Click → dropdown. Style reuses the existing `.chip chip-btn` chip with a
+ * mode accent so it visually sits with the always-approve / goal / loop
+ * chips on the same row.
  */
-.workspace-bar {
+.mode-chip-wrap {
   position: relative;
-  z-index: 1;
-  box-sizing: border-box;
-  align-self: center;
-  width: calc(100% - 28px);
-  max-width: 100%;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0 2px;
-  margin: 0;
-  padding: 3px 8px;
-  min-height: 0;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--border-soft) 80%, transparent);
-  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--bg) 12%);
-  box-shadow:
-    0 1px 0 color-mix(in srgb, #fff 4%, transparent) inset,
-    0 3px 10px var(--shadow);
-}
-
-.workspace-picker-btn,
-.ws-meta-chip,
-.ws-meta-btn {
   display: inline-flex;
-  align-items: center;
+}
+
+.mode-chip {
   gap: 5px;
-  min-width: 0;
-  max-width: min(240px, 40%);
-  padding: 2px 7px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.15;
-  transition:
-    border-color 0.12s,
-    background 0.12s,
-    color 0.12s;
-}
-
-/* Mode chip: never clip the label (icon-only was a flex/min-width collapse). */
-.ws-mode-btn {
-  max-width: none;
-  flex: 0 0 auto;
-  min-width: max-content;
   color: var(--text);
 }
 
-.workspace-picker-btn {
-  color: var(--text);
-  cursor: pointer;
+.mode-chip strong {
+  font-weight: 500;
 }
 
-.workspace-picker-btn:hover:not(:disabled),
-.ws-meta-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--bg-hover) 85%, transparent);
-  color: var(--text);
+.mode-chip.mode-plan {
+  border-color: color-mix(in srgb, var(--warn, #e8b86d) 40%, transparent);
+  background: color-mix(in srgb, var(--warn, #e8b86d) 14%, transparent);
+}
+.mode-chip.mode-plan strong {
+  color: var(--warn, #e8b86d);
 }
 
-.workspace-picker-btn.open,
-.ws-meta-btn.open {
+.mode-chip.mode-ask {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.mode-chip.open {
   background: var(--bg-active);
   color: var(--text);
 }
 
-.workspace-picker-btn.empty {
-  color: var(--warn-text, var(--warn));
-  background: var(--warn-bg, rgba(232, 184, 109, 0.08));
-}
-
-.workspace-picker-btn:disabled,
-.ws-meta-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.workspace-picker-btn .ws-icon,
-.ws-meta-chip .ws-icon,
-.ws-meta-btn .ws-icon {
-  flex: 0 0 auto;
-  display: inline-flex;
-  opacity: 0.85;
-}
-
-.workspace-picker-btn .ws-icon svg,
-.ws-meta-chip .ws-icon svg,
-.ws-meta-btn .ws-icon svg {
-  width: 12px;
-  height: 12px;
-}
-
-.workspace-picker-btn .ws-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 500;
-}
-
-.ws-meta-chip > span:not(.ws-icon),
-.ws-meta-btn > span:not(.ws-icon) {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ws-mode-wrap {
-  position: relative;
-  flex: 0 0 auto;
-  min-width: max-content;
-}
-
-.ws-mode-label {
-  flex: 0 0 auto !important;
-  min-width: max-content !important;
-  max-width: none !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  white-space: nowrap;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.workspace-dropdown {
+.mode-dropdown {
   position: absolute;
   left: 0;
   right: auto;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 6px);
   z-index: 40;
-  min-width: 240px;
-  max-width: min(420px, 90vw);
-  max-height: 280px;
-  overflow-y: auto;
-  padding: 6px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--bg-dropdown);
-  box-shadow: 0 12px 36px var(--shadow-strong);
-}
-
-.workspace-dropdown-sep {
-  padding: 8px 10px 4px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-dim);
+  min-width: 220px;
+  padding: 4px;
 }
 
 .composer {
   position: relative;
-  /* Above .workspace-bar so upward toolbars (model / effort) aren't clipped. */
+  /* Higher than .composer-stack so upward toolbars (model / effort / mode)
+     aren't clipped by siblings below the composer. */
   z-index: 2;
   width: 100%;
   box-sizing: border-box;
@@ -3770,10 +3660,6 @@ html[data-theme="light"] .composer {
   box-shadow:
     0 1px 0 color-mix(in srgb, #fff 70%, transparent) inset,
     0 10px 28px var(--shadow);
-}
-
-html[data-theme="light"] .workspace-bar {
-  background: color-mix(in srgb, var(--bg-elevated) 92%, var(--bg) 8%);
 }
 
 .composer.composer-dimmed {
