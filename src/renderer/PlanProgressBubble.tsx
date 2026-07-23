@@ -144,7 +144,11 @@ export function PlanProgressBubble({ todos, m, onOpenPanel }: Props) {
                   className={`plan-progress-bubble-task-icon status-${t.status}`}
                   aria-hidden
                 >
-                  {todoStatusIcon(t.status)}
+                  {t.status === "in_progress" ? (
+                    <span className="plan-progress-bubble-spinner plan-progress-bubble-task-spinner" />
+                  ) : (
+                    todoStatusIcon(t.status)
+                  )}
                 </span>
                 <span className="plan-progress-bubble-task-step">
                   {i + 1}.
@@ -176,7 +180,8 @@ export function PlanProgressBubble({ todos, m, onOpenPanel }: Props) {
 function todoStatusIcon(status: TodoStatus): string {
   switch (status) {
     case "in_progress":
-      return "↻";
+      // Spinner is a CSS element (same as the bubble button), not a glyph.
+      return "";
     case "completed":
       return "✓";
     case "cancelled":

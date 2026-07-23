@@ -6992,12 +6992,16 @@ html[data-theme="light"] .icon-btn.send {
   color: #c44;
 }
 .plan-progress-bubble-task-icon.status-in_progress {
-  color: #c9851a;
-  /* Spinning ↻ glyph gives an obvious "running" affordance inside the
-     task list popup. Inherits the same keyframes as the main bubble's
-     spinner so timing matches. */
-  animation: plan-progress-spin 0.9s linear infinite;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+/* Same ring spinner as `.plan-progress-bubble-spinner` on the step button. */
+.plan-progress-bubble-task-spinner {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
 }
 .plan-progress-bubble-task-icon.status-pending {
   color: var(--text-muted);
