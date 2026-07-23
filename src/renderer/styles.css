@@ -4298,7 +4298,13 @@ html[data-theme="light"] .workspace-bar {
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
-  margin: 0;
+  margin: 0 0 2px;
+  align-self: stretch;
+  /* The bubble sits above the composer-stack in a flex column; this row
+     must remain visible whenever goalState is set, regardless of any
+     stacking-context siblings (e.g. ask_user_question modal). */
+  position: relative;
+  z-index: 1;
 }
 .goal-progress-bubble {
   display: inline-flex;

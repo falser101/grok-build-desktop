@@ -3781,6 +3781,21 @@ export class AgentBackend {
       this.handleSessionUpdate(asRecord(params));
       return;
     }
+    // xAI extension notifications used by the shell to push typed
+    // `SessionUpdate` payloads (goal_updated, loop_updated, todo_updated,
+    // …) without redefining the ACP wire. The pager TUI accepts both the
+    // canonical `x.ai/session_notification` (live path) and the legacy
+    // `x.ai/session/update` (replay path). Without these the desktop
+    // never sees goal progress — the standard `session/update` channel
+    // is reserved for the typed ACP `SessionUpdate` enums and the shell
+    // doesn't bother duplicating them onto the standard channel.
+    if (
+      method === "x.ai/session_notification" ||
+      method === "x.ai/session/update"
+    ) {
+      this.handleSessionUpdate(asRecord(params));
+      return;
+    }
     if (
       method === "_x.ai/sessions/changed" ||
       method === "x.ai/sessions/changed"
@@ -3862,7 +3877,22 @@ export class AgentBackend {
     );
     const update = asRecord(params.update);
     if (!update) return;
-    const kind = asString(update.sessionUpdate);
+    const kind = asString(update.sessionUpdate) ?? "";
+
+    // Defensive catch-all: an update without a recognised discriminator
+    // but with goal-shaped fields still lights up the bubble. Lives
+    // before the streaming-caret block so a `goal_updated`-shaped
+    // payload can never be mistaken for a stray text chunk.
+    const looksLikeGoalUpdate =
+      !kind &&
+      Boolean(asString(update.objective)) &&
+      Boolean(asString(update.status));
+    if (looksLikeGoalUpdate) {
+      this.applyGoalUpdate(update);
+      return;
+    }
+    // Most `session/update` envelopes carry an explicit discriminator;
+    // when one is missing and it doesn't look like a goal, drop.
     if (!kind) return;
 
     // Streaming caret only while a live turn is in flight. Replay and
@@ -4361,54 +4391,82 @@ export class AgentBackend {
     // via the xAI `goal_updated` notification (rate-limited to 1/s).
     // Drives the 🎯 progress bubble above the composer.
     if (kind === "goal_updated" || kind === "GoalUpdated") {
-      const payload = update as Record<string, JsonValue>;
-      const status = asString(payload.status) ?? "";
-      // "complete" → drop the bubble (goal finished). The objective
-      // stays in the user-message badge, but no live progress chip.
-      if (status === "complete") {
-        this.goalState = null;
-      } else {
-        this.goalState = {
-          goalId:
-            asString(payload.goal_id) ?? asString(payload.goalId) ?? "",
-          objective: asString(payload.objective) ?? "",
-          status,
-          phase: asString(payload.phase) ?? "",
-          currentDeliverableTitle: asString(
-            payload.current_deliverable_title ??
-              payload.currentDeliverableTitle,
-          ),
-          currentSubagentRole: asString(
-            payload.current_subagent_role ?? payload.currentSubagentRole,
-          ),
-          totalDeliverables:
-            asNumber(payload.total_deliverables) ??
-            asNumber(payload.totalDeliverables) ??
-            0,
-          completedDeliverables:
-            asNumber(payload.completed_deliverables) ??
-            asNumber(payload.completedDeliverables) ??
-            0,
-          tokensUsed:
-            asNumber(payload.tokens_used) ??
-            asNumber(payload.tokensUsed),
-          tokenBudget:
-            asNumber(payload.token_budget) ??
-            asNumber(payload.tokenBudget),
-          elapsedMs:
-            asNumber(payload.elapsed_ms) ?? asNumber(payload.elapsedMs),
-          pauseMessage: asString(
-            payload.pause_message ?? payload.pauseMessage,
-          ),
-          lastEvent: asString(payload.last_event ?? payload.lastEvent),
-          updatedAt: Date.now(),
-        };
-      }
-      this.emitSnapshot();
+      this.applyGoalUpdate(update);
       return;
     }
 
     // turn_completed / session_recap / retry_state: ignore for now
+  }
+
+  /**
+   * Populate / clear `goalState` from a goal-shaped update payload, then
+   * emit a snapshot. Pulled out as a method so the defensive catch-all
+   * at the top of `handleSessionUpdateOnActive` can reuse the same logic
+   * when an envelope arrives without the `sessionUpdate` discriminator.
+   */
+  private applyGoalUpdate(update: Record<string, JsonValue>): void {
+    const payload = update as Record<string, JsonValue>;
+    const status = asString(payload.status) ?? "";
+    // Optional diagnostic: prints one line per goal update when the
+    // operator sets GROK_DEBUG_GOAL=1. Useful to confirm the wire is
+    // reaching the desktop without leaving noise in normal logs.
+    if (
+      process.env.GROK_DEBUG_GOAL === "1" ||
+      process.env.GROK_DEBUG_GOAL === "true"
+    ) {
+      try {
+        this.log(
+          "info",
+          `[goal_updated] status=${status} phase=${asString(
+            payload.phase,
+          )} obj=${asString(payload.objective)?.slice(0, 60)}`,
+        );
+      } catch {
+        // never let the debug log break a live snapshot
+      }
+    }
+    // "complete" → drop the bubble (goal finished). The objective
+    // stays in the user-message badge, but no live progress chip.
+    if (status === "complete") {
+      this.goalState = null;
+    } else {
+      this.goalState = {
+        goalId:
+          asString(payload.goal_id) ?? asString(payload.goalId) ?? "",
+        objective: asString(payload.objective) ?? "",
+        status,
+        phase: asString(payload.phase) ?? "",
+        currentDeliverableTitle: asString(
+          payload.current_deliverable_title ??
+            payload.currentDeliverableTitle,
+        ),
+        currentSubagentRole: asString(
+          payload.current_subagent_role ?? payload.currentSubagentRole,
+        ),
+        totalDeliverables:
+          asNumber(payload.total_deliverables) ??
+          asNumber(payload.totalDeliverables) ??
+          0,
+        completedDeliverables:
+          asNumber(payload.completed_deliverables) ??
+          asNumber(payload.completedDeliverables) ??
+          0,
+        tokensUsed:
+          asNumber(payload.tokens_used) ??
+          asNumber(payload.tokensUsed),
+        tokenBudget:
+          asNumber(payload.token_budget) ??
+          asNumber(payload.tokenBudget),
+        elapsedMs:
+          asNumber(payload.elapsed_ms) ?? asNumber(payload.elapsedMs),
+        pauseMessage: asString(
+          payload.pause_message ?? payload.pauseMessage,
+        ),
+        lastEvent: asString(payload.last_event ?? payload.lastEvent),
+        updatedAt: Date.now(),
+      };
+    }
+    this.emitSnapshot();
   }
 
   private async handleReverseRequest(
