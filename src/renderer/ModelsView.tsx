@@ -880,86 +880,63 @@ export function ModelsView({
 
   return (
     <div className="settings-page ext-page models-page">
-      <div className="models-page-bg" aria-hidden />
       <header className="settings-header models-hero">
-        <div className="models-hero-row">
-          <button type="button" className="settings-back" onClick={onBack}>
-            ← {m.backToChat}
-          </button>
-        </div>
-        <div className="models-hero-row models-hero-main">
+        <button type="button" className="settings-back" onClick={onBack}>
+          ← {m.backToChat}
+        </button>
+        <div className="models-hero-main">
           <div className="models-hero-text">
-            <p className="models-hero-eyebrow">
-              {zh ? "提供商 · 协议 · 配额" : "Providers · protocol · quotas"}
-            </p>
-            <h1 className="settings-title models-hero-title">
-              {m.modelsTitle}
-            </h1>
-            <p className="settings-subtitle models-hero-sub">
-              {m.modelsSubtitle}
-            </p>
+            <h1 className="settings-title">{m.modelsTitle}</h1>
+            <p className="settings-subtitle">{m.modelsSubtitle}</p>
+            {providers.length > 0 ? (
+              <p className="models-stats-inline" role="status">
+                <span>
+                  {m.extEnabled}{" "}
+                  <strong>
+                    {stats.enabledProviders}/{stats.totalProviders}
+                  </strong>
+                </span>
+                <span className="models-stats-sep" aria-hidden>
+                  ·
+                </span>
+                <span>
+                  {m.modelsEnabledModelsStat}{" "}
+                  <strong>{stats.totalModels}</strong>
+                </span>
+              </p>
+            ) : null}
           </div>
-          <div className="models-hero-actions">
+          <div className="models-hero-actions" role="toolbar" aria-label={m.modelsTitle}>
             <button
               type="button"
-              className="ext-btn models-toolbar-btn"
+              className="ext-btn"
               disabled={busy}
               onClick={() => void load()}
               title={m.extRefresh}
             >
-              <span className="ext-btn-icon" aria-hidden>
-                ↻
-              </span>
-              <span>{m.extRefresh}</span>
+              {m.extRefresh}
             </button>
             <button
               type="button"
-              className="ext-btn models-toolbar-btn"
+              className="ext-btn"
               disabled={busy}
               onClick={() => onReconnect()}
               title={m.modelsReconnectHint}
             >
-              <span className="ext-btn-icon" aria-hidden>
-                ⤴
-              </span>
-              <span>{m.modelsReconnect}</span>
+              {m.modelsReconnect}
             </button>
             <button
               type="button"
-              className={`ext-btn primary models-add-btn ${
-                presetPickerOpen ? "active" : ""
-              }`}
+              className={`ext-btn primary${presetPickerOpen ? " active" : ""}`}
               onClick={() => {
                 setPresetPickerOpen((v) => !v);
                 setEditor(null);
               }}
             >
-              <span className="ext-btn-icon" aria-hidden>
-                +
-              </span>
-              <span>{m.modelsAddProvider}</span>
+              {m.modelsAddProvider}
             </button>
           </div>
         </div>
-        {providers.length > 0 ? (
-          <div className="models-stats" role="group" aria-label={m.modelsTitle}>
-            <div className="models-stat-tile">
-              <span className="models-stat-k">{m.extEnabled}</span>
-              <span className="models-stat-v">
-                <strong>{stats.enabledProviders}</strong>
-                <span className="models-stat-den">
-                  / {stats.totalProviders}
-                </span>
-              </span>
-            </div>
-            <div className="models-stat-tile">
-              <span className="models-stat-k">{m.modelsEnabledModelsStat}</span>
-              <span className="models-stat-v">
-                <strong>{stats.totalModels}</strong>
-              </span>
-            </div>
-          </div>
-        ) : null}
       </header>
 
       {error ? (

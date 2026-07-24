@@ -213,7 +213,9 @@ export function filterSlashMenu(
         modeId: def.modeId,
         intentId: def.intentId,
         inputHint: acpCmd?.inputHint,
-        hideUserMessage: def.action === "execute" && def.name === "compact",
+        hideUserMessage:
+          def.action === "execute" &&
+          (def.name === "compact" || def.name === "rewind"),
       },
     });
   }
@@ -400,7 +402,9 @@ export type LocalSlashResult =
   /** Open the prompt-history search UI (optional filter from args). */
   | { kind: "open_history"; filter?: string }
   /** Open the Plan / TODO right panel. */
-  | { kind: "open_plan" };
+  | { kind: "open_plan" }
+  /** Open conversation rewind modal (`/rewind`). */
+  | { kind: "open_rewind" };
 
 export interface LocalSlashContext {
   models: ModelInfo[];
@@ -469,6 +473,10 @@ export async function tryHandleLocalSlash(
 
   if (name === "history") {
     return { kind: "open_history", filter: args || undefined };
+  }
+
+  if (name === "rewind") {
+    return { kind: "open_rewind" };
   }
 
   if (name === "new" || name === "clear") {

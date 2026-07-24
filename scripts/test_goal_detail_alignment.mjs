@@ -35,26 +35,25 @@ function check(name, ok, detail = "") {
   checks.push({ name, ok: !!ok, detail });
 }
 
-// 1. The duplicated `statusText — phase` form must be gone for paused
-//    statuses specifically — it may legitimately remain for the
-//    active / non-paused branch (where `statusText` ≠ `phase`).
-//    Original bug: paused fell into the active branch and rendered
-//    the status label twice. Now it must short-circuit before the
-//    duplicate form.
-const duplicateForPaused =
-  /isPaused\s*\?\s*statusText\s*:[\s\S]{0,80}`\$\{statusText\}\s*—\s*\$\{phase\}`/.test(
+// 1. Paused / failed statuses render statusText only (no `status — phase`
+//    duplication). Active branch may still use the em-dash form.
+const statusLineShortCircuit =
+  /isPaused\s*\|\|\s*isFailed[\s\S]{0,40}\?\s*statusText[\s\S]{0,80}`\$\{statusText\}\s*—\s*\$\{phase\}`/.test(
+    modal,
+  ) ||
+  /isPaused\s*\|\|\s*isFailed[\s\S]{0,80}statusText[\s\S]{0,120}isActive/.test(
     modal,
   );
 check(
-  "Paused branch short-circuits before the `statusText — phase` template",
-  duplicateForPaused,
+  "Paused/failed branch short-circuits before the `statusText — phase` template",
+  statusLineShortCircuit,
 );
 
-// 1b. The paused-status branch must render `statusText` only.
+// 1b. statusLine ternary prefers statusText-only for paused/failed.
 const pausedOnlyBranch =
-  /isPaused\s*\?\s*statusText\s*:[\s\S]{0,80}isActive\s*\|\|\s*goal\.phase/;
+  /isPaused\s*\|\|\s*isFailed[\s\S]{0,60}\?\s*statusText[\s\S]{0,80}isActive\s*\|\|\s*goal\.phase/;
 check(
-  "GoalDetailModal paused branch returns `statusText` only (no phase suffix)",
+  "GoalDetailModal paused/failed branch returns `statusText` only (no phase suffix)",
   pausedOnlyBranch.test(modal),
 );
 
@@ -89,17 +88,28 @@ const interfaceDef = /goalPauseReasonLabel:\s*string;[\s\S]+?goalPausedResumeLin
 );
 check("i18n Messages interface declares both new keys", interfaceDef);
 
-const enBundle = /goalPauseReasonLabel:\s*"Reason:\s*"/.test(i18n) &&
-  /goalPausedResumeLine:\s*"\{status\}\s*—\s*type\s*\/goal resume to continue"/.test(
+const enBundle =
+  /goalPauseReasonLabel:\s*"Reason:\s*"/.test(i18n) &&
+  /goalPausedResumeLine:\s*"Status:\s*\{status\}\s*—\s*type\s*\/goal resume to continue"/.test(
     i18n,
   );
 check("English bundle fills `goalPauseReasonLabel` and `goalPausedResumeLine`", enBundle);
 
-const zhBundle = /goalPauseReasonLabel:\s*"原因："/.test(i18n) &&
-  /goalPausedResumeLine:\s*"\{status\}\s*—\s*输入\s*\/goal resume 继续"/.test(
+const zhBundle =
+  /goalPauseReasonLabel:\s*"原因："/.test(i18n) &&
+  /goalPausedResumeLine:\s*"状态:\s*\{status\}\s*—\s*输入\s*\/goal resume 继续"/.test(
     i18n,
   );
 check("Chinese bundle fills `goalPauseReasonLabel` and `goalPausedResumeLine`", zhBundle);
+
+// Strict TUI: footer is slash hints, not action buttons.
+check(
+  "Detail modal footer uses slash command hints (no Pause button props)",
+  /goalDetailCommands/.test(modal) &&
+    !/onPause\?:/.test(modal) &&
+    !/onResume\?:/.test(modal) &&
+    !/onClear\?:/.test(modal),
+);
 
 // 4. CSS rules.
 const cssBlock = /\.goal-detail-reason\s*\{/.test(css);

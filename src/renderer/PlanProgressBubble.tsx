@@ -168,7 +168,7 @@ export function PlanProgressBubble({ todos, m, onOpenPanel }: Props) {
                 onOpenPanel();
               }}
             >
-              {m.sidePanelPlan}
+              {m.sidePanelTodo}
             </button>
           ) : null}
         </div>

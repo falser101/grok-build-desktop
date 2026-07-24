@@ -30,6 +30,18 @@ export type CompactStatus =
 
 export type CompactMode = "manual" | "auto";
 
+/** Tool sub-kind for specialised rendering (aligns with TUI RenderBlock::ToolCall). */
+export type ToolKind =
+  | "execute"    // shell command execution
+  | "read"       // file reading
+  | "edit"       // file editing (search_replace / write)
+  | "listDir"    // directory listing
+  | "search"     // grep/ripgrep search
+  | "other";     // generic/unknown tool
+
+/** Per-block display mode (aligns with TUI DisplayMode). */
+export type DisplayMode = "collapsed" | "truncated" | "expanded";
+
 /** File diff from ACP `ToolCallContent::Diff`. */
 export interface ToolDiff {
   path: string;
@@ -75,7 +87,9 @@ export type TimelineItem =
       toolCallId: string;
       title: string;
       status: string;
-      toolKind?: string;
+      toolKind?: ToolKind;
+      /** Per-block display mode (collapsed/truncated/expanded). */
+      displayMode?: DisplayMode;
       /** File diffs from tool content (search_replace, apply_patch, …). */
       diffs?: ToolDiff[];
       /**
@@ -116,7 +130,78 @@ export type TimelineItem =
       message?: string;
       createdAt?: number;
     }
-  | { id: string; kind: "system"; text: string; createdAt?: number };
+  | { id: string; kind: "system"; text: string; createdAt?: number }
+  /** Subagent lifecycle (aligns with TUI SubagentBlock). */
+  | {
+      id: string;
+      kind: "subagent";
+      subagentId: string;
+      childSessionId?: string;
+      subagentType: string;
+      persona?: string;
+      role?: string;
+      status: "running" | "completed" | "failed" | "cancelled";
+      progress?: {
+        tokens?: number;
+        turns?: number;
+        toolCalls?: number;
+      };
+      createdAt?: number;
+    }
+  /** Workflow run progress (aligns with TUI WorkflowBlock). */
+  | {
+      id: string;
+      kind: "workflow";
+      workflowId: string;
+      name: string;
+      status: string;
+      phase?: string;
+      progress?: {
+        agentsLaunched: number;
+        agentsCompleted: number;
+        budgetUsed: number;
+        budgetTotal: number;
+      };
+      createdAt?: number;
+    }
+  /** Background task lifecycle (aligns with TUI BgTaskBlock). */
+  | {
+      id: string;
+      kind: "bgTask";
+      taskId: string;
+      description: string;
+      status: "running" | "completed" | "failed";
+      createdAt?: number;
+    }
+  /** Session event (aligns with TUI SessionEventBlock). */
+  | {
+      id: string;
+      kind: "sessionEvent";
+      eventType: string;
+      text: string;
+      createdAt?: number;
+    }
+  /** "By the way" interim note (aligns with TUI BtwBlock). */
+  | {
+      id: string;
+      kind: "btw";
+      text: string;
+      createdAt?: number;
+    }
+  /** Context info note (aligns with TUI ContextInfoBlock). */
+  | {
+      id: string;
+      kind: "contextInfo";
+      text: string;
+      createdAt?: number;
+    }
+  /** Credit / billing limit notice (aligns with TUI CreditLimitBlock). */
+  | {
+      id: string;
+      kind: "creditLimit";
+      text: string;
+      createdAt?: number;
+    };
 
 /**
  * Activity classification for an agent session, aligned with TUI
@@ -183,6 +268,11 @@ export interface SessionSummary {
   updatedAt: string;
   modelId?: string;
   /**
+   * Session source for filtering (aligns with TUI SourceFilter).
+   * "grok" | "conversation" | "claude" | "codex" | "cursor" | "remote" | …
+   */
+  source?: string;
+  /**
    * Activity classification for this session, populated by the backend
    * for every session in the sidebar list. Aligned with TUI `RowState` —
    * see {@link AgentActivity}.
@@ -197,6 +287,23 @@ export interface SessionSummary {
   status?: AgentActivity;
   /** Why `status === "needsInput"`. */
   needsInputReason?: NeedsInputReason;
+  /**
+   * Expanded card detail (aligns with TUI SessionPickerEntry.cardDetail).
+   * Shown when user clicks/expands a session in the sidebar.
+   */
+  cardDetail?: SessionCardDetail;
+}
+
+/** Expanded metadata for a session card (aligns with TUI CardDetail). */
+export interface SessionCardDetail {
+  numMessages?: number;
+  turnCount?: number;
+  toolCallCount?: number;
+  firstPromptPreview?: string;
+  hostname?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  source?: string;
 }
 
 /** Outcome string accepted by the agent for `x.ai/folder_trust/request`. */
@@ -261,6 +368,43 @@ export interface ForkSessionResult {
   newSessionId: string;
   newCwd: string;
   parentSessionId?: string;
+}
+
+/** One `/rewind` checkpoint from `x.ai/rewind/points`. */
+export interface RewindPointUi {
+  promptIndex: number;
+  createdAt: string;
+  numFileSnapshots: number;
+  hasFileChanges: boolean;
+  promptPreview?: string;
+}
+
+export type RewindMode = "all" | "conversation_only" | "files_only";
+
+/**
+ * MCP status for the chat top bar (TUI `McpInitProgress` + ready linger).
+ * - `connecting`: spinner + `MCP (n/m)` while handshakes run
+ * - `ready`: static `MCP · m` after `mcp_initialized` (desktop keeps this so
+ *   the chip does not vanish the moment init finishes)
+ */
+export type McpBadgePhase = "connecting" | "ready";
+
+export interface McpInitProgressUi {
+  connected: number;
+  total: number;
+  phase: McpBadgePhase;
+  /** From `mcp_initialized.mcpToolCount` when known. */
+  toolCount?: number;
+}
+
+export interface RewindExecuteResult {
+  success: boolean;
+  targetPromptIndex: number;
+  revertedFiles: string[];
+  cleanFiles: string[];
+  error?: string;
+  mode?: string;
+  promptText?: string;
 }
 
 export interface SearchSessionsOptions {
@@ -381,7 +525,7 @@ export interface TodoItemUi {
 /**
  * Goal subsystem state mirrored to the renderer for the 🎯 progress
  * bubble above the composer. Mirrors the xAI `goal_updated` payload
- * (camelCased for the renderer).
+ * (camelCased for the renderer). Fully aligned with TUI GoalDisplayState.
  */
 export interface GoalStateSnapshot {
   goalId: string;
@@ -410,6 +554,26 @@ export interface GoalStateSnapshot {
   classifierMaxRuns?: number;
   /** Wall-clock ms when the agent last sent an update. */
   updatedAt: number;
+  // ── TUI GoalDisplayState alignment (new fields) ──
+  /** Classifier verdict from last completion review. */
+  lastClassifierVerdict?: "Achieved" | "NotAchieved";
+  /** Path to classifier details file (if any). */
+  lastClassifierDetailsPath?: string;
+  /** Subagent metrics. */
+  totalWorkerRounds?: number;
+  totalVerifyRounds?: number;
+  liveSubagentTokens?: number;
+  liveContextPct?: number;
+  liveTurnCount?: number;
+  liveToolCallCount?: number;
+  /** Per-model token breakdown (sorted desc). */
+  liveTokensByModel?: Array<{ model: string; tokens: number }>;
+  /** Client-side timer extrapolation. */
+  receivedAt?: number;
+  elapsedFloorMs?: number;
+  /** Budget baseline (tokens at goal creation). */
+  tokenBaseline?: number;
+  finishedSubagentTokens?: number;
 }
 
 /**
@@ -524,6 +688,8 @@ export interface AppSnapshot {
   connection: ConnectionState;
   error?: string;
   workspace?: string;
+  /** CWD path with $HOME abbreviated as ~ (for status bar display). */
+  statusBarCwd?: string;
   sessionId?: string;
   sessionTitle?: string;
   modelId?: string;
@@ -573,6 +739,21 @@ export interface AppSnapshot {
   tokensUsed?: number;
   /** Model context window size (tokens). */
   contextWindow?: number;
+  /** Git branch name at workspace root (for status bar). */
+  gitBranch?: string;
+  /** True when the session cwd is a linked git worktree. */
+  isWorktree?: boolean;
+  /**
+   * Tilde-shortened main-repo path when {@link isWorktree}
+   * (TUI status bar: "worktree of …").
+   */
+  gitMainRepo?: string;
+  /**
+   * MCP servers still connecting (TUI status bar `MCP (n/m)`).
+   * Present only while init is in progress and `total > 0`.
+   * Cleared by `x.ai/mcp_initialized`.
+   */
+  mcpInitProgress?: McpInitProgressUi;
   /** Active permission prompt (front of queue), if any. */
   pendingPermission?: PermissionRequestUi;
   /**
@@ -705,13 +886,27 @@ export interface FileReadResult {
 /** MCP server row for management UI. */
 export type McpServerScope = "user" | "project";
 
+/** Session status from ACP `x.ai/mcp/list` (TUI McpsServerSession). */
+export type McpServerStatus =
+  | "ready"
+  | "initializing"
+  | "needs_auth"
+  | "setup_required"
+  | "unavailable";
+
 export interface McpServerEntry {
   name: string;
+  displayName?: string;
   enabled: boolean;
   scope: McpServerScope;
   transport: "stdio" | "http" | "sse";
-  /** Command line or URL. */
+  /** Command line, URL, or source label. */
   detail: string;
+  /** Live status from agent session (ACP list). */
+  status?: McpServerStatus;
+  toolCount?: number;
+  source?: string;
+  authRequired?: boolean;
 }
 
 export interface AddMcpServerInput {
@@ -732,6 +927,39 @@ export interface SkillEntry {
   path: string;
   scope: "local" | "user" | "bundled" | "compat";
   disabled: boolean;
+}
+
+/**
+ * A skill from the open skills catalog (skills.sh).
+ * Install with `npx skills add <source> --skill <skillId> -a grok`.
+ */
+export interface SkillCatalogEntry {
+  /** Full id: owner/repo/skillId */
+  id: string;
+  skillId: string;
+  name: string;
+  /** owner/repo source package */
+  source: string;
+  installs?: number;
+  /** https://skills.sh/... detail page */
+  url: string;
+}
+
+/** Install a catalog skill into Grok (user ~/.grok/skills or project .grok/skills). */
+export interface InstallSkillInput {
+  /** owner/repo or full package owner/repo@skill or GitHub URL */
+  source: string;
+  /** Specific skill name within a multi-skill repo (optional if @skill in source). */
+  skillId?: string;
+  /** user = -g (~/.grok/skills); project = workspace .grok/skills */
+  scope?: "user" | "project";
+}
+
+export interface InstallSkillResult {
+  message: string;
+  /** Best-effort installed skill name(s). */
+  installed?: string[];
+  stdout?: string;
 }
 
 export interface PluginEntry {
@@ -1000,6 +1228,16 @@ export interface DesktopApi {
   ) => Promise<void>;
   deleteSession: (sessionId: string, cwd: string) => Promise<void>;
   forkSession: (sessionId: string, cwd: string) => Promise<ForkSessionResult>;
+  /** List conversation rewind checkpoints for the focused session. */
+  listRewindPoints: () => Promise<RewindPointUi[]>;
+  /**
+   * Rewind focused session to a prompt index.
+   * Restores files when mode is `all` or `files_only`.
+   */
+  executeRewind: (
+    targetPromptIndex: number,
+    mode?: RewindMode,
+  ) => Promise<RewindExecuteResult>;
   searchSessions: (
     query: string,
     options?: SearchSessionsOptions,
@@ -1124,6 +1362,10 @@ export interface DesktopApi {
   ) => Promise<void>;
   listSkills: () => Promise<SkillEntry[]>;
   setSkillDisabled: (name: string, disabled: boolean) => Promise<void>;
+  /** Search skills.sh open catalog. */
+  searchSkillCatalog: (query: string) => Promise<SkillCatalogEntry[]>;
+  /** Install from skills.sh / GitHub via `npx skills add -a grok`. */
+  installSkill: (input: InstallSkillInput) => Promise<InstallSkillResult>;
   listPlugins: (available?: boolean) => Promise<PluginEntry[]>;
   installPlugin: (source: string) => Promise<void>;
   uninstallPlugin: (name: string) => Promise<void>;

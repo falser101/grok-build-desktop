@@ -17,9 +17,12 @@ import { homedir } from "node:os";
 import { resolveGrokBinary } from "./backend";
 import type {
   HookEntry,
+  InstallSkillInput,
+  InstallSkillResult,
   McpServerEntry,
   McpServerScope,
   PluginEntry,
+  SkillCatalogEntry,
   SkillEntry,
 } from "../shared/types";
 
@@ -349,12 +352,20 @@ async function readSkillsDisabled(): Promise<Set<string>> {
   return set;
 }
 
+function tomlStringArray(items: string[]): string {
+  if (items.length === 0) return "[]";
+  return `[${items
+    .map((n) => `"${n.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
+    .join(", ")}]`;
+}
+
 /**
- * Upsert skill name in `[skills].disabled` array.
+ * Upsert a key inside the `[skills]` table of ~/.grok/config.toml.
+ * `key` is e.g. `disabled` or `paths`; `values` replaces the array.
  */
-export async function setSkillDisabled(
-  name: string,
-  disabled: boolean,
+async function upsertSkillsTomlArray(
+  key: "disabled" | "paths" | "ignore",
+  values: string[],
 ): Promise<void> {
   const path = userConfigPath();
   let text = "";
@@ -363,19 +374,11 @@ export async function setSkillDisabled(
   } catch {
     text = "";
   }
-  const set = await readSkillsDisabled();
-  if (disabled) set.add(name);
-  else set.delete(name);
-  const arr = Array.from(set).sort();
-  const disabledLine =
-    arr.length === 0
-      ? `disabled = []`
-      : `disabled = [${arr.map((n) => `"${n.replace(/"/g, '\\"')}"`).join(", ")}]`;
-
+  const line = `${key} = ${tomlStringArray(values)}`;
   const lines = text.length ? text.split(/\r?\n/) : [];
   let inSkills = false;
   let sawSkills = false;
-  let disabledIdx = -1;
+  let keyIdx = -1;
   let skillsHeaderIdx = -1;
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i]!.trim();
@@ -387,15 +390,15 @@ export async function setSkillDisabled(
       }
       continue;
     }
-    if (inSkills && /^disabled\s*=/.test(t)) disabledIdx = i;
+    if (inSkills && new RegExp(`^${key}\\s*=`).test(t)) keyIdx = i;
   }
-  if (disabledIdx >= 0) {
-    lines[disabledIdx] = disabledLine;
+  if (keyIdx >= 0) {
+    lines[keyIdx] = line;
   } else if (sawSkills) {
-    lines.splice(skillsHeaderIdx + 1, 0, disabledLine);
+    lines.splice(skillsHeaderIdx + 1, 0, line);
   } else {
     if (lines.length && lines[lines.length - 1] !== "") lines.push("");
-    lines.push("[skills]", disabledLine);
+    lines.push("[skills]", line);
   }
   await writeFile(
     path,
@@ -403,6 +406,206 @@ export async function setSkillDisabled(
       (lines[lines.length - 1] === "" ? "" : "\n"),
     "utf8",
   );
+}
+
+async function readSkillsPaths(): Promise<string[]> {
+  const out: string[] = [];
+  try {
+    const text = await readFile(userConfigPath(), "utf8");
+    let inSkills = false;
+    for (const line of text.split(/\r?\n/)) {
+      const t = line.trim();
+      if (t.startsWith("[")) {
+        inSkills = t === "[skills]";
+        continue;
+      }
+      if (!inSkills) continue;
+      const m = t.match(/^paths\s*=\s*\[(.*)\]\s*(?:#.*)?$/);
+      if (m) {
+        for (const part of m[1]!.split(",")) {
+          const p = part.trim().replace(/^["']|["']$/g, "");
+          if (p) out.push(p);
+        }
+      }
+    }
+  } catch {
+    // no config
+  }
+  return out;
+}
+
+/**
+ * Upsert skill name in `[skills].disabled` array.
+ */
+export async function setSkillDisabled(
+  name: string,
+  disabled: boolean,
+): Promise<void> {
+  const set = await readSkillsDisabled();
+  if (disabled) set.add(name);
+  else set.delete(name);
+  await upsertSkillsTomlArray("disabled", Array.from(set).sort());
+}
+
+const SKILLS_SH_API = "https://skills.sh";
+
+/**
+ * Search the open skills catalog (skills.sh) — same source as `npx skills find`.
+ */
+export async function searchSkillCatalog(
+  query: string,
+): Promise<SkillCatalogEntry[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const url = `${SKILLS_SH_API}/api/search?${new URLSearchParams({ q }).toString()}`;
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) {
+    throw new Error(`skills.sh search failed (${res.status})`);
+  }
+  const raw = (await res.json()) as {
+    skills?: Array<Record<string, unknown>>;
+  };
+  const list = Array.isArray(raw.skills) ? raw.skills : [];
+  const out: SkillCatalogEntry[] = [];
+  for (const item of list) {
+    const skillId = String(item.skillId ?? item.name ?? "").trim();
+    const source = String(item.source ?? "").trim();
+    if (!skillId || !source) continue;
+    const id = String(item.id ?? `${source}/${skillId}`);
+    const name = String(item.name ?? skillId);
+    const installs =
+      typeof item.installs === "number" ? item.installs : undefined;
+    out.push({
+      id,
+      skillId,
+      name,
+      source,
+      installs,
+      url: `https://skills.sh/${id.replace(/^\/+/, "")}`,
+    });
+  }
+  return out;
+}
+
+/**
+ * Install a skill for Grok via the Skills CLI (`npx skills add -a grok`).
+ * Global scope → ~/.grok/skills; project → <cwd>/.grok/skills.
+ */
+export async function installSkillFromRegistry(
+  input: InstallSkillInput & { cwd?: string },
+): Promise<InstallSkillResult> {
+  let source = (input.source || "").trim();
+  if (!source) throw new Error("source is required");
+
+  // Allow package form owner/repo@skill
+  let skillId = (input.skillId || "").trim();
+  const at = source.indexOf("@");
+  if (!skillId && at > 0 && !source.startsWith("http")) {
+    skillId = source.slice(at + 1).trim();
+    source = source.slice(0, at).trim();
+  }
+
+  const scope = input.scope === "project" ? "project" : "user";
+  const args = ["--yes", "skills", "add", source, "-y", "-a", "grok", "--copy"];
+  if (scope === "user") args.push("-g");
+  if (skillId) args.push("--skill", skillId);
+
+  const result = await new Promise<{
+    stdout: string;
+    stderr: string;
+    code: number;
+  }>((resolvePromise, reject) => {
+    const child = spawn("npx", args, {
+      cwd: input.cwd || process.cwd(),
+      env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+      shell: false,
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error("skills install timed out (120s)"));
+    }, 120_000);
+    child.stdout?.on("data", (d: Buffer) => {
+      stdout += d.toString("utf8");
+    });
+    child.stderr?.on("data", (d: Buffer) => {
+      stderr += d.toString("utf8");
+    });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolvePromise({ stdout, stderr, code: code ?? 1 });
+    });
+  });
+
+  const combined = `${result.stdout}\n${result.stderr}`.trim();
+  if (result.code !== 0) {
+    const snippet = combined.slice(-800) || `exit ${result.code}`;
+    throw new Error(`skills install failed: ${snippet}`);
+  }
+
+  const installed: string[] = [];
+  // e.g. "✓ vercel-react-best-practices (copied)" or "→ ~/.grok/skills/foo"
+  for (const line of combined.split(/\r?\n/)) {
+    const m =
+      line.match(/[✓✔]\s+([a-zA-Z0-9_.:-]+)\s*\(/) ||
+      line.match(/→\s+.*\/skills\/([a-zA-Z0-9_.:-]+)/);
+    if (m?.[1] && !installed.includes(m[1])) installed.push(m[1]);
+  }
+  if (skillId && !installed.includes(skillId)) installed.push(skillId);
+
+  const label = skillId || source;
+  const where =
+    scope === "user" ? "~/.grok/skills" : ".grok/skills (project)";
+  return {
+    message: `Installed ${label} → ${where}`,
+    installed,
+    stdout: combined.slice(0, 4000),
+  };
+}
+
+/** @deprecated kept for internal path config; not used by catalog install UI */
+export async function addSkillPath(
+  rawPath: string,
+  cwd?: string,
+): Promise<{ path: string; message: string }> {
+  const trimmed = rawPath.trim();
+  if (!trimmed) throw new Error("path is required");
+
+  let expanded = trimmed;
+  if (trimmed === "~") {
+    expanded = homedir();
+  } else if (trimmed.startsWith("~/")) {
+    expanded = join(homedir(), trimmed.slice(2));
+  } else if (!trimmed.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(trimmed)) {
+    expanded = resolve(cwd || process.cwd(), trimmed);
+  }
+
+  let resolved = expanded;
+  try {
+    const { realpath } = await import("node:fs/promises");
+    resolved = await realpath(expanded);
+  } catch {
+    resolved = resolve(expanded);
+  }
+
+  const paths = await readSkillsPaths();
+  if (!paths.includes(resolved)) {
+    paths.push(resolved);
+    await upsertSkillsTomlArray("paths", paths);
+  }
+
+  return {
+    path: resolved,
+    message: `Added path ${resolved} to [skills].paths`,
+  };
 }
 
 export async function listSkills(cwd?: string): Promise<SkillEntry[]> {

@@ -9,6 +9,7 @@ import type { LocalePref, ThemePref, UserPrefs } from "./prefs";
 import type { Messages } from "./i18n";
 import { AgentSettingsView } from "./AgentSettingsView";
 import { ModelsView } from "./ModelsView";
+import { ExtensionsView } from "./ExtensionsView";
 
 /**
  * Identifiers for the left-rail sections of the settings page. Imported by
@@ -19,6 +20,8 @@ export type SettingsSectionId =
   | "general"
   | "account"
   | "models"
+  | "mcp"
+  | "skills"
   | "agent"
   | "about";
 
@@ -457,13 +460,26 @@ export function SettingsView({
 
   // Nav sections shown in the left rail. Each maps to one or more cards in
   // the right pane. Defaults to the most common entry point (account).
-  const SECTIONS: { id: SettingsSectionId; label: string }[] = [
-    { id: "general", label: m.settingsNavGeneral },
-    { id: "account", label: m.settingsNavAccount },
-    { id: "models", label: m.settingsNavModels },
-    { id: "agent", label: m.settingsNavAgent },
-    { id: "about", label: m.settingsNavAbout },
-  ];
+  const SECTIONS: { id: SettingsSectionId; label: string }[] = useMemo(
+    () => [
+      { id: "general", label: m.settingsNavGeneral },
+      { id: "account", label: m.settingsNavAccount },
+      { id: "models", label: m.settingsNavModels },
+      { id: "mcp", label: m.settingsNavMcp },
+      { id: "skills", label: m.settingsNavSkills },
+      { id: "agent", label: m.settingsNavAgent },
+      { id: "about", label: m.settingsNavAbout },
+    ],
+    [
+      m.settingsNavGeneral,
+      m.settingsNavAccount,
+      m.settingsNavModels,
+      m.settingsNavMcp,
+      m.settingsNavSkills,
+      m.settingsNavAgent,
+      m.settingsNavAbout,
+    ],
+  );
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(
     initialSection ?? "general",
   );
@@ -476,6 +492,8 @@ export function SettingsView({
   useEffect(() => {
     if (!initialSectionSeen.current) {
       initialSectionSeen.current = true;
+      // Still apply initialSection on first mount when provided.
+      if (initialSection) setActiveSection(initialSection);
       return;
     }
     setActiveSection(initialSection ?? "general");
@@ -484,7 +502,7 @@ export function SettingsView({
     const q = navQuery.trim().toLowerCase();
     if (!q) return SECTIONS;
     return SECTIONS.filter((s) => s.label.toLowerCase().includes(q));
-  }, [navQuery]);
+  }, [navQuery, SECTIONS]);
 
   return (
     <div className="settings-page settings-page-nav">
@@ -625,6 +643,28 @@ export function SettingsView({
             </div>
           ) : null}
 
+          {activeSection === "mcp" ? (
+            <div className="settings-ext-embed">
+              <ExtensionsView
+                m={m}
+                embedded
+                onlyTabs={["mcp"]}
+                initialTab="mcp"
+              />
+            </div>
+          ) : null}
+
+          {activeSection === "skills" ? (
+            <div className="settings-ext-embed">
+              <ExtensionsView
+                m={m}
+                embedded
+                onlyTabs={["skills"]}
+                initialTab="skills"
+              />
+            </div>
+          ) : null}
+
           {activeSection === "agent" ? (
             <AgentSettingsView
               status={installerStatus}
@@ -687,6 +727,21 @@ function SettingsNavIcon({
         <svg {...common}>
           <path d="M8 1.5l5.5 3v6L8 13.5 2.5 10.5v-6z" />
           <path d="M8 7.5l5.5-3M8 7.5L2.5 4.5M8 7.5v6" />
+        </svg>
+      );
+    case "mcp":
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="2.5" width="4" height="4" rx="1" />
+          <rect x="9.5" y="2.5" width="4" height="4" rx="1" />
+          <rect x="2.5" y="9.5" width="4" height="4" rx="1" />
+          <path d="M6.5 4.5h3M4.5 6.5v3M11.5 6.5v3" />
+        </svg>
+      );
+    case "skills":
+      return (
+        <svg {...common}>
+          <path d="M8 2.5l1.5 3.2 3.5.4-2.6 2.4.7 3.4L8 10.2 4.9 11.9l.7-3.4L3 6.1l3.5-.4z" />
         </svg>
       );
     case "agent":

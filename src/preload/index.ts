@@ -8,6 +8,8 @@ import type {
   AppSnapshot,
   AskUserQuestionResponse,
   DesktopApi,
+  InstallSkillInput,
+  InstallSkillResult,
   ExternalEditorDescriptor,
   ExtensionsConfigPaths,
   FetchModelsInput,
@@ -33,6 +35,7 @@ import type {
   SearchSessionsOptions,
   SessionModeId,
   SessionSearchHit,
+  SkillCatalogEntry,
   SkillEntry,
   TermHostEvent,
   TermStartResult,
@@ -66,6 +69,19 @@ const api: DesktopApi = {
       sessionId,
       cwd,
     ) as Promise<ForkSessionResult>,
+  listRewindPoints: () =>
+    ipcRenderer.invoke("agent:listRewindPoints") as Promise<
+      import("../shared/types").RewindPointUi[]
+    >,
+  executeRewind: (
+    targetPromptIndex: number,
+    mode?: import("../shared/types").RewindMode,
+  ) =>
+    ipcRenderer.invoke(
+      "agent:executeRewind",
+      targetPromptIndex,
+      mode,
+    ) as Promise<import("../shared/types").RewindExecuteResult>,
   searchSessions: (query: string, options?: SearchSessionsOptions) =>
     ipcRenderer.invoke(
       "agent:searchSessions",
@@ -191,6 +207,12 @@ const api: DesktopApi = {
     ipcRenderer.invoke("ext:listSkills") as Promise<SkillEntry[]>,
   setSkillDisabled: (name: string, disabled: boolean) =>
     ipcRenderer.invoke("ext:setSkillDisabled", name, disabled) as Promise<void>,
+  searchSkillCatalog: (query: string) =>
+    ipcRenderer.invoke("ext:searchSkillCatalog", query) as Promise<
+      SkillCatalogEntry[]
+    >,
+  installSkill: (input: InstallSkillInput) =>
+    ipcRenderer.invoke("ext:installSkill", input) as Promise<InstallSkillResult>,
   listPlugins: (available?: boolean) =>
     ipcRenderer.invoke("ext:listPlugins", available) as Promise<PluginEntry[]>,
   installPlugin: (source: string) =>

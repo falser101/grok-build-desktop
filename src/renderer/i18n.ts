@@ -156,6 +156,15 @@ export interface Messages {
   /** Left-edge history timeline rail: each tick is one user message. */
   historyTimelineTooltip: string;
   historyTimelineJump: string;
+  /** Chat chrome overflow (ⓘ) — status details when the column is narrow. */
+  chromeStatusMore: string;
+  chromeStatusPath: string;
+  chromeStatusBranch: string;
+  chromeStatusWorktree: string;
+  chromeStatusUsage: string;
+  chromeStatusModel: string;
+  /** MCP connecting chip tooltip. */
+  chromeStatusMcp: string;
   /** Floating button above the composer that returns to the latest message. */
   jumpToBottom: string;
   /** Per-turn collapsible group header (one per assistant response). */
@@ -189,6 +198,8 @@ export interface Messages {
   toolOutputTruncated: string;
   /** e.g. "2 files" for multi-diff tool cards. */
   toolDiffCount: string;
+  /** e.g. "5 matches" for search tool cards. */
+  toolSearchMatches: string;
   /** Copy one timeline bubble to clipboard. */
   copyMessage: string;
   /** Short confirm after copy. */
@@ -264,6 +275,8 @@ export interface Messages {
   goalStatusPausedNoProgress: string;
   goalStatusPausedError: string;
   goalStatusBlocked: string;
+  goalStatusFailed: string;
+  goalStatusInterrupted: string;
   goalStatusBudgetLimited: string;
   goalStatusComplete: string;
   goalPhasePlanning: string;
@@ -277,6 +290,7 @@ export interface Messages {
   goalDetailClose: string;
   goalDetailStatus: string;
   goalDetailTokens: string;
+  goalDetailBudget: string;
   goalDetailElapsed: string;
   goalProgressSection: string;
   goalNoProgressItems: string;
@@ -285,6 +299,9 @@ export interface Messages {
   goalActiveSubagent: string;
   goalPausedResumeHint: string;
   goalDetailEscHint: string;
+  /** Footer slash-command strip (TUI goal_detail commands hint). */
+  goalDetailCommands: string;
+  goalDetailCommandsFailed: string;
   /** Short label rendered before the raw `pause_message` text
    *  in the goal detail modal — mirrors TUI `format_pause_reason()`'s
    *  "Reason: " prefix. */
@@ -293,6 +310,15 @@ export interface Messages {
    *  they can resume via `/goal resume`. `{status}` is replaced with the
    *  localised paused status label (e.g. "Paused (error)"). */
   goalPausedResumeLine: string;
+  /** Failed/interrupted recovery line — `{status}` replaced. */
+  goalFailedClearLine: string;
+  goalCompletionReview: string;
+  goalLastVerdict: string;
+  goalAttempts: string;
+  goalDetails: string;
+  goalVerdictAchieved: string;
+  goalVerdictNotAchieved: string;
+  goalVerdictPending: string;
   goalEventCreated: string;
   goalEventPlanningStarted: string;
   goalEventPlanningCompleted: string;
@@ -300,12 +326,19 @@ export interface Messages {
   goalEventWorkerStarted: string;
   goalEventWorkerCompleted: string;
   goalEventWorkerFailed: string;
+  goalEventContextRotated: string;
   goalEventPaused: string;
+  goalEventPausedWithDetail: string;
   goalEventResumed: string;
   goalEventCompleted: string;
   goalEventCleared: string;
   goalEventBudgetExceeded: string;
-  /** Action button tooltips on the goal progress bubble (hover-only). */
+  goalEventPrematureStop: string;
+  goalEventPrematureStopWithDetail: string;
+  goalEventJustNow: string;
+  /** Relative time: `{t}` is e.g. `2m` → "2m ago". */
+  goalEventAgo: string;
+  /** Kept for goal_action timeline cards (slash still used by those). */
   goalActionPause: string;
   goalActionResume: string;
   goalActionClear: string;
@@ -597,6 +630,17 @@ export interface Messages {
   planTodoPendingCount: string;
   planTodoDoneCount: string;
   planTodoHigh: string;
+  /** Dedicated Todo pane (TUI TodoPane). */
+  todoPanelTitle: string;
+  todoPanelEmpty: string;
+  sidePanelTodo: string;
+  todoStatInProgress: string;
+  todoStatPending: string;
+  todoStatCompleted: string;
+  todoStatCancelled: string;
+  todoPriorityHigh: string;
+  todoPriorityMedium: string;
+  todoPriorityLow: string;
   planEmpty: string;
   planEmptyInPlanMode: string;
   planApprovalNeeded: string;
@@ -616,6 +660,26 @@ export interface Messages {
   planProgressPending: string;
   /** Hover popup title on the task progress button. */
   planProgressTasksTitle: string;
+
+  // Conversation rewind (/rewind)
+  rewindTitle: string;
+  rewindHint: string;
+  rewindLoading: string;
+  rewindEmpty: string;
+  rewindNoPreview: string;
+  rewindHasFiles: string;
+  rewindFilesBadge: string;
+  rewindModeLabel: string;
+  rewindModeAll: string;
+  rewindModeConversation: string;
+  rewindModeFiles: string;
+  rewindCancel: string;
+  rewindConfirm: string;
+  rewindWorking: string;
+  rewindClose: string;
+  rewindFailed: string;
+  rewindSuccess: string;
+  rewindSuccessWithFiles: string;
 
   // Folder-trust prompt (x.ai/folder_trust/request)
   trustKicker: string;
@@ -678,7 +742,29 @@ export interface Messages {
   extEnabled: string;
   extDisabled: string;
   extMcpEmpty: string;
+  extMcpStatusReady: string;
+  extMcpStatusInit: string;
+  extMcpStatusAuth: string;
+  extMcpStatusSetup: string;
+  extMcpStatusDown: string;
+  extMcpTools: string;
+  settingsNavMcp: string;
+  settingsNavSkills: string;
   extSkillsEmpty: string;
+  /** Skills tab: browse skills.sh catalog and install. */
+  extAddSkill: string;
+  extAddSkillHint: string;
+  extSkillSearch: string;
+  extSkillSearchPlaceholder: string;
+  extSkillSearchBtn: string;
+  extSkillSearchEmpty: string;
+  extSkillInstalls: string;
+  extSkillPackage: string;
+  extSkillPackagePlaceholder: string;
+  extSkillPackageHint: string;
+  extSkillInstalling: string;
+  extSkillInstalled: string;
+  extSkillOpenCatalog: string;
   extPluginsEmpty: string;
   extHooksEmpty: string;
   extInstallPlugin: string;
@@ -896,6 +982,13 @@ const en: Messages = {
   currentTurnPinHint: "Jump to this message",
   historyTimelineTooltip: "Message history",
   historyTimelineJump: "Jump to this message",
+  chromeStatusMore: "Status details",
+  chromeStatusPath: "Path",
+  chromeStatusBranch: "Branch",
+  chromeStatusWorktree: "Worktree",
+  chromeStatusUsage: "Usage",
+  chromeStatusModel: "Model",
+  chromeStatusMcp: "MCP servers — click to manage",
   jumpToBottom: "Jump to latest message",
   turnGroupToggle: "Thinking & tool calls",
   turnGroupInner: "Show thinking and tool calls",
@@ -917,6 +1010,7 @@ const en: Messages = {
   toolOutput: "Output",
   toolOutputTruncated: "Output truncated for display",
   toolDiffCount: "{n} file(s)",
+  toolSearchMatches: "{n} matches",
   copyMessage: "Copy message",
   copied: "Copied",
   copyFailed: "Could not copy",
@@ -979,6 +1073,8 @@ const en: Messages = {
   goalStatusPausedNoProgress: "Paused (no progress)",
   goalStatusPausedError: "Paused (error)",
   goalStatusBlocked: "Paused (verification blocked)",
+  goalStatusFailed: "Failed",
+  goalStatusInterrupted: "Interrupted",
   goalStatusBudgetLimited: "Budget",
   goalStatusComplete: "Done",
   goalPhasePlanning: "Planning",
@@ -992,6 +1088,7 @@ const en: Messages = {
   goalDetailClose: "Close",
   goalDetailStatus: "Status",
   goalDetailTokens: "Tokens",
+  goalDetailBudget: "Budget",
   goalDetailElapsed: "Elapsed",
   goalProgressSection: "Progress",
   goalNoProgressItems: "No progress items yet",
@@ -1000,8 +1097,18 @@ const en: Messages = {
   goalActiveSubagent: "Active Subagent",
   goalPausedResumeHint: "Goal paused — resume to continue",
   goalDetailEscHint: "Esc to close",
+  goalDetailCommands: "Esc: close  /goal resume | pause | status | clear",
+  goalDetailCommandsFailed: "Esc: close  /goal clear, then start a new goal",
   goalPauseReasonLabel: "Reason: ",
-  goalPausedResumeLine: "{status} — type /goal resume to continue",
+  goalPausedResumeLine: "Status: {status} — type /goal resume to continue",
+  goalFailedClearLine: "Status: {status} — type /goal clear, then start a new goal",
+  goalCompletionReview: "Completion review",
+  goalLastVerdict: "Last verdict",
+  goalAttempts: "Attempts",
+  goalDetails: "Details",
+  goalVerdictAchieved: "Achieved",
+  goalVerdictNotAchieved: "Not Achieved",
+  goalVerdictPending: "Not yet evaluated",
   goalEventCreated: "Goal created",
   goalEventPlanningStarted: "Planning started",
   goalEventPlanningCompleted: "Planning completed",
@@ -1009,11 +1116,17 @@ const en: Messages = {
   goalEventWorkerStarted: "Worker started",
   goalEventWorkerCompleted: "Worker completed",
   goalEventWorkerFailed: "Worker failed",
-  goalEventPaused: "Goal paused",
-  goalEventResumed: "Goal resumed",
-  goalEventCompleted: "Goal completed",
-  goalEventCleared: "Goal cleared",
+  goalEventContextRotated: "Context rotated",
+  goalEventPaused: "Paused",
+  goalEventPausedWithDetail: "Paused: {detail}",
+  goalEventResumed: "Resumed",
+  goalEventCompleted: "Completed",
+  goalEventCleared: "Cleared",
   goalEventBudgetExceeded: "Budget exceeded",
+  goalEventPrematureStop: "Stopped early",
+  goalEventPrematureStopWithDetail: "Stopped early: {detail}",
+  goalEventJustNow: "just now",
+  goalEventAgo: "{t} ago",
   goalActionPause: "Pause",
   goalActionResume: "Resume",
   goalActionClear: "Clear",
@@ -1283,6 +1396,17 @@ const en: Messages = {
   planTodoPendingCount: "{n} pending",
   planTodoDoneCount: "{n} done",
   planTodoHigh: "High priority",
+  todoPanelTitle: "Todos",
+  todoPanelEmpty:
+    "No todos yet. They appear when the agent writes a task list.",
+  sidePanelTodo: "Todos",
+  todoStatInProgress: "{n} active",
+  todoStatPending: "{n} pending",
+  todoStatCompleted: "{n} done",
+  todoStatCancelled: "{n} cancelled",
+  todoPriorityHigh: "high",
+  todoPriorityMedium: "med",
+  todoPriorityLow: "low",
   planEmpty:
     "No plan written yet. Enter plan mode with /plan or wait for the agent to write plan.md.",
   planEmptyInPlanMode:
@@ -1303,6 +1427,26 @@ const en: Messages = {
   planProgressStep: "Step {n} / {total}",
   planProgressPending: "{n} more",
   planProgressTasksTitle: "Tasks",
+
+  rewindTitle: "Rewind conversation",
+  rewindHint:
+    "Pick a user turn to roll back to. Later messages (and optionally file changes) will be discarded.",
+  rewindLoading: "Loading checkpoints…",
+  rewindEmpty: "No rewind points yet. Send a prompt first.",
+  rewindNoPreview: "(no preview)",
+  rewindHasFiles: "This turn has file snapshots",
+  rewindFilesBadge: "{n} files",
+  rewindModeLabel: "What to restore",
+  rewindModeAll: "Conversation + files",
+  rewindModeConversation: "Conversation only",
+  rewindModeFiles: "Files only",
+  rewindCancel: "Cancel",
+  rewindConfirm: "Rewind",
+  rewindWorking: "Rewinding…",
+  rewindClose: "Close",
+  rewindFailed: "Rewind failed",
+  rewindSuccess: "Rewound to turn #{n}",
+  rewindSuccessWithFiles: "Rewound to turn #{n} · restored {files} file(s)",
 
   trustKicker: "Trust folder",
   trustTitle: "Trust this workspace?",
@@ -1363,8 +1507,31 @@ const en: Messages = {
   extRemoveConfirm: 'Remove MCP server "{name}"?',
   extEnabled: "On",
   extDisabled: "Off",
-  extMcpEmpty: "No MCP servers configured. Add one above or run `grok mcp add`.",
+  extMcpEmpty:
+    "No MCP servers on this session. Add one above, or open a session in a project that configures MCP.",
+  extMcpStatusReady: "ready",
+  extMcpStatusInit: "connecting",
+  extMcpStatusAuth: "needs auth",
+  extMcpStatusSetup: "setup required",
+  extMcpStatusDown: "unavailable",
+  extMcpTools: "{n} tools",
+  settingsNavMcp: "MCP",
+  settingsNavSkills: "Skills",
   extSkillsEmpty: "No skills found under ~/.grok/skills or the workspace.",
+  extAddSkill: "Install from catalog",
+  extAddSkillHint:
+    "Search skills.sh and install with `npx skills add -a grok` into ~/.grok/skills (user) or .grok/skills (project).",
+  extSkillSearch: "Search catalog",
+  extSkillSearchPlaceholder: "e.g. react, pr review, deploy…",
+  extSkillSearchBtn: "Search",
+  extSkillSearchEmpty: "No matching skills. Try different keywords.",
+  extSkillInstalls: "{n} installs",
+  extSkillPackage: "Or paste package",
+  extSkillPackagePlaceholder: "owner/repo@skill  or  https://github.com/…",
+  extSkillPackageHint: "Same as `npx skills add <package> -a grok -y`",
+  extSkillInstalling: "Installing…",
+  extSkillInstalled: "Installed",
+  extSkillOpenCatalog: "Open skills.sh",
   extPluginsEmpty: "No plugins installed. Install from a source or browse the marketplace.",
   extHooksEmpty:
     "No hook files found. Put JSON under ~/.grok/hooks/ or the project .grok/hooks/.",
@@ -1584,6 +1751,13 @@ const zh: Messages = {
   currentTurnPinHint: "定位到这条消息",
   historyTimelineTooltip: "消息时间轴",
   historyTimelineJump: "定位到这条消息",
+  chromeStatusMore: "状态详情",
+  chromeStatusPath: "路径",
+  chromeStatusBranch: "分支",
+  chromeStatusWorktree: "Worktree",
+  chromeStatusUsage: "用量",
+  chromeStatusModel: "模型",
+  chromeStatusMcp: "MCP 服务器 — 点击管理",
   jumpToBottom: "回到最新消息",
   turnGroupToggle: "思考与工具调用",
   turnGroupInner: "查看思考与工具调用",
@@ -1605,6 +1779,7 @@ const zh: Messages = {
   toolOutput: "输出",
   toolOutputTruncated: "输出已截断显示",
   toolDiffCount: "{n} 个文件",
+  toolSearchMatches: "{n} 个匹配",
   copyMessage: "复制消息",
   copied: "已复制",
   copyFailed: "复制失败",
@@ -1666,8 +1841,10 @@ const zh: Messages = {
   goalStatusPausedNoProgress: "已暂停（无进展）",
   goalStatusPausedError: "已暂停（错误）",
   goalStatusBlocked: "已暂停（验证阻塞）",
-  goalStatusBudgetLimited: "预算上限",
-  goalStatusComplete: "已完成",
+  goalStatusFailed: "失败",
+  goalStatusInterrupted: "已中断",
+  goalStatusBudgetLimited: "预算",
+  goalStatusComplete: "完成",
   goalPhasePlanning: "规划中",
   goalPhaseExecuting: "执行中",
   goalPhaseIdle: "空闲",
@@ -1679,16 +1856,27 @@ const zh: Messages = {
   goalDetailClose: "关闭",
   goalDetailStatus: "状态",
   goalDetailTokens: "Tokens",
+  goalDetailBudget: "预算",
   goalDetailElapsed: "耗时",
   goalProgressSection: "进度",
   goalNoProgressItems: "暂无进度项",
-  goalProgressMore: "另有 {n} 项",
+  goalProgressMore: "+{n} 项",
   goalRecentHistory: "最近历史",
   goalActiveSubagent: "活动子代理",
   goalPausedResumeHint: "目标已暂停 — 恢复后继续",
   goalDetailEscHint: "Esc 关闭",
+  goalDetailCommands: "Esc: 关闭  /goal resume | pause | status | clear",
+  goalDetailCommandsFailed: "Esc: 关闭  /goal clear，然后重新设定目标",
   goalPauseReasonLabel: "原因：",
-  goalPausedResumeLine: "{status} — 输入 /goal resume 继续",
+  goalPausedResumeLine: "状态: {status} — 输入 /goal resume 继续",
+  goalFailedClearLine: "状态: {status} — 输入 /goal clear，然后重新设定目标",
+  goalCompletionReview: "完成复核",
+  goalLastVerdict: "最近判定",
+  goalAttempts: "尝试次数",
+  goalDetails: "详情",
+  goalVerdictAchieved: "已达成",
+  goalVerdictNotAchieved: "未达成",
+  goalVerdictPending: "尚未评估",
   goalEventCreated: "目标已创建",
   goalEventPlanningStarted: "开始规划",
   goalEventPlanningCompleted: "规划完成",
@@ -1696,11 +1884,17 @@ const zh: Messages = {
   goalEventWorkerStarted: "工作子代理已启动",
   goalEventWorkerCompleted: "工作子代理完成",
   goalEventWorkerFailed: "工作子代理失败",
-  goalEventPaused: "目标已暂停",
-  goalEventResumed: "目标已恢复",
-  goalEventCompleted: "目标已完成",
-  goalEventCleared: "目标已清除",
+  goalEventContextRotated: "上下文已轮转",
+  goalEventPaused: "已暂停",
+  goalEventPausedWithDetail: "已暂停: {detail}",
+  goalEventResumed: "已恢复",
+  goalEventCompleted: "已完成",
+  goalEventCleared: "已清除",
   goalEventBudgetExceeded: "超出预算",
+  goalEventPrematureStop: "提前停止",
+  goalEventPrematureStopWithDetail: "提前停止: {detail}",
+  goalEventJustNow: "刚刚",
+  goalEventAgo: "{t} 前",
   goalActionPause: "暂停",
   goalActionResume: "恢复",
   goalActionClear: "清除",
@@ -1966,6 +2160,16 @@ const zh: Messages = {
   planTodoPendingCount: "{n} 待办",
   planTodoDoneCount: "{n} 完成",
   planTodoHigh: "高优先级",
+  todoPanelTitle: "任务清单",
+  todoPanelEmpty: "暂无任务。代理通过 todo_write 写入后会显示在这里。",
+  sidePanelTodo: "任务清单",
+  todoStatInProgress: "{n} 进行中",
+  todoStatPending: "{n} 待办",
+  todoStatCompleted: "{n} 已完成",
+  todoStatCancelled: "{n} 已取消",
+  todoPriorityHigh: "高",
+  todoPriorityMedium: "中",
+  todoPriorityLow: "低",
   planEmpty: "尚无计划。使用 /plan 进入计划模式，或等待代理写入 plan.md。",
   planEmptyInPlanMode: "已处于计划模式。代理探索时会写入 plan.md。",
   planApprovalNeeded: "待审批",
@@ -1983,6 +2187,26 @@ const zh: Messages = {
   planProgressStep: "第 {n} / {total} 步",
   planProgressPending: "还有 {n} 步",
   planProgressTasksTitle: "任务清单",
+
+  rewindTitle: "回滚对话",
+  rewindHint:
+    "选择要回到的用户轮次。之后的消息（以及可选的文件改动）会被丢弃。",
+  rewindLoading: "加载检查点…",
+  rewindEmpty: "暂无回滚点。先发送一条提示词。",
+  rewindNoPreview: "（无预览）",
+  rewindHasFiles: "该轮包含可还原的文件快照",
+  rewindFilesBadge: "{n} 个文件",
+  rewindModeLabel: "还原范围",
+  rewindModeAll: "对话 + 文件",
+  rewindModeConversation: "仅对话",
+  rewindModeFiles: "仅文件",
+  rewindCancel: "取消",
+  rewindConfirm: "回滚",
+  rewindWorking: "回滚中…",
+  rewindClose: "关闭",
+  rewindFailed: "回滚失败",
+  rewindSuccess: "已回滚到第 #{n} 轮",
+  rewindSuccessWithFiles: "已回滚到第 #{n} 轮 · 还原 {files} 个文件",
 
   trustKicker: "信任文件夹",
   trustTitle: "信任此工作区？",
@@ -2043,8 +2267,31 @@ const zh: Messages = {
   extRemoveConfirm: '移除 MCP 服务器 "{name}"？',
   extEnabled: "开",
   extDisabled: "关",
-  extMcpEmpty: "尚未配置 MCP 服务器。可在上方添加，或使用 `grok mcp add`。",
+  extMcpEmpty:
+    "当前会话没有 MCP 服务器。可在上方添加，或在已配置 MCP 的工作区打开会话。",
+  extMcpStatusReady: "就绪",
+  extMcpStatusInit: "连接中",
+  extMcpStatusAuth: "需认证",
+  extMcpStatusSetup: "需配置",
+  extMcpStatusDown: "不可用",
+  extMcpTools: "{n} 个工具",
+  settingsNavMcp: "MCP",
+  settingsNavSkills: "技能",
   extSkillsEmpty: "在 ~/.grok/skills 或工作区中未发现 Skills。",
+  extAddSkill: "从仓库安装",
+  extAddSkillHint:
+    "搜索 skills.sh，并用 `npx skills add -a grok` 安装到 ~/.grok/skills（用户）或 .grok/skills（项目）。",
+  extSkillSearch: "搜索技能仓库",
+  extSkillSearchPlaceholder: "例如 react、pr review、deploy…",
+  extSkillSearchBtn: "搜索",
+  extSkillSearchEmpty: "没有匹配结果，试试其他关键词。",
+  extSkillInstalls: "{n} 次安装",
+  extSkillPackage: "或粘贴包名",
+  extSkillPackagePlaceholder: "owner/repo@skill  或  https://github.com/…",
+  extSkillPackageHint: "等同于 `npx skills add <package> -a grok -y`",
+  extSkillInstalling: "安装中…",
+  extSkillInstalled: "已安装",
+  extSkillOpenCatalog: "打开 skills.sh",
   extPluginsEmpty: "尚未安装插件。可从源安装或浏览 Marketplace。",
   extHooksEmpty:
     "未找到 Hook 文件。请放到 ~/.grok/hooks/ 或项目 .grok/hooks/。",

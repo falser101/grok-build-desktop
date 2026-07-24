@@ -22,15 +22,14 @@ import {
   addMcpServer,
   getConfigPaths,
   installPlugin,
+  installSkillFromRegistry,
   listHooks,
-  listMcpServers,
   listPlugins,
-  listSkills,
   readHookPreview,
   removeMcpServer,
+  searchSkillCatalog,
   setMcpEnabled,
   setPluginEnabled,
-  setSkillDisabled,
   uninstallPlugin,
   type AddMcpInput,
 } from "./extensions-manager";
@@ -475,6 +474,24 @@ function registerIpc(): void {
     },
   );
 
+  ipcMain.handle("agent:listRewindPoints", async () => {
+    return backend.listRewindPoints();
+  });
+
+  ipcMain.handle(
+    "agent:executeRewind",
+    async (_e, targetPromptIndex: number, mode?: string) => {
+      if (typeof targetPromptIndex !== "number" || !Number.isFinite(targetPromptIndex)) {
+        throw new Error("targetPromptIndex is required");
+      }
+      const m =
+        mode === "conversation_only" || mode === "files_only" || mode === "all"
+          ? mode
+          : "all";
+      return backend.executeRewind(targetPromptIndex, m);
+    },
+  );
+
   ipcMain.handle(
     "agent:searchSessions",
     async (_e, query: string, options?: SearchSessionsOptions) => {
@@ -775,7 +792,8 @@ function registerIpc(): void {
   const workspaceCwd = () => backend.snapshot().workspace || process.cwd();
 
   ipcMain.handle("ext:listMcp", async () => {
-    return listMcpServers(workspaceCwd());
+    // Prefer ACP session list (same as TUI); backend falls back to CLI.
+    return backend.listMcpServers();
   });
 
   ipcMain.handle("ext:addMcp", async (_e, input: AddMcpInput) => {
@@ -812,7 +830,8 @@ function registerIpc(): void {
   );
 
   ipcMain.handle("ext:listSkills", async () => {
-    return listSkills(workspaceCwd());
+    // Prefer ACP skills/list (same as TUI); backend falls back to disk scan.
+    return backend.listSkillsCatalog();
   });
 
   ipcMain.handle(
@@ -824,7 +843,39 @@ function registerIpc(): void {
       if (typeof disabled !== "boolean") {
         throw new Error("disabled must be boolean");
       }
-      await setSkillDisabled(name.trim(), disabled);
+      // Prefer ACP skills/toggle (same as TUI); backend falls back to config.
+      await backend.setSkillEnabled(name.trim(), !disabled);
+    },
+  );
+
+  ipcMain.handle("ext:searchSkillCatalog", async (_e, query: string) => {
+    if (typeof query !== "string") throw new Error("query is required");
+    return searchSkillCatalog(query);
+  });
+
+  ipcMain.handle(
+    "ext:installSkill",
+    async (
+      _e,
+      input: { source?: string; skillId?: string; scope?: string },
+    ) => {
+      if (!input || typeof input !== "object") {
+        throw new Error("input is required");
+      }
+      if (typeof input.source !== "string" || !input.source.trim()) {
+        throw new Error("source is required");
+      }
+      const scope =
+        input.scope === "project" ? ("project" as const) : ("user" as const);
+      return installSkillFromRegistry({
+        source: input.source.trim(),
+        skillId:
+          typeof input.skillId === "string" && input.skillId.trim()
+            ? input.skillId.trim()
+            : undefined,
+        scope,
+        cwd: workspaceCwd(),
+      });
     },
   );
 

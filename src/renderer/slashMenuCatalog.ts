@@ -95,4 +95,12 @@ export const DESKTOP_SLASH_MENU: SlashMenuDef[] = [
     action: "fill",
     requireAcp: true,
   },
+  {
+    name: "rewind",
+    titleZh: "回滚对话",
+    titleEn: "Rewind conversation",
+    descZh: "回到更早的用户轮次，可还原文件",
+    descEn: "Roll back to an earlier turn; optionally restore files",
+    action: "execute",
+  },
 ];

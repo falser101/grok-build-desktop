@@ -39,11 +39,18 @@ import type {
   PlanApprovalOutcome,
   PlanApprovalUi,
   PromptAttachment,
+  McpInitProgressUi,
+  McpServerEntry,
+  McpServerStatus,
   PromptPayload,
+  RewindExecuteResult,
+  RewindMode,
+  RewindPointUi,
   SearchSessionsOptions,
   SessionModeId,
   SessionSearchHit,
   SessionSummary,
+  SkillEntry,
   TimelineItem,
   TodoItemUi,
   AgentActivity,
@@ -233,6 +240,20 @@ interface GoalStatePayload {
   classifierRunsAttempted?: number;
   classifierMaxRuns?: number;
   updatedAt: number;
+  // TUI GoalDisplayState alignment
+  lastClassifierVerdict?: "Achieved" | "NotAchieved";
+  lastClassifierDetailsPath?: string;
+  totalWorkerRounds?: number;
+  totalVerifyRounds?: number;
+  liveSubagentTokens?: number;
+  liveContextPct?: number;
+  liveTurnCount?: number;
+  liveToolCallCount?: number;
+  liveTokensByModel?: Array<{ model: string; tokens: number }>;
+  receivedAt?: number;
+  elapsedFloorMs?: number;
+  tokenBaseline?: number;
+  finishedSubagentTokens?: number;
 }
 
 interface PendingPlanApprovalEntry {
@@ -319,6 +340,8 @@ interface SessionRuntime {
   goalState?: GoalStatePayload | null;
   /** Goal-scoped todos — persisted alongside `goalState`. */
   goalTodos: TodoItemUi[];
+  /** MCP init progress for this session (TUI top-bar chip). */
+  mcpInitProgress?: McpInitProgressUi;
 }
 
 function emptyRuntime(sessionId: string, cwd: string): SessionRuntime {
@@ -632,6 +655,138 @@ function asNumber(v: JsonValue | undefined): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
+/**
+ * Parse ACP `x.ai/mcp/list` response into UI rows (TUI McpsListResponse).
+ */
+function parseMcpListResponse(raw: JsonValue): McpServerEntry[] {
+  const rec = asRecord(raw) ?? {};
+  const body = asRecord(rec.result as JsonValue) ?? rec;
+  const serversRaw = Array.isArray(body.servers)
+    ? body.servers
+    : Array.isArray(body)
+      ? body
+      : [];
+  const out: McpServerEntry[] = [];
+  for (const item of serversRaw) {
+    const entry = asRecord(item as JsonValue);
+    if (!entry) continue;
+    const name = asString(entry.name);
+    if (!name) continue;
+    const session = asRecord(entry.session as JsonValue);
+    const enabled = session
+      ? session.enabled !== false
+      : entry.enabled !== false;
+    const statusRaw = (asString(session?.status) ?? "").toLowerCase();
+    let status: McpServerStatus | undefined;
+    if (session?.setup_required === true || session?.setupRequired === true) {
+      status = "setup_required";
+    } else if (
+      session?.auth_required === true ||
+      session?.authRequired === true
+    ) {
+      status = "needs_auth";
+    } else if (!enabled) {
+      status = "unavailable";
+    } else if (statusRaw === "ready") {
+      status = "ready";
+    } else if (statusRaw === "initializing") {
+      status = "initializing";
+    } else if (statusRaw === "setuprequired") {
+      status = "setup_required";
+    } else if (session) {
+      status = "unavailable";
+    }
+    const tools = Array.isArray(session?.tools)
+      ? (session!.tools as JsonValue[])
+      : [];
+    const toolCount = tools.length;
+    const source =
+      asString(entry.sourceLabel) ??
+      asString(entry.source_label) ??
+      asString(entry.source) ??
+      undefined;
+    const configType = (
+      asString(entry.type) ??
+      asString(entry.configType) ??
+      asString(entry.config_type) ??
+      ""
+    ).toLowerCase();
+    let transport: McpServerEntry["transport"] = "stdio";
+    if (configType === "sse") transport = "sse";
+    else if (
+      configType === "http" ||
+      configType === "streamablehttp" ||
+      configType === "streamable_http"
+    ) {
+      transport = "http";
+    }
+    const detail =
+      source ||
+      asString(entry.displayName) ||
+      asString(entry.display_name) ||
+      name;
+    // Scope is not always on the wire; default user (project configs still list).
+    const scope: McpServerEntry["scope"] =
+      asString(entry.scope) === "project" ? "project" : "user";
+    out.push({
+      name,
+      displayName:
+        asString(entry.displayName) ??
+        asString(entry.display_name) ??
+        undefined,
+      enabled,
+      scope,
+      transport,
+      detail,
+      status,
+      toolCount,
+      source,
+      authRequired:
+        session?.auth_required === true || session?.authRequired === true,
+    });
+  }
+  return out;
+}
+
+/** Parse ACP `x.ai/skills/list` → SkillEntry[]. */
+function parseSkillsListResponse(raw: JsonValue): SkillEntry[] {
+  const rec = asRecord(raw) ?? {};
+  const body = asRecord(rec.result as JsonValue) ?? rec;
+  const list = Array.isArray(body.skills)
+    ? body.skills
+    : Array.isArray(body)
+      ? body
+      : [];
+  const out: SkillEntry[] = [];
+  for (const item of list) {
+    const s = asRecord(item as JsonValue);
+    if (!s) continue;
+    const name = asString(s.name);
+    if (!name) continue;
+    const scopeRaw = (asString(s.scope) ?? "user").toLowerCase();
+    const scope: SkillEntry["scope"] =
+      scopeRaw === "local" ||
+      scopeRaw === "bundled" ||
+      scopeRaw === "compat" ||
+      scopeRaw === "user"
+        ? (scopeRaw as SkillEntry["scope"])
+        : "user";
+    const enabled = s.enabled !== false;
+    out.push({
+      name,
+      description:
+        asString(s.shortDescription) ??
+        asString(s.short_description) ??
+        asString(s.description) ??
+        "",
+      path: asString(s.path) ?? "",
+      scope,
+      disabled: !enabled,
+    });
+  }
+  return out;
+}
+
 async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path, fsConstants.X_OK);
@@ -809,9 +964,47 @@ function toolContentFields(update: Record<string, JsonValue>): {
   };
 }
 
+/** Parse workflow progress fields from a session update payload. */
+function parseWorkflowProgress(
+  update: Record<string, JsonValue>,
+): Extract<TimelineItem, { kind: "workflow" }>["progress"] {
+  const launched =
+    asNumber(update.agents_launched) ??
+    asNumber(update.agentsLaunched);
+  const completed =
+    asNumber(update.agents_completed) ??
+    asNumber(update.agentsCompleted);
+  const used =
+    asNumber(update.budget_used) ??
+    asNumber(update.budgetUsed);
+  const total =
+    asNumber(update.budget_total) ??
+    asNumber(update.budgetTotal) ??
+    asNumber(update.agent_budget) ??
+    asNumber(update.agentBudget);
+  if (
+    typeof launched !== "number" &&
+    typeof completed !== "number" &&
+    typeof used !== "number" &&
+    typeof total !== "number"
+  ) {
+    return undefined;
+  }
+  return {
+    agentsLaunched: launched ?? 0,
+    agentsCompleted: completed ?? 0,
+    budgetUsed: used ?? 0,
+    budgetTotal: total ?? 0,
+  };
+}
+
 function projectName(cwd: string): string {
   const base = basename(cwd.replace(/[/\\]+$/, "") || cwd);
   return base || cwd;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function parseAvailableCommands(
@@ -1089,6 +1282,50 @@ function titleFromSummary(s: Record<string, JsonValue>): string {
   return "New session";
 }
 
+function extractSessionCardDetail(
+  rec: Record<string, JsonValue>,
+  info: Record<string, JsonValue> | undefined,
+): SessionCardDetail | undefined {
+  const numMessages =
+    asNumber(rec.num_messages) ?? asNumber(rec.numMessages);
+  const turnCount =
+    asNumber(rec.turn_count) ?? asNumber(rec.turnCount);
+  const toolCallCount =
+    asNumber(rec.tool_call_count) ?? asNumber(rec.toolCallCount);
+  const firstPromptPreview =
+    asString(rec.first_prompt_preview) ?? asString(rec.firstPromptPreview);
+  const hostname =
+    asString(rec.hostname) ?? asString(info?.hostname);
+  const createdAt =
+    asString(rec.created_at) ?? asString(rec.createdAt) ?? asString(info?.created_at);
+  const updatedAt =
+    asString(rec.updated_at) ?? asString(rec.updatedAt);
+  const source =
+    asString(info?.source) ?? asString(rec.source);
+  if (
+    typeof numMessages !== "number" &&
+    typeof turnCount !== "number" &&
+    typeof toolCallCount !== "number" &&
+    !firstPromptPreview &&
+    !hostname &&
+    !createdAt &&
+    !updatedAt &&
+    !source
+  ) {
+    return undefined;
+  }
+  return {
+    numMessages,
+    turnCount,
+    toolCallCount,
+    firstPromptPreview,
+    hostname,
+    createdAt,
+    updatedAt,
+    source,
+  };
+}
+
 function parseModels(modelsVal: JsonValue | undefined): {
   current?: string;
   available: ModelInfo[];
@@ -1178,6 +1415,22 @@ export class AgentBackend {
   private connection: ConnectionState = "idle";
   private error?: string;
   private workspace?: string;
+  /** Git branch at workspace root (fetched on session start / switch). */
+  private gitBranch?: string;
+  /** True when cwd is a linked git worktree (git-dir ≠ common-dir). */
+  private isWorktree?: boolean;
+  /**
+   * Tilde-shortened path of the main repo when {@link isWorktree}.
+   * Mirrors TUI `main_repo` / status bar "(worktree of …)".
+   */
+  private gitMainRepo?: string;
+  /** Interval id for throttled git refresh while a session is open. */
+  private gitRefreshTimer?: ReturnType<typeof setInterval>;
+  /**
+   * MCP server connection progress for the focused session.
+   * From `x.ai/mcp/init_progress`; cleared by `x.ai/mcp_initialized`.
+   */
+  private mcpInitProgress?: McpInitProgressUi;
   private sessionId?: string;
   private sessionTitle?: string;
   private modelId?: string;
@@ -1378,6 +1631,12 @@ export class AgentBackend {
       connection: this.connection,
       error: this.error,
       workspace: this.workspace,
+      statusBarCwd: this.workspace
+        ? this.workspace.replace(
+            new RegExp(`^${escapeRegex(process.env.HOME ?? "~")}`),
+            "~",
+          )
+        : undefined,
       sessionId: this.sessionId,
       sessionTitle: this.sessionTitle,
       modelId: this.modelId,
@@ -1417,6 +1676,12 @@ export class AgentBackend {
       replaying: this.replaying,
       tokensUsed: this.tokensUsed,
       contextWindow: this.contextWindow,
+      gitBranch: this.gitBranch,
+      isWorktree: this.isWorktree,
+      gitMainRepo: this.gitMainRepo,
+      mcpInitProgress: this.mcpInitProgress
+        ? { ...this.mcpInitProgress }
+        : undefined,
       pendingPermission: activePerm
         ? {
             ...activePerm.ui,
@@ -1481,6 +1746,22 @@ export class AgentBackend {
               classifierRunsAttempted: gs.classifierRunsAttempted,
               classifierMaxRuns: gs.classifierMaxRuns,
               updatedAt: gs.updatedAt,
+              // TUI GoalDisplayState alignment
+              lastClassifierVerdict: gs.lastClassifierVerdict,
+              lastClassifierDetailsPath: gs.lastClassifierDetailsPath,
+              totalWorkerRounds: gs.totalWorkerRounds,
+              totalVerifyRounds: gs.totalVerifyRounds,
+              liveSubagentTokens: gs.liveSubagentTokens,
+              liveContextPct: gs.liveContextPct,
+              liveTurnCount: gs.liveTurnCount,
+              liveToolCallCount: gs.liveToolCallCount,
+              liveTokensByModel: gs.liveTokensByModel
+                ? gs.liveTokensByModel.map((m) => ({ ...m }))
+                : undefined,
+              receivedAt: gs.receivedAt,
+              elapsedFloorMs: gs.elapsedFloorMs,
+              tokenBaseline: gs.tokenBaseline,
+              finishedSubagentTokens: gs.finishedSubagentTokens,
             }
           : undefined;
       })(),
@@ -1585,6 +1866,9 @@ export class AgentBackend {
       // replay when switching sessions).
       goalState: prev?.goalState ?? null,
       goalTodos: prev?.goalTodos ? prev.goalTodos.map((t) => ({ ...t })) : [],
+      mcpInitProgress: this.mcpInitProgress
+        ? { ...this.mcpInitProgress }
+        : prev?.mcpInitProgress,
     });
   }
 
@@ -1821,6 +2105,9 @@ export class AgentBackend {
     this.toolIndex = rt.toolIndex;
     this.todos = rt.todos;
     this.planContent = rt.planContent;
+    this.mcpInitProgress = rt.mcpInitProgress
+      ? { ...rt.mcpInitProgress }
+      : undefined;
     // goalState / goalTodos are now read directly from SessionRuntime
     // by snapshot() — no hydration needed. They survive session switches
     // because they live in the per-session runtime bag.
@@ -3501,6 +3788,8 @@ export class AgentBackend {
             "",
           modelId:
             asString(rec.current_model_id) || asString(rec.currentModelId),
+          source: asString(info?.source) ?? asString(rec.source) ?? "grok",
+          cardDetail: extractSessionCardDetail(rec, info),
         });
       }
       this.sessions = sessions;
@@ -3626,6 +3915,312 @@ export class AgentBackend {
     this.emitSnapshot();
   }
 
+  /** Collapse `$HOME` prefix to `~` (status bar display). */
+  private collapseHomePath(p: string): string {
+    const home = process.env.HOME ?? "";
+    if (home && (p === home || p.startsWith(home + "/") || p.startsWith(home + "\\"))) {
+      return `~${p.slice(home.length)}`;
+    }
+    return p;
+  }
+
+  /**
+   * Apply git display fields and emit only when something actually changed.
+   * Used by both the local `git rev-parse` probe and `x.ai/git_head_changed`.
+   */
+  private applyGitInfo(next: {
+    branch?: string;
+    isWorktree?: boolean;
+    mainRepo?: string;
+  }): void {
+    const branch = next.branch;
+    const isWorktree = Boolean(next.isWorktree);
+    const mainRepo = isWorktree ? next.mainRepo : undefined;
+    if (
+      this.gitBranch === branch &&
+      this.isWorktree === isWorktree &&
+      this.gitMainRepo === mainRepo
+    ) {
+      return;
+    }
+    this.gitBranch = branch;
+    this.isWorktree = isWorktree;
+    this.gitMainRepo = mainRepo;
+    this.emitSnapshot();
+  }
+
+  private clearGitInfo(): void {
+    if (
+      this.gitBranch === undefined &&
+      !this.isWorktree &&
+      this.gitMainRepo === undefined
+    ) {
+      return;
+    }
+    this.gitBranch = undefined;
+    this.isWorktree = false;
+    this.gitMainRepo = undefined;
+    this.emitSnapshot();
+  }
+
+  /**
+   * Fetch branch + linked-worktree info for the workspace (fire-and-forget).
+   *
+   * Aligned with TUI `git_info::compute_cwd_git_info`:
+   * - branch shorthand (or `detached` when HEAD is detached)
+   * - `is_worktree` when `git-dir` ≠ `git-common-dir`
+   * - `main_repo` = parent of common dir (tilde-shortened)
+   *
+   * Prefer ACP `x.ai/git_head_changed` for live updates; this probe runs
+   * on session start/switch and on a slow interval as a fallback.
+   */
+  private async refreshGitBranch(): Promise<void> {
+    if (!this.workspace) {
+      this.clearGitInfo();
+      return;
+    }
+    const cwd = this.workspace;
+    try {
+      const { execFile } = await import("child_process");
+      const path = await import("path");
+      const run = (args: string[]): Promise<string> =>
+        new Promise((resolve, reject) => {
+          execFile(
+            "git",
+            args,
+            { cwd, timeout: 5000 },
+            (err, stdout) => {
+              if (err) reject(err);
+              else resolve(String(stdout ?? "").trim());
+            },
+          );
+        });
+
+      const inside = await run(["rev-parse", "--is-inside-work-tree"]).catch(
+        () => "",
+      );
+      if (inside !== "true") {
+        this.clearGitInfo();
+        return;
+      }
+
+      let branch = await run(["rev-parse", "--abbrev-ref", "HEAD"]).catch(
+        () => "",
+      );
+      if (!branch || branch === "HEAD") {
+        const short = await run(["rev-parse", "--short", "HEAD"]).catch(
+          () => "",
+        );
+        // TUI uses empty string for detached; we show a readable label.
+        branch = short ? `detached@${short}` : "detached";
+      }
+
+      const gitDir = await run(["rev-parse", "--git-dir"]).catch(() => "");
+      const commonDir = await run(["rev-parse", "--git-common-dir"]).catch(
+        () => "",
+      );
+      const absGit = gitDir ? path.resolve(cwd, gitDir) : "";
+      const absCommon = commonDir ? path.resolve(cwd, commonDir) : "";
+      // Linked worktree: worktree git dir is not the shared common dir.
+      const isWorktree = Boolean(
+        absGit && absCommon && absGit !== absCommon,
+      );
+
+      let mainRepo: string | undefined;
+      if (isWorktree && absCommon) {
+        // common dir is typically <main>/.git — parent is the main workdir.
+        const parent = path.dirname(absCommon);
+        mainRepo = this.collapseHomePath(parent);
+      }
+
+      this.applyGitInfo({ branch, isWorktree, mainRepo });
+    } catch {
+      // Transient git failure — keep previous display rather than blanking.
+    }
+  }
+
+  /** Start slow poll so branch switches outside ACP still appear. */
+  private ensureGitRefreshLoop(): void {
+    if (this.gitRefreshTimer) return;
+    this.gitRefreshTimer = setInterval(() => {
+      if (this.workspace) void this.refreshGitBranch();
+    }, 12_000);
+    // Don't keep the process alive solely for this timer (Electron main).
+    if (typeof this.gitRefreshTimer === "object" && "unref" in this.gitRefreshTimer) {
+      (this.gitRefreshTimer as NodeJS.Timeout).unref?.();
+    }
+  }
+
+  /** Write MCP badge into active session and its runtime bag. */
+  private setMcpProgressForSession(
+    sessionId: string | undefined,
+    progress: McpInitProgressUi | undefined,
+  ): void {
+    if (sessionId && this.sessionId && sessionId !== this.sessionId) {
+      const rt = this.runtimes.get(sessionId);
+      if (!rt) return;
+      rt.mcpInitProgress = progress ? { ...progress } : undefined;
+      return;
+    }
+    this.mcpInitProgress = progress ? { ...progress } : undefined;
+    const sid = sessionId ?? this.sessionId;
+    if (sid) {
+      const rt = this.runtimes.get(sid);
+      if (rt) rt.mcpInitProgress = progress ? { ...progress } : undefined;
+    }
+    this.emitSnapshot();
+  }
+
+  /**
+   * ACP `x.ai/mcp/init_progress` — `{ total, connected, sessionId? }`.
+   * Updates focused session or the matching parked runtime bag.
+   */
+  private handleMcpInitProgress(params: JsonValue | undefined): void {
+    const rec = asRecord(params);
+    if (!rec) return;
+    const total =
+      asNumber(rec.total) ?? asNumber(rec.Total) ?? undefined;
+    const connected =
+      asNumber(rec.connected) ?? asNumber(rec.Connected) ?? undefined;
+    if (total == null || connected == null) return;
+    // total===0 is a seed; TUI hides the top-bar chip until real servers.
+    if (total <= 0) return;
+    const progress: McpInitProgressUi = {
+      total: Math.floor(total),
+      connected: Math.max(0, Math.floor(connected)),
+      phase: "connecting",
+    };
+    const sessionId =
+      asString(rec.sessionId) ?? asString(rec.session_id) ?? undefined;
+
+    if (sessionId && this.sessionId && sessionId !== this.sessionId) {
+      const rt = this.runtimes.get(sessionId);
+      if (!rt) return;
+      const prev = rt.mcpInitProgress;
+      if (
+        prev?.phase === "connecting" &&
+        prev.total === progress.total &&
+        prev.connected === progress.connected
+      ) {
+        return;
+      }
+      rt.mcpInitProgress = progress;
+      return;
+    }
+
+    const prev = this.mcpInitProgress;
+    if (
+      prev?.phase === "connecting" &&
+      prev.total === progress.total &&
+      prev.connected === progress.connected
+    ) {
+      return;
+    }
+    this.setMcpProgressForSession(sessionId, progress);
+  }
+
+  /**
+   * ACP `x.ai/mcp_initialized` — stop spinner; keep a ready chip when we
+   * know there are servers/tools so the badge does not flash away.
+   */
+  private handleMcpInitialized(params: JsonValue | undefined): void {
+    const rec = asRecord(params);
+    const sessionId = rec
+      ? (asString(rec.sessionId) ?? asString(rec.session_id) ?? undefined)
+      : undefined;
+    const toolCount =
+      asNumber(rec?.mcpToolCount) ??
+      asNumber(rec?.mcp_tool_count) ??
+      undefined;
+
+    const applyReady = (prev: McpInitProgressUi | undefined): McpInitProgressUi | undefined => {
+      const total = prev && prev.total > 0 ? prev.total : 0;
+      // No servers were handshaking and no tools → nothing to show.
+      if (total <= 0 && !(toolCount && toolCount > 0)) {
+        return undefined;
+      }
+      const servers = total > 0 ? total : 0;
+      return {
+        total: servers > 0 ? servers : prev?.total ?? 0,
+        connected: servers > 0 ? servers : prev?.connected ?? 0,
+        phase: "ready",
+        toolCount:
+          typeof toolCount === "number" && toolCount >= 0
+            ? Math.floor(toolCount)
+            : prev?.toolCount,
+      };
+    };
+
+    if (sessionId && this.sessionId && sessionId !== this.sessionId) {
+      const rt = this.runtimes.get(sessionId);
+      if (!rt) return;
+      rt.mcpInitProgress = applyReady(rt.mcpInitProgress);
+      return;
+    }
+
+    const next = applyReady(this.mcpInitProgress);
+    // If we never saw init_progress but tools exist, still show ready.
+    const resolved =
+      next ??
+      (toolCount && toolCount > 0
+        ? {
+            total: 0,
+            connected: 0,
+            phase: "ready" as const,
+            toolCount: Math.floor(toolCount),
+          }
+        : undefined);
+    if (
+      this.mcpInitProgress?.phase === resolved?.phase &&
+      this.mcpInitProgress?.total === resolved?.total &&
+      this.mcpInitProgress?.connected === resolved?.connected &&
+      this.mcpInitProgress?.toolCount === resolved?.toolCount
+    ) {
+      return;
+    }
+    this.setMcpProgressForSession(sessionId, resolved);
+  }
+
+  /**
+   * ACP `x.ai/git_head_changed` — live branch/worktree update from the agent.
+   * Payload: `{ sessionId, branch?, isWorktree?, mainRepo? }` (camel or snake).
+   */
+  private handleGitHeadChanged(params: JsonValue | undefined): void {
+    const rec = asRecord(params);
+    if (!rec) return;
+    const sessionId =
+      asString(rec.sessionId) ?? asString(rec.session_id) ?? undefined;
+    // Only apply to focused session when session id is present.
+    if (sessionId && this.sessionId && sessionId !== this.sessionId) {
+      return;
+    }
+    const branchRaw = asString(rec.branch);
+    // Empty string = detached HEAD (TUI convention).
+    const branch =
+      branchRaw === undefined
+        ? undefined
+        : branchRaw === ""
+          ? "detached"
+          : branchRaw;
+    const isWorktree =
+      rec.isWorktree === true ||
+      rec.is_worktree === true ||
+      Boolean(asString(rec.mainRepo) ?? asString(rec.main_repo));
+    let mainRepo =
+      asString(rec.mainRepo) ?? asString(rec.main_repo) ?? undefined;
+    if (mainRepo) mainRepo = this.collapseHomePath(mainRepo);
+    if (branch === undefined && !isWorktree) {
+      // Notification without branch and not a worktree — re-probe.
+      void this.refreshGitBranch();
+      return;
+    }
+    this.applyGitInfo({
+      branch: branch ?? this.gitBranch,
+      isWorktree,
+      mainRepo,
+    });
+  }
+
   async newSession(workspace: string): Promise<void> {
     return this.withSessionOp(async () => {
       await this.connect();
@@ -3669,6 +4264,7 @@ export class AgentBackend {
       this.toolIndex = new Map();
       this.todos = [];
       this.planContent = undefined;
+      this.mcpInitProgress = undefined;
       this.resetTurnFlags();
       // Keep `/` skills visible while session/new is in flight (was wiped to []).
       this.availableCommands = await mergeDiskSkillsIntoCommands(
@@ -3704,6 +4300,8 @@ export class AgentBackend {
         this.refreshCommands(),
         this.refreshContextUsage(),
       ]);
+      void this.refreshGitBranch();
+      this.ensureGitRefreshLoop();
       // Final guarantee after async follow-ups.
       this.resetTurnFlags();
       this.syncActiveIntoRuntimes();
@@ -3744,6 +4342,8 @@ export class AgentBackend {
         this.emitSnapshot();
         void this.refreshCommands();
         void this.refreshContextUsage();
+        void this.refreshGitBranch();
+        this.ensureGitRefreshLoop();
         this.log("info", `Switched to warm session ${sessionId}`);
         return;
       }
@@ -3762,7 +4362,12 @@ export class AgentBackend {
       this.toolIndex = new Map();
       this.todos = [];
       this.planContent = undefined;
+      this.mcpInitProgress = undefined;
       this.emitSnapshot();
+
+      // Fire-and-forget git branch detection (won't block load).
+      void this.refreshGitBranch();
+      this.ensureGitRefreshLoop();
 
       // Remaining non-visual setup (doesn't affect the loading snapshot).
       this.streamingAssistantId = null;
@@ -3896,6 +4501,98 @@ export class AgentBackend {
     await this.refreshHistory();
   }
 
+  /**
+   * List MCP servers the same way as TUI: ACP `x.ai/mcp/list` with the
+   * active session id. Falls back to CLI `grok mcp list --json` when there
+   * is no live session / agent.
+   */
+  async listMcpServers(): Promise<McpServerEntry[]> {
+    const cwd = this.workspace || process.cwd();
+    if (this.sessionId && this.client?.connected) {
+      try {
+        const raw = await this.requestExt(
+          "mcp/list",
+          {
+            sessionId: this.sessionId,
+            cache: false,
+          },
+          30_000,
+        );
+        if (!isAbsorbedByStream(raw)) {
+          const parsed = parseMcpListResponse(raw);
+          if (parsed.length > 0) return parsed;
+          // Empty array is a valid ACP answer (no servers on this session).
+          return parsed;
+        }
+      } catch (err) {
+        this.log(
+          "warn",
+          `mcp/list ACP failed, falling back to CLI: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    const { listMcpServers: listCli } = await import("./extensions-manager");
+    return listCli(cwd);
+  }
+
+  /**
+   * List skills via ACP `x.ai/skills/list` (TUI source). Falls back to disk
+   * scan when the agent is unavailable.
+   */
+  async listSkillsCatalog(): Promise<SkillEntry[]> {
+    const cwd = this.workspace || process.cwd();
+    if (this.client?.connected) {
+      try {
+        const raw = await this.requestExt(
+          "skills/list",
+          { cwd },
+          30_000,
+        );
+        if (!isAbsorbedByStream(raw)) {
+          return parseSkillsListResponse(raw);
+        }
+      } catch (err) {
+        this.log(
+          "warn",
+          `skills/list ACP failed, falling back to disk: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    const { listSkills } = await import("./extensions-manager");
+    return listSkills(cwd);
+  }
+
+  /**
+   * Toggle skill enabled flag (TUI `x.ai/skills/toggle`). Falls back to
+   * config.toml `[skills].disabled`.
+   */
+  async setSkillEnabled(name: string, enabled: boolean): Promise<void> {
+    const cwd = this.workspace || process.cwd();
+    if (this.client?.connected) {
+      try {
+        await this.requestExt(
+          "skills/toggle",
+          { name, enabled, cwd },
+          30_000,
+        );
+        return;
+      } catch (err) {
+        this.log(
+          "warn",
+          `skills/toggle ACP failed, falling back to config: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    const { setSkillDisabled } = await import("./extensions-manager");
+    await setSkillDisabled(name, !enabled);
+  }
+
   async forkSession(
     sessionId: string,
     cwd: string,
@@ -3925,6 +4622,142 @@ export class AgentBackend {
       newCwd,
       parentSessionId: asString(rec?.parentSessionId) ?? sessionId,
     };
+  }
+
+  /**
+   * List rewind checkpoints (`x.ai/rewind/points`).
+   * Newest prompts last; UI usually reverses for top-first display.
+   */
+  async listRewindPoints(): Promise<RewindPointUi[]> {
+    if (!this.sessionId) throw new Error("No active session");
+    await this.connect();
+    const raw = await this.requestExt(
+      "rewind/points",
+      { sessionId: this.sessionId },
+      30_000,
+    );
+    if (isAbsorbedByStream(raw)) {
+      throw new Error("Rewind points request absorbed by stream");
+    }
+    const rec = asRecord(raw) ?? {};
+    const body = asRecord(rec.result as JsonValue) ?? rec;
+    const list = Array.isArray(body.rewindPoints)
+      ? body.rewindPoints
+      : Array.isArray(body.rewind_points)
+        ? body.rewind_points
+        : [];
+    const points: RewindPointUi[] = [];
+    for (const item of list) {
+      const row = asRecord(item as JsonValue);
+      if (!row) continue;
+      const promptIndex =
+        asNumber(row.promptIndex) ?? asNumber(row.prompt_index);
+      if (promptIndex == null) continue;
+      points.push({
+        promptIndex,
+        createdAt:
+          asString(row.createdAt) ?? asString(row.created_at) ?? "",
+        numFileSnapshots:
+          asNumber(row.numFileSnapshots) ??
+          asNumber(row.num_file_snapshots) ??
+          0,
+        hasFileChanges:
+          row.hasFileChanges === true ||
+          row.has_file_changes === true ||
+          (asNumber(row.numFileSnapshots) ??
+            asNumber(row.num_file_snapshots) ??
+            0) > 0,
+        promptPreview:
+          asString(row.promptPreview) ??
+          asString(row.prompt_preview) ??
+          undefined,
+      });
+    }
+    return points;
+  }
+
+  /**
+   * Execute conversation rewind to `targetPromptIndex` (and optionally
+   * restore file snapshots). Reloads the session timeline afterwards.
+   */
+  async executeRewind(
+    targetPromptIndex: number,
+    mode: RewindMode = "all",
+  ): Promise<RewindExecuteResult> {
+    if (!this.sessionId) throw new Error("No active session");
+    if (!Number.isFinite(targetPromptIndex) || targetPromptIndex < 0) {
+      throw new Error("Invalid targetPromptIndex");
+    }
+    const sid = this.sessionId;
+    const cwd = this.workspace ?? "";
+    await this.connect();
+    const raw = await this.requestExt(
+      "rewind/execute",
+      {
+        sessionId: sid,
+        targetPromptIndex,
+        force: true,
+        mode,
+      },
+      120_000,
+    );
+    if (isAbsorbedByStream(raw)) {
+      throw new Error("Rewind execute absorbed by stream");
+    }
+    const rec = asRecord(raw) ?? {};
+    const body = asRecord(rec.result as JsonValue) ?? rec;
+    const success = body.success !== false && !asString(body.error);
+    const result: RewindExecuteResult = {
+      success,
+      targetPromptIndex:
+        asNumber(body.targetPromptIndex) ??
+        asNumber(body.target_prompt_index) ??
+        targetPromptIndex,
+      revertedFiles: Array.isArray(body.revertedFiles)
+        ? (body.revertedFiles as JsonValue[])
+            .map((f) => (typeof f === "string" ? f : ""))
+            .filter(Boolean)
+        : Array.isArray(body.reverted_files)
+          ? (body.reverted_files as JsonValue[])
+              .map((f) => (typeof f === "string" ? f : ""))
+              .filter(Boolean)
+          : [],
+      cleanFiles: Array.isArray(body.cleanFiles)
+        ? (body.cleanFiles as JsonValue[])
+            .map((f) => (typeof f === "string" ? f : ""))
+            .filter(Boolean)
+        : Array.isArray(body.clean_files)
+          ? (body.clean_files as JsonValue[])
+              .map((f) => (typeof f === "string" ? f : ""))
+              .filter(Boolean)
+          : [],
+      error: asString(body.error),
+      mode: asString(body.mode) ?? mode,
+      promptText:
+        asString(body.promptText) ?? asString(body.prompt_text) ?? undefined,
+    };
+    this.log(
+      "info",
+      `Rewind session=${sid.slice(0, 8)} → prompt#${result.targetPromptIndex} ` +
+        `mode=${result.mode} success=${result.success}`,
+    );
+    // Reload timeline so UI matches agent state after truncate.
+    if (success && cwd) {
+      try {
+        // Force cold reload: drop warm bag so loadSession re-fetches.
+        this.runtimes.delete(sid);
+        this.sessionId = undefined;
+        await this.loadSession(sid, cwd);
+      } catch (err) {
+        this.log(
+          "warn",
+          `Post-rewind reload failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    return result;
   }
 
   async searchSessions(
@@ -4138,6 +4971,30 @@ export class AgentBackend {
       method === "x.ai/sessions/changed"
     ) {
       void this.refreshHistory();
+      return;
+    }
+    // Live git branch / worktree updates (TUI status bar source of truth).
+    if (
+      method === "_x.ai/git_head_changed" ||
+      method === "x.ai/git_head_changed"
+    ) {
+      this.handleGitHeadChanged(params);
+      return;
+    }
+    // MCP servers connecting — TUI top-bar `MCP (n/m)` chip.
+    if (
+      method === "_x.ai/mcp/init_progress" ||
+      method === "x.ai/mcp/init_progress"
+    ) {
+      this.handleMcpInitProgress(params);
+      return;
+    }
+    // MCP finished connecting for a session — clear the chip.
+    if (
+      method === "_x.ai/mcp_initialized" ||
+      method === "x.ai/mcp_initialized"
+    ) {
+      this.handleMcpInitialized(params);
       return;
     }
     // Agent model catalog hot-reload (config.toml [model.*] / models_cache).
@@ -4783,6 +5640,176 @@ const streaming = !this.replaying && this.activity === "working";
       return;
     }
 
+    // ── Subagent lifecycle (aligns with TUI SubagentBlock) ──────────
+    if (kind === "subagent_spawned" || kind === "SubagentSpawned") {
+      this.finalizeStreaming();
+      this.clearReopenableThought();
+      this.pushTimeline({
+        id: newId("sub"),
+        kind: "subagent",
+        subagentId:
+          asString(update.subagent_id) ??
+          asString(update.subagentId) ??
+          newId("subagent"),
+        childSessionId:
+          asString(update.child_session_id) ??
+          asString(update.childSessionId),
+        subagentType:
+          asString(update.subagent_type) ??
+          asString(update.subagentType) ??
+          "unknown",
+        persona: asString(update.persona),
+        role: asString(update.role),
+        status: "running",
+      });
+      return;
+    }
+
+    if (kind === "subagent_progress" || kind === "SubagentProgress") {
+      const sid =
+        asString(update.subagent_id) ?? asString(update.subagentId);
+      if (!sid) return;
+      this.updateLastSubagentCard((item) => ({
+        ...item,
+        progress: {
+          tokens:
+            asNumber(update.live_subagent_tokens) ??
+            asNumber(update.liveSubagentTokens) ??
+            item.progress?.tokens,
+          turns:
+            asNumber(update.live_turn_count) ??
+            asNumber(update.liveTurnCount) ??
+            item.progress?.turns,
+          toolCalls:
+            asNumber(update.live_tool_call_count) ??
+            asNumber(update.liveToolCallCount) ??
+            item.progress?.toolCalls,
+        },
+      }));
+      return;
+    }
+
+    if (kind === "subagent_finished" || kind === "SubagentFinished") {
+      const sid =
+        asString(update.subagent_id) ?? asString(update.subagentId);
+      if (!sid) return;
+      const outcome =
+        asString(update.outcome) ??
+        asString(update.status) ??
+        "completed";
+      const finalStatus =
+        outcome === "success" || outcome === "completed"
+          ? ("completed" as const)
+          : outcome === "cancelled"
+            ? ("cancelled" as const)
+            : ("failed" as const);
+      this.updateLastSubagentCard((item) => ({
+        ...item,
+        status: finalStatus,
+      }));
+      return;
+    }
+
+    // ── Workflow lifecycle (aligns with TUI WorkflowBlock) ─────────
+    if (kind === "workflow_updated" || kind === "WorkflowUpdated") {
+      const workflowId =
+        asString(update.workflow_id) ??
+        asString(update.workflowId) ??
+        newId("wf");
+      const existingId = this.timeline
+        .filter((i) => i.kind === "workflow")
+        .find((i) => (i as Extract<TimelineItem, { kind: "workflow" }>).workflowId === workflowId)?.id;
+
+      const phase = asString(update.phase);
+      const status = asString(update.status) ?? "running";
+      const progress = parseWorkflowProgress(update);
+
+      if (existingId) {
+        this.updateTimeline(existingId, (item) => {
+          if (item.kind !== "workflow") return item;
+          return {
+            ...item,
+            status,
+            phase: phase ?? item.phase,
+            progress: progress ?? item.progress,
+          } as Extract<TimelineItem, { kind: "workflow" }>;
+        });
+      } else {
+        this.finalizeStreaming();
+        this.clearReopenableThought();
+        this.pushTimeline({
+          id: newId("wf"),
+          kind: "workflow",
+          workflowId,
+          name: asString(update.name) ?? asString(update.workflow_name) ?? workflowId,
+          status,
+          phase,
+          progress,
+        });
+      }
+      return;
+    }
+
+    // ── Background task lifecycle (aligns with TUI BgTaskBlock) ────
+    if (kind === "task_backgrounded" || kind === "TaskBackgrounded") {
+      this.finalizeStreaming();
+      this.clearReopenableThought();
+      this.pushTimeline({
+        id: newId("bg"),
+        kind: "bgTask",
+        taskId:
+          asString(update.task_id) ??
+          asString(update.taskId) ??
+          newId("task"),
+        description:
+          asString(update.description) ??
+          asString(update.command) ??
+          "Background task",
+        status: "running",
+      });
+      return;
+    }
+
+    if (kind === "task_completed" || kind === "TaskCompleted") {
+      const tid =
+        asString(update.task_id) ?? asString(update.taskId);
+      if (!tid) return;
+      this.updateLastBgTaskCard(tid, (item) => ({
+        ...item,
+        status:
+          asString(update.status) === "completed"
+            ? ("completed" as const)
+            : ("failed" as const),
+      }));
+      return;
+    }
+
+    // ── Session events (compaction, memory flush, turn completed) ──
+    if (
+      kind === "memory_flush_completed" ||
+      kind === "MemoryFlushCompleted" ||
+      kind === "turn_completed" ||
+      kind === "TurnCompleted" ||
+      kind === "session_recap" ||
+      kind === "SessionRecap"
+    ) {
+      if (kind === "session_recap" || kind === "SessionRecap") {
+        const text =
+          asString(update.message) ??
+          asString(update.recap) ??
+          "Session resumed.";
+        this.pushTimeline({
+          id: newId("se"),
+          kind: "sessionEvent",
+          eventType: "recap",
+          text,
+        });
+        return;
+      }
+      // memory_flush_completed / turn_completed: silent for now
+      return;
+    }
+
     // turn_completed / session_recap / retry_state: ignore for now
   }
 
@@ -4834,6 +5861,26 @@ const streaming = !this.replaying && this.activity === "working";
       const planning =
         payload.planning === true ||
         payload.planning_in_flight === true;
+      const parseLiveTokensByModel = (): Array<{ model: string; tokens: number }> | undefined => {
+        const raw = payload.live_tokens_by_model ?? payload.liveTokensByModel;
+        if (!Array.isArray(raw)) return undefined;
+        const out: Array<{ model: string; tokens: number }> = [];
+        for (const entry of raw) {
+          if (!Array.isArray(entry) || entry.length < 2) continue;
+          const model = asString(entry[0] as JsonValue);
+          const tokens = asNumber(entry[1] as JsonValue);
+          if (model && typeof tokens === "number") out.push({ model, tokens });
+        }
+        return out.length > 0 ? out : undefined;
+      };
+      const verdictRaw =
+        asString(payload.last_classifier_verdict) ??
+        asString(payload.lastClassifierVerdict);
+      const verdict: "Achieved" | "NotAchieved" | undefined =
+        verdictRaw === "Achieved" || verdictRaw === "NotAchieved"
+          ? verdictRaw
+          : undefined;
+
       rt.goalState = {
         goalId:
           asString(payload.goal_id) ?? asString(payload.goalId) ?? "",
@@ -4881,6 +5928,40 @@ const streaming = !this.replaying && this.activity === "working";
         classifierMaxRuns:
           asNumber(payload.classifier_max_runs) ??
           asNumber(payload.classifierMaxRuns),
+        // TUI GoalDisplayState alignment
+        lastClassifierVerdict: verdict,
+        lastClassifierDetailsPath: asString(
+          payload.last_classifier_details_path ??
+            payload.lastClassifierDetailsPath,
+        ),
+        totalWorkerRounds:
+          asNumber(payload.total_worker_rounds) ??
+          asNumber(payload.totalWorkerRounds),
+        totalVerifyRounds:
+          asNumber(payload.total_verify_rounds) ??
+          asNumber(payload.totalVerifyRounds),
+        liveSubagentTokens:
+          asNumber(payload.live_subagent_tokens) ??
+          asNumber(payload.liveSubagentTokens),
+        liveContextPct:
+          asNumber(payload.live_context_pct) ??
+          asNumber(payload.liveContextPct),
+        liveTurnCount:
+          asNumber(payload.live_turn_count) ??
+          asNumber(payload.liveTurnCount),
+        liveToolCallCount:
+          asNumber(payload.live_tool_call_count) ??
+          asNumber(payload.liveToolCallCount),
+        liveTokensByModel: parseLiveTokensByModel(),
+        receivedAt: Date.now(),
+        elapsedFloorMs:
+          asNumber(payload.elapsed_ms) ?? asNumber(payload.elapsedMs) ?? undefined,
+        tokenBaseline:
+          asNumber(payload.token_baseline) ??
+          asNumber(payload.tokenBaseline),
+        finishedSubagentTokens:
+          asNumber(payload.finished_subagent_tokens) ??
+          asNumber(payload.finishedSubagentTokens),
         updatedAt: Date.now(),
       };
       // Seed goal todos from current turn todos if we just started and empty.
@@ -4892,6 +5973,50 @@ const streaming = !this.replaying && this.activity === "working";
     // Background sessions' goal updates are visible on next switch (TUI pattern).
     if (sessionId === this.sessionId) {
       this.emitSnapshot();
+    }
+  }
+
+  /**
+   * Update the most recently pushed subagent card. Used by
+   * SubagentProgress / SubagentFinished handlers.
+   */
+  private updateLastSubagentCard(
+    fn: (
+      item: Extract<TimelineItem, { kind: "subagent" }>,
+    ) => Extract<TimelineItem, { kind: "subagent" }>,
+  ): void {
+    for (let i = this.timeline.length - 1; i >= 0; i--) {
+      const item = this.timeline[i];
+      if (item.kind === "subagent") {
+        this.updateTimeline(item.id, (inner) =>
+          inner.kind === "subagent"
+            ? fn(inner as Extract<TimelineItem, { kind: "subagent" }>)
+            : inner,
+        );
+        return;
+      }
+    }
+  }
+
+  /**
+   * Update a background task card by taskId. Used by TaskCompleted.
+   */
+  private updateLastBgTaskCard(
+    taskId: string,
+    fn: (
+      item: Extract<TimelineItem, { kind: "bgTask" }>,
+    ) => Extract<TimelineItem, { kind: "bgTask" }>,
+  ): void {
+    for (let i = this.timeline.length - 1; i >= 0; i--) {
+      const item = this.timeline[i];
+      if (item.kind === "bgTask" && item.taskId === taskId) {
+        this.updateTimeline(item.id, (inner) =>
+          inner.kind === "bgTask"
+            ? fn(inner as Extract<TimelineItem, { kind: "bgTask" }>)
+            : inner,
+        );
+        return;
+      }
     }
   }
 

@@ -40,19 +40,28 @@ const read = (rel) => fs.readFileSync(path.join(DESKTOP, rel), "utf8");
     conditional,
     "expected `snap.goalState ? <GoalProgressBubble goal={snap.goalState} ... /> : null`",
   );
-  const props =
-    /onPause=\{\(\)\s*=>\s*void\s+onGoalAction\("pause"\)\}/.test(app) &&
-    /onResume=\{\(\)\s*=>\s*void\s+onGoalAction\("resume"\)\}/.test(app) &&
-    /onClear=\{\(\)\s*=>\s*void\s+onGoalAction\("clear"\)\}/.test(app);
+  // Strict TUI: chip has no hover pause/resume/clear — only toggles detail.
+  const noChipActions =
+    !/<GoalProgressBubble[\s\S]*?onPause=/.test(app) &&
+    !/<GoalProgressBubble[\s\S]*?onResume=/.test(app) &&
+    !/<GoalProgressBubble[\s\S]*?onClear=/.test(app);
   check(
-    "renderer wires pause/resume/clear handlers",
-    props,
-    "expected onPause/onResume/onClear → onGoalAction",
+    "renderer does not wire chip pause/resume/clear (strict TUI)",
+    noChipActions,
+    "GoalProgressBubble must not receive onPause/onResume/onClear",
   );
   check(
-    "renderer opens GoalDetailModal from chip",
-    /GoalDetailModal/.test(app) && /onOpenDetail/.test(app),
-    "expected GoalDetailModal + onOpenDetail",
+    "renderer toggles GoalDetailModal from chip",
+    /GoalDetailModal/.test(app) &&
+      /onOpenDetail=\{\(\)\s*=>\s*setGoalDetailOpen\(\(v\)\s*=>\s*!v\)\}/.test(
+        app,
+      ),
+    "expected GoalDetailModal + onOpenDetail toggle",
+  );
+  check(
+    "renderer binds g key to toggle goal detail",
+    /e\.key\s*!==\s*"g"/.test(app) || /e\.key\s*===\s*"g"/.test(app),
+    "expected g-key handler for show_goal_detail parity",
   );
   check(
     "GoalDetailModal uses goalTodos not snap.todos for Progress",
