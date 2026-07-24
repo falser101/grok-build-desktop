@@ -3066,23 +3066,6 @@ body.is-resizing-files-tree * {
   align-items: center;
 }
 
-/* ❯ User prefix — accent-colored arrow, not selectable (TUI style) */
-.user-prefix {
-  color: var(--accent);
-  font-weight: 600;
-  margin-right: 2px;
-  user-select: none;
-  flex-shrink: 0;
-}
-
-/* Multi-line continuation indent for user messages: the ❯ prefix is ~1.2em
-   wide; negative text-indent + padding-left creates a hanging indent so
-   continuation lines align under the text, not under the arrow. */
-.msg.msg-user .msg-body {
-  text-indent: -1.3em;
-  padding-left: 1.5em;
-}
-
 /* Timestamp sits in .msg-meta (user) or absolute top-right (assistant). */
 .msg-timestamp {
   flex: 0 0 auto;

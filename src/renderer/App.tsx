@@ -1702,11 +1702,10 @@ const TimelineRow = memo(function TimelineRow({
               ))}
             </div>
           ) : null}
-          {/* User messages skip the role label — the ❯ prefix
-             and left accent border identify the speaker (TUI style). */}
+          {/* User messages skip the role label — left accent border
+             identifies the speaker. */}
           {bodyText ? (
             <div className="msg-body">
-              <span className="user-prefix" aria-hidden>❯ </span>
               {renderUserMessageBody(bodyText, onOpenAtFile, skillByLower)}
             </div>
           ) : null}
